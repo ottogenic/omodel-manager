@@ -98,6 +98,8 @@ DEFAULT_CONFIG = {
         "gpus": "all",
         "remote": None,                     # e.g. "otto@192.168.50.101" to run on the DGX;
                                             #      null = local. Override per-model or with --remote.
+        "remotes": [],                      # list of hosts for `ps` to query by default;
+                                            #      omit --hosts to query these (plus local).
         "hf_cache": "~/.cache/huggingface",
         "env": {
             "HF_TOKEN": None,               # None -> `-e HF_TOKEN` (inherit from shell)
@@ -139,6 +141,37 @@ DEFAULT_CONFIG = {
                 "reasoning-parser": "qwen3",
                 "tool-call-parser": "qwen3_xml",
                 "enable-auto-tool-choice": True,
+                "enable-log-requests": True,
+            },
+        },
+        "qwen3.6-35b-bf16": {
+            "notes": [
+                "Qwen/Qwen3.6-35B-A3B (BF16 base, qwen3_5_moe MoE: 35B total / ~3B active). "
+                "256K native context, MTP speculative decoding, fp8 KV cache. "
+                "Requires vLLM >= 0.19.0.",
+                "Multimodal (image-text-to-text). "
+                "Add --language-model-only to serve text-only and free VRAM for KV cache.",
+                "BF16 weights ~70GB -- needs a large-VRAM GPU (or raise tensor-parallel-size); "
+                "tune gpu-memory-utilization / max-num-seqs to your hardware.",
+            ],
+            "image": "vllm/vllm-openai:v0.20.0",
+            "model": "Qwen/Qwen3.6-35B-A3B",
+            "port": 8000,
+            "usecase": ["Reasoning", "Agentic", "General"],
+            "vllm_args": {
+                "served-model-name": "qwen/qwen3.6-35b",
+                "tensor-parallel-size": 1,
+                "dtype": "bfloat16",
+                "kv-cache-dtype": "fp8",
+                "gpu-memory-utilization": 0.9,
+                "max-model-len": 262144,
+                "max-num-seqs": 2,
+                "enable-chunked-prefill": True,
+                "speculative-config": '{"method":"mtp","num_speculative_tokens":3}',
+                "enable-auto-tool-choice": True,
+                "tool-call-parser": "qwen3_coder",
+                "reasoning-parser": "qwen3",
+                "enable-log-requests": True,
             },
         },
         "nemotron-3-super-120b-nvfp4-256k": {
@@ -228,6 +261,7 @@ DEFAULT_CONFIG = {
                 "enable-auto-tool-choice": True,
                 "tool-call-parser": "qwen3_coder",
                 "reasoning-parser": "qwen3",
+                "enable-log-requests": True,
             },
         },
         "qwen3.6-27b-nvfp4-512k": {
@@ -257,6 +291,7 @@ DEFAULT_CONFIG = {
                 "enable-auto-tool-choice": True,
                 "tool-call-parser": "qwen3_coder",
                 "reasoning-parser": "qwen3",
+                "enable-log-requests": True,
             },
         },
         "glm-4.7-flash": {
@@ -508,6 +543,21 @@ def remote_home(target):
 
 # Docker helpers
 # ============================================================================
+
+# Sentinel to distinguish "no remote passed" from "explicitly local".
+_UNSET = object()
+
+
+def _docker_on(target, args, capture=False):
+    """Run a docker command on a specific host (local or remote)."""
+    if target:
+        remote_cmd = "docker " + " ".join(shlex.quote(a) for a in args)
+        argv = ssh_argv(target, batch=True) + [remote_cmd]
+    else:
+        argv = ["docker"] + args
+    return subprocess.run(argv, text=True, capture_output=capture)
+
+
 def need_docker():
     if REMOTE:
         if not shutil.which("ssh"):
@@ -539,13 +589,16 @@ def docker(args, capture=False, check=False, tty=False):
     return subprocess.run(argv, text=True, check=check, capture_output=capture)
 
 
-def list_managed(include_all=False):
-    """Return list of dicts for running containers (managed, or all vllm if include_all)."""
+def list_managed(include_all=False, remote=_UNSET):
+    """Return list of dicts for running containers (managed, or all vllm if include_all).
+    When remote is omitted, uses the global REMOTE; pass None for local only."""
+    if remote is _UNSET:
+        remote = REMOTE
     fmt = "{{json .}}"
     args = ["ps", "--format", fmt]
     if not include_all:
         args += ["--filter", f"label={LABEL_MANAGER}={LABEL_VALUE}"]
-    res = docker(args, capture=True)
+    res = _docker_on(remote, args, capture=True)
     if res.returncode != 0:
         print(res.stderr.strip(), file=sys.stderr)
         return []
@@ -735,10 +788,39 @@ def cmd_home(args):
 
 
 def cmd_ps(args):
-    need_docker()
-    rows = list_managed(include_all=args.all)
     p = _prog()
-    if not rows:
+    # Collect targets: explicit --hosts > --remote > defaults.remotes > local.
+    if args.hosts:
+        targets = args.hosts
+    elif REMOTE:
+        targets = [REMOTE]
+    else:
+        try:
+            cfg_remotes = load_config().get("defaults", {}).get("remotes", []) or []
+        except SystemExit:
+            cfg_remotes = []
+        targets = cfg_remotes if cfg_remotes else [None]
+
+    # Only demand docker if we're going to query local.
+    has_local = None in targets
+    if has_local:
+        need_docker()
+    else:
+        # Check ssh is available for remote targets.
+        if any(t for t in targets) and not shutil.which("ssh"):
+            print("ERROR: `ssh` not found on PATH (needed for --remote).", file=sys.stderr)
+            sys.exit(1)
+
+    all_rows = []
+    for t in targets:
+        try:
+            rows = list_managed(include_all=args.all, remote=t)
+        except SystemExit:
+            continue
+        for r in rows:
+            r["_host"] = t if t else "localhost"
+        all_rows.extend(rows)
+    if not all_rows:
         print("No running managed vLLM containers."
               + ("" if args.all else "  (try --all to include unmanaged ones)"))
         _suggest([
@@ -746,17 +828,21 @@ def cmd_ps(args):
             ("Run a model", f"{p} launch <profile>{_rsuf()}"),
         ])
         return
-    print(f"{'NAME':<28} {'MODEL':<34} {'PORT':<6} {'STATUS'}")
-    for r in rows:
+    print(f"{'HOST':<20} {'NAME':<28} {'MODEL':<30} {'PORT':<6} {'STATUS'}")
+    for r in all_rows:
         labels = r.get("Labels", "")
-        model = _label(labels, LABEL_MODEL) or r.get("Image", "")[:32]
+        model = _label(labels, LABEL_MODEL) or r.get("Image", "")[:30]
         port = _label(labels, LABEL_PORT) or "?"
-        print(f"{r.get('Names',''):<28} {model:<34} {str(port):<6} {r.get('Status','')}")
-    example = _label(rows[0].get("Labels", ""), LABEL_MODEL) or rows[0].get("Names", "<name>")
+        host = r.get("_host", "localhost")
+        print(f"{host:<20} {r.get('Names',''):<28} {model:<30} {str(port):<6} {r.get('Status','')}")
+    example = _label(all_rows[0].get("Labels", ""), LABEL_MODEL) or all_rows[0].get("Names", "<name>")
+    # Derive the --remote suffix from the host where the first container lives.
+    first_host = all_rows[0].get("_host", "localhost")
+    rsuf = f" --remote {first_host}" if first_host != "localhost" else ""
     _suggest([
-        ("View a model's logs (Ctrl-C to stop following)", f"{p} logs {example}{_rsuf()} -f"),
-        ("Check readiness", f"{p} health{_rsuf()}"),
-        ("Stop a model", f"{p} stop {example}{_rsuf()}"),
+        ("View a model's logs (Ctrl-C to stop following)", f"{p} logs {example}{rsuf} -f"),
+        ("Check readiness", f"{p} health{rsuf}"),
+        ("Stop a model", f"{p} stop {example}{rsuf}"),
     ])
 
 
@@ -1105,6 +1191,18 @@ def cmd_setup(args):
         ok, _ = _r_ok(target, "true")
     results.append(("keyless SSH", ok, "connected with otools key" if ok
                     else "no passwordless login; --fix to set up"))
+    if ok and fix:
+        # Register this host so `ps` queries it by default.
+        try:
+            cfg = load_config()
+            remotes = cfg.setdefault("defaults", {}).setdefault("remotes", []) or []
+            if target not in remotes:
+                remotes.append(target)
+                cfg["defaults"]["remotes"] = remotes
+                save_config(cfg)
+                print(f"-> registered {target} in config.defaults.remotes")
+        except SystemExit:
+            pass   # config doesn't exist yet, that's fine -- SSH still works.
     if not ok:
         _print_results(results)
         print("\nSSH must work before the rest. Re-run after fixing connectivity.")
@@ -1235,6 +1333,9 @@ def main():
     p = sub.add_parser("ps", help="list running managed vLLM containers (default)",
                        parents=[remote_parent])
     p.add_argument("--all", action="store_true", help="also include other vllm/* containers")
+    p.add_argument("--hosts", metavar="USER@HOST", action="append",
+                   help="query these hosts over SSH (repeat for multiple; "
+                        "omit --remote/--hosts to query local only)")
     p.set_defaults(func=cmd_ps)
 
     for alias in ("models", "list"):
