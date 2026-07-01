@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `configs/` — generic, **harness-agnostic** per-model configs (capabilities +
+  per-mode `presets` sampling + a tuning README), one `.md` per model keyed to a
+  `model_manager.json` profile. This is the source of truth that downstream
+  adapters consume (omodel-wire → OpenCode; pi.dev / Claude Code later). Manager
+  only stores + validates them (`test_configs.py`). First config: `qwen3.6-35b-nvfp4`.
+
 ## [0.1.0] - 2026-06-30
 
 Initial packaged release. Extracted from the `otools` suite and renamed to

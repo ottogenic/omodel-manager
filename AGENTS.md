@@ -10,10 +10,16 @@ A single-file, stdlib-only Python CLI (`omodel-manager`) that launches and manag
 vLLM Docker containers from an editable JSON config (`model_manager.json`), locally or
 on a remote GPU host over SSH. It is a *launcher/manager*, not an inference client.
 
+This repo also **owns the generic, harness-agnostic per-model configs** in
+`configs/` (capabilities + per-mode sampling + tuning READMEs). The manager only
+**stores + validates** them; downstream adapters (omodel-wire → OpenCode, pi.dev,
+Claude Code, …) consume them and render harness-specific output. Keep `configs/`
+free of any harness-specific keys. See `configs/README.md` for the format.
+
 **Constraints (do not violate):**
 - **Standard library only.** No third-party imports, ever. Runs with a bare `python3`.
-- **Single script + one data file.** Keep the tool in `omodel-manager`;
-  `model_manager.json` is the one companion (curated launch profiles).
+- **Single script + data files.** The tool is `omodel-manager`; `model_manager.json`
+  holds launch profiles; `configs/*.md` hold the generic model configs.
 - **No local shell.** Build a `docker` **argv list** and run via `subprocess.run([...])`
   (through `docker()`), never `shell=True`. Over SSH the argv is `shlex.quote`d into a
   single remote command — this is what keeps JSON args like `--speculative-config` and
