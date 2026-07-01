@@ -1,19 +1,30 @@
-# qwen3.6-35b-nvfp4 — sampling & thinking reference
+# qwen3.6-35b-a3b-fp8 — sampling & thinking reference
 #
-# NVIDIA NVFP4 quant of Qwen3.6-35B-A3B (MoE). Reasoning model, thinking ON by
-# default, tool-calling. Launch via the omodel-manager `qwen3.6-35b-nvfp4` profile.
-# Values are STARTING POINTS to sweep from, not guarantees.
+# FP8 (e4m3) quant of Qwen3.6-35B-A3B (hybrid GDN/Mamba MoE, qwen3_5_moe).
+# Multimodal (image-text-to-text), reasoning model (thinking ON by default),
+# tool-calling. Launch via the omodel-manager `qwen3.6-35b-a3b-fp8` profile.
+# Same base model as `qwen3.6-35b-nvfp4` — sampling is identical (sampling is
+# per-model, not per-quant); this file exists so the FP8 served id matches and
+# carries its own capabilities/source. Values are STARTING POINTS to sweep from.
+#
+# Hardware note (Blackwell / DGX Spark, sm_121): the launch profile sets
+# VLLM_USE_DEEP_GEMM=0 (DeepGEMM FP8-MoE crashes at load otherwise; MoE falls
+# back to TRITON). That is a launch/vllm_args concern, not a sampling one.
 #
 # Thinking is a chat-template toggle (not a sampling param). Turn it off per
 # request with  chat_template_kwargs = { enable_thinking = false }  (or add
 # /no_think to the prompt). Anti-loop rule that matters:
 #   temperature 0.6 (NOT 0) + presence_penalty ~0.8.
+#
+# Verified live on 2026-07-01 (vLLM 0.23.1rc1, DGX Spark): vision (4x4 blue PNG
+# -> "Blue"), thinking on/off (reasoning surfaces in the `reasoning` field),
+# and all standard sampling knobs land in the served SamplingParams.
 
-match  = ["qwen3.6-35b-nvfp4", "nvidia/Qwen3.6-35B-A3B-NVFP4", "Qwen3.6-35B-A3B", "Qwen3.6-35B"]
-source = "https://huggingface.co/nvidia/Qwen3.6-35B-A3B-NVFP4"
+match  = ["qwen3.6-35b-a3b-fp8", "Qwen/Qwen3.6-35B-A3B-FP8"]
+source = "https://huggingface.co/Qwen/Qwen3.6-35B-A3B-FP8"
 
 [capabilities]
-vision           = { input = ["text", "image"], output = ["text"] }  # verified 2026-07-01: 4x4 blue PNG -> "Blue" on n2
+vision           = { input = ["text", "image"], output = ["text"] }  # verified: 4x4 blue PNG -> "Blue"
 reasoning        = true
 tool_call        = true
 thinking_control = "enable_thinking"  # enable_thinking | reasoning_effort | soft_switch | none

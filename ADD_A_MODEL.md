@@ -1,11 +1,28 @@
-# Onboarding a new model (AI guide)
+# Onboarding a model — add or update (AI guide)
 
-A repeatable, AI-runnable workflow to add a model to the otools stack: a **launch
-profile** in omodel-manager (`model_manager.json`) and a **generic config** in
-`configs/*.toml` that omodel-wire (and future adapters) consume. Nothing is
-committed until the model is proven on real hardware.
+A repeatable, AI-runnable workflow to **add a new model** to the otools stack — or
+to **update an existing one** that was added quickly and never fully vetted. Each
+model has a **launch profile** in omodel-manager (`model_manager.json`) and a
+**generic config** in `configs/*.toml` that omodel-wire (and future adapters)
+consume. Nothing is committed until the model is proven on real hardware.
 
 **Input:** a HuggingFace repo link (e.g. `https://huggingface.co/Qwen/Qwen3.6-35B-A3B-FP8`).
+
+**Add vs update — same workflow, different starting point:**
+- **Add:** no profile/config yet. Do every step below: research → draft profile →
+  draft config → prove on hardware → verify params → commit.
+- **Update:** a profile/config already exists but wasn't given the full treatment
+  (params guessed, capabilities unverified, or drifted from the model card). Run the
+  **same** research + live-test steps against the existing profile, then reconcile
+  each field to what you observe and to the card — don't assume the existing values
+  are correct. Example from this repo: `qwen3.6-35b-nvfp4` shipped with
+  `tool-call-parser qwen3_xml` and `vision = false`, but the card + live tests show
+  `qwen3_coder` and multimodal. An update pass is exactly what catches that.
+
+> **Future (not built yet):** collapse "update" into one command — point the tool at
+> an existing model key, and it re-fetches the card, re-runs the live validation
+> battery, diffs declared-vs-observed, and proposes the param/capability corrections
+> automatically. Until then, this guide is the manual version of that loop.
 
 **Golden rule:** *declare nothing you haven't observed.* Research proposes values;
 the live tests (below) confirm them. If a step's evidence contradicts the card,
@@ -31,6 +48,11 @@ trust the evidence and note it.
    - Search `"<model> vLLM"`, `"<model> blackwell"`, `"<model> fp8 throughput"`.
    - Note anything that changes launch flags or expectations (e.g. FP8-MoE decode
      is slow on Blackwell → NVFP4 may be the better serve).
+   - **Known Blackwell/sm_121 FP8-MoE trap:** DeepGEMM's E8M0 scale-factor path
+     crashes at load (`Unknown SF transformation`) and hurts accuracy for Qwen3.5/3.6
+     FP8 MoE (vLLM #37804/#43507). Fix: env `VLLM_USE_DEEP_GEMM=0` → MoE falls back to
+     TRITON (the working backend on sm_121). CUTLASS MoE is *unavailable* on sm_121 —
+     don't try to force it.
 
 Write down: capabilities (vision/reasoning/tool_call), thinking mechanism, native
 context, quant + the vLLM flags it implies, and any known-issue mitigations.
@@ -42,9 +64,12 @@ Add a profile to `DEFAULT_CONFIG` in `omodel-manager` **and** `model_manager.jso
 profile; change only what the quant/model needs:
 
 - `image`: the pinned vLLM image that supports this model/quant.
-- `model` + `served-model-name` (**served name = the config key** so wire matches it).
+- `model` + `served-model-name` — put `served-model-name` **inside `vllm_args`**, set
+  to the config key, so the served id matches the config's `match` (a top-level
+  `served-model-name` is silently ignored and the model serves under its full HF id).
 - `port` (default 8000 — one model per box at a time).
-- `env`: quant/runtime vars (e.g. `VLLM_NVFP4_GEMM_BACKEND`, `VLLM_ATTENTION_BACKEND`).
+- `env`: quant/runtime vars (e.g. `VLLM_NVFP4_GEMM_BACKEND`, `VLLM_ATTENTION_BACKEND`,
+  and on Blackwell FP8-MoE `VLLM_USE_DEEP_GEMM=0` — see §1).
 - `vllm_args`: `--quantization` (often auto-detected — omit unless required),
   `--kv-cache-dtype`, `--max-model-len`, `--max-num-seqs` (respect Mamba-cache limits),
   `--reasoning-parser`, `--tool-call-parser`, `--enable-auto-tool-choice`, spec-decode, etc.
@@ -76,8 +101,10 @@ consume — keep it harness-agnostic. Fill from research; the live tests will co
 1. **Find a free node.** `omodel-manager ps --remote <host>` on each box. If none is
    free, **ask the operator which running model to stop** — don't evict blindly.
 2. **Launch** the dry-run first, then for real, watching startup:
-   `omodel-manager launch <key> --remote <host> --keep`  (`--keep` so a crash's logs
-   survive) then `omodel-manager logs <key> --remote <host> -f`.
+   `omodel-manager launch <key> --remote <host> --keep`  — `--keep` is **not optional**
+   on a first launch: the detached default uses `--rm`, which deletes a crashed
+   container *and its logs*, so a startup crash leaves you with nothing to read. Then
+   `omodel-manager logs <key> --remote <host> -f`.
 3. **Review the logs** for: config/flag rejections, OOM / KV-cache / Mamba-cache
    warnings, quant/backend fallbacks, and `Application startup complete`.
 4. **Functional test** — one request; confirm a clean completion in the logs (no
@@ -93,19 +120,27 @@ Run each check against the **live** endpoint and read the logged `SamplingParams
 response to confirm it actually took effect — *don't infer*.
 
 1. **Thinking** — toggle `chat_template_kwargs.enable_thinking` on/off; confirm the
-   `reasoning`/`reasoning_content` field appears/disappears. Test any special option
-   you plan to declare, e.g. `{"chat_template_kwargs":{"preserve_thinking":true}}`.
+   reasoning field appears/disappears. **Field-name drift:** newer vLLM returns the
+   trace in `reasoning`, older builds in `reasoning_content` — dump the raw message
+   keys and check both (a jumping `completion_tokens` count next to an "empty" field
+   means you're reading the wrong key). Test any special option you plan to declare,
+   e.g. `{"chat_template_kwargs":{"preserve_thinking":true}}`.
 2. **Vision** (only if the config declares it) — POST a **4×4 solid-blue PNG** with
    `"Describe this color in one word."`; a real vision model answers "blue". If the
    config says vision but the model can't, fix the config.
-3. **Sampling params — test each independently.** Send one param at a time and grep
-   the logged `SamplingParams` to confirm it landed:
+3. **Sampling params — test each independently.** Send one param at a time (isolated,
+   one per request) and grep the logged `SamplingParams(...)` line to confirm it
+   landed; give each a distinctive value so you can fingerprint its own log line:
    `temperature, top_p, top_k, min_p, presence_penalty, frequency_penalty,
    repetition_penalty, max_tokens, min_tokens, seed, stop, stop_token_ids, logprobs,
    top_logprobs, thinking_token_budget, repetition_detection`.
    **If one doesn't appear in the log, do NOT assume the rest worked** — remove that
-   param and retry the others. Record which are honored (they inform what the config
-   and the chat.params plugin may safely set).
+   param and retry the others. Gotchas seen live: a rejection can be a *type* error,
+   not "unsupported" (e.g. `repetition_detection` takes a `RepetitionDetectionParams`
+   object `{max_pattern_size, min_pattern_size, min_count}`, not a bool — and it does
+   not echo in the `SamplingParams` repr, so it's only confirmable by accept/reject).
+   Record which are honored (they inform what the config and the chat.params plugin
+   may safely set).
 
 Confirm the merged truth from logs:
 ```bash
