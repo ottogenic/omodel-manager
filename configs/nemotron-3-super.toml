@@ -1,0 +1,59 @@
+# nemotron-3-super — sampling & thinking reference
+#
+# NVIDIA Nemotron-3-Super-120B-A12B-NVFP4 (hybrid Mamba+MoE+attention). Reasoning
+# model, tool-calling. Launch via the omodel-manager `nemotron-3-super-120b-nvfp4-*`
+# profiles. The card gives ONE sampling (temp 1.0, top_p 0.95) for all tasks; the
+# roles share it and differ by thinking + permission.
+#
+# thinking_control = "none": the adapter does NOT auto-inject Qwen-style knobs;
+# each preset carries its own chat_template_kwargs. Nemotron has `low_effort`
+# (a variant), not Qwen's clear/preserve_thinking.
+
+match  = ["nemotron-3-super", "nvidia/nemotron-3-super", "Nemotron-3-Super", "NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4"]
+source = "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4"
+thinking_control = "none"     # recipe-level: don't auto-inject; presets set options explicitly
+
+[capabilities]
+vision           = false
+reasoning        = true
+tool_call        = true
+thinking_control = "enable_thinking"   # the model DOES support enable_thinking (used in presets below)
+
+[context]
+native = 1000000
+
+[presets.reason]              # research & Q&A
+thinking = true
+options.chat_template_kwargs = { enable_thinking = true }
+[presets.reason.sampling]
+temperature = 1.0
+top_p       = 0.95
+
+[presets.code]                # interactive coding
+thinking = true
+options.chat_template_kwargs = { enable_thinking = true }
+[presets.code.sampling]
+temperature = 1.0
+top_p       = 0.95
+
+[presets.agent]               # unattended worker
+thinking = true
+options.chat_template_kwargs = { enable_thinking = true }
+[presets.agent.sampling]
+temperature = 1.0
+top_p       = 0.95
+
+[presets.instruct]            # fast, no thinking
+thinking = false
+options.chat_template_kwargs = { enable_thinking = false }
+[presets.instruct.sampling]
+temperature = 1.0
+top_p       = 0.95
+
+# Ctrl+T thinking-depth variants (Nemotron uses low_effort, not clear_thinking)
+[variants.think]
+options.chat_template_kwargs = { enable_thinking = true }
+[variants.think-low]
+options.chat_template_kwargs = { enable_thinking = true, low_effort = true }
+[variants.no-think]
+options.chat_template_kwargs = { enable_thinking = false }

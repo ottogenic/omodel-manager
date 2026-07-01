@@ -1,0 +1,63 @@
+# qwen3.6-27b-nvfp4 — sampling & thinking reference
+#
+# unsloth NVFP4 quant of Qwen3.6-27B. Reasoning model, thinking ON by default,
+# tool-calling. Shared by the omodel-manager `qwen3.6-27b-nvfp4-256k` and
+# `-512k` launch profiles (sampling is per-model, not per-launch/context).
+# Thinking off per request: chat_template_kwargs = { enable_thinking = false }.
+# Anti-loop: temperature 0.6 (NOT 0) + presence_penalty on instruct.
+
+match  = ["qwen3.6-27b-nvfp4", "unsloth/qwen3.6-27b", "Qwen3.6-27B-NVFP4", "Qwen3.6-27B"]
+source = "https://huggingface.co/unsloth/Qwen3.6-27B-NVFP4"
+
+[capabilities]
+vision           = false
+reasoning        = true
+tool_call        = true
+thinking_control = "enable_thinking"
+
+[context]
+native       = 262144
+min_thinking = 131072
+
+[presets.reason]              # research & Q&A (card general thinking: temp 1.0)
+thinking   = true
+max_output = 81920
+[presets.reason.sampling]
+temperature = 1.0
+top_p       = 0.95
+top_k       = 20
+min_p       = 0.0
+
+[presets.code]                # precise coding / web dev (temp 0.6)
+thinking   = true
+max_output = 32768
+[presets.code.sampling]
+temperature = 0.6
+top_p       = 0.95
+top_k       = 20
+min_p       = 0.0
+
+[presets.agent]               # unattended worker: coding sampling + preserved thinking
+thinking   = true
+max_output = 32768
+options.chat_template_kwargs = { preserve_thinking = true }
+[presets.agent.sampling]
+temperature = 0.6
+top_p       = 0.95
+top_k       = 20
+min_p       = 0.0
+
+[presets.instruct]            # fast, no thinking (card instruct: temp 0.7, pp 1.5)
+thinking   = false
+max_output = 32768
+[presets.instruct.sampling]
+temperature      = 0.7
+top_p            = 0.80
+top_k            = 20
+min_p            = 0.0
+presence_penalty = 1.5
+
+[variants.think]
+options.chat_template_kwargs = { enable_thinking = true }
+[variants.no-think]
+options.chat_template_kwargs = { enable_thinking = false }

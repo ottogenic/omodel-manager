@@ -1,0 +1,60 @@
+# glm-4.7-flash — sampling & thinking reference
+#
+# zai-org/GLM-4.7-Flash. Reasoning model, thinking ON by default, tool-calling.
+# Launch via the omodel-manager `glm-4.7-flash` profile (serve with
+# --reasoning-parser glm45 --tool-call-parser glm47).
+#
+# thinking_control = "none": presets carry chat_template_kwargs explicitly.
+# NOTE: `clear_thinking` (preserved thinking) is SGLang-only — on vLLM it's ignored.
+
+match  = ["glm-4.7-flash", "GLM-4.7-Flash", "zai-org/GLM-4.7-Flash"]
+source = "https://huggingface.co/zai-org/GLM-4.7-Flash"
+thinking_control = "none"
+
+[capabilities]
+vision           = false
+reasoning        = true
+tool_call        = true
+thinking_control = "enable_thinking"
+
+[context]
+native = 131072
+
+[presets.reason]              # default / hard problems (card: temp 1.0, top_p 0.95)
+thinking = true
+max_output = 131072
+options.chat_template_kwargs = { enable_thinking = true }
+[presets.reason.sampling]
+temperature = 1.0
+top_p       = 0.95
+
+[presets.code]                # precise coding (card Terminal-Bench/SWE: temp 0.7, top_p 1.0)
+thinking = true
+max_output = 16384
+options.chat_template_kwargs = { enable_thinking = true }
+[presets.code.sampling]
+temperature = 0.7
+top_p       = 1.0
+
+[presets.agent]               # unattended agent / tool use (temp 0.6; clear_thinking SGLang-only)
+thinking = true
+max_output = 16384
+options.chat_template_kwargs = { enable_thinking = true, clear_thinking = false }
+[presets.agent.sampling]
+temperature = 0.6
+top_p       = 0.95
+
+[presets.instruct]            # non-thinking / low latency
+thinking = false
+max_output = 8192
+options.chat_template_kwargs = { enable_thinking = false }
+[presets.instruct.sampling]
+temperature = 1.0
+top_p       = 0.95
+
+[variants.think]
+options.chat_template_kwargs = { enable_thinking = true }
+[variants.think-preserve]
+options.chat_template_kwargs = { enable_thinking = true, clear_thinking = false }
+[variants.no-think]
+options.chat_template_kwargs = { enable_thinking = false }
