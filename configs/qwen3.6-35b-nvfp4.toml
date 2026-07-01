@@ -1,0 +1,80 @@
+# qwen3.6-35b-nvfp4 — sampling & thinking reference
+#
+# NVIDIA NVFP4 quant of Qwen3.6-35B-A3B (MoE). Reasoning model, thinking ON by
+# default, tool-calling. Launch via the omodel-manager `qwen3.6-35b-nvfp4` profile.
+# Values are STARTING POINTS to sweep from, not guarantees.
+#
+# Thinking is a chat-template toggle (not a sampling param). Turn it off per
+# request with  chat_template_kwargs = { enable_thinking = false }  (or add
+# /no_think to the prompt). Anti-loop rule that matters:
+#   temperature 0.6 (NOT 0) + presence_penalty ~0.8.
+
+match  = ["qwen3.6-35b-nvfp4", "nvidia/Qwen3.6-35B-A3B-NVFP4", "Qwen3.6-35B-A3B", "Qwen3.6-35B"]
+source = "https://huggingface.co/nvidia/Qwen3.6-35B-A3B-NVFP4"
+
+[capabilities]
+vision           = false            # unverified here; declare a modalities object + run `verify` if multimodal
+reasoning        = true
+tool_call        = true
+thinking_control = "enable_thinking"  # enable_thinking | reasoning_effort | soft_switch | none
+
+[context]
+native       = 262144
+min_thinking = 131072
+
+# ── Task-mode presets ────────────────────────────────────────────────────────
+# Adapters (omodel-wire → OpenCode, …) map these onto agents/subagents.
+# Sampling knobs (vLLM default in parens):
+#   temperature (1.0)       0.6 = focus; 0.8–1.0 = variety. NEVER 0 (loops on thinking models).
+#   top_p       (1.0)       0.95 reasoning baseline; ~0.8 tightens.
+#   top_k       (-1 off)    20 tightens cheaply.
+#   min_p       (0.0)       alt tail cutoff; try 0.05–0.1.
+#   presence_penalty  (0.0) anti-loop; +0.5…+1.5 breaks repetition; >1.5 risks language mixing.
+#   frequency_penalty (0.0) 0.1–0.5 curbs verbatim repeats.
+#   repetition_penalty(1.0) 1.05–1.15; don't stack hard with presence/frequency.
+#   max_output              16k–32k for thinking (the reasoning trace eats budget).
+
+[presets.reason]              # research & planning (thinking on)
+thinking   = true
+max_output = 16384
+[presets.reason.sampling]
+temperature      = 0.6        # bump toward 0.8–1.0 for more exploratory research
+top_p            = 0.95
+top_k            = 20
+min_p            = 0.0
+presence_penalty = 0.8        # anti-loop
+
+[presets.code]                # precise coding (thinking on)
+thinking   = true
+max_output = 32768
+[presets.code.sampling]
+temperature = 0.6
+top_p       = 0.95
+top_k       = 20
+min_p       = 0.0
+
+[presets.agent]               # unattended worker: coding sampling + preserved thinking
+thinking   = true
+max_output = 32768
+options.chat_template_kwargs = { preserve_thinking = true }
+[presets.agent.sampling]
+temperature = 0.6
+top_p       = 0.95
+top_k       = 20
+min_p       = 0.0
+
+[presets.instruct]            # fast, no thinking
+thinking   = false
+max_output = 32768
+[presets.instruct.sampling]
+temperature      = 0.7
+top_p            = 0.80
+top_k            = 20
+min_p            = 0.0
+presence_penalty = 1.5
+
+# ── Ctrl+T thinking-depth variants (raw options only) ────────────────────────
+[variants.think]
+options.chat_template_kwargs = { enable_thinking = true }
+[variants.no-think]
+options.chat_template_kwargs = { enable_thinking = false }
