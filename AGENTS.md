@@ -16,6 +16,10 @@ This repo also **owns the generic, harness-agnostic per-model configs** in
 Claude Code, …) consume them and render harness-specific output. Keep `configs/`
 free of any harness-specific keys. See `configs/README.md` for the format.
 
+**Onboarding a new model?** Follow **`ADD_A_MODEL.md`** — the AI-runnable workflow
+(research → draft profile + config → prove it on hardware → verify tunable params →
+commit). Start from a HuggingFace repo link.
+
 **Constraints (do not violate):**
 - **Standard library only.** No third-party imports, ever. Runs with a bare `python3`.
 - **Single script + data files.** The tool is `omodel-manager`; `model_manager.json`
