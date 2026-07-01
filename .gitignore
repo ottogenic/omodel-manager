@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Downloaded model side-files (regenerated on demand by `fetch` / `launch`)
+assets/
+
+# Local tool state / overrides / secrets — do not commit
+.otools/
+*.local.json
+*.bak
+.env
+hf_token
+
+# Agent-harness scaffolding — keep the repo tool-agnostic (AGENTS.md is the
+# vendor-neutral standard; per-tool instruction files don't belong in the repo)
+CLAUDE.md
+GEMINI.md
+.claude/
+.cursor/
+.cursorrules
+.windsurf/
+.aider*
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# NOTE: model_manager.json IS committed on purpose — curated launch profiles,
+# no secrets. The HF token lives in ~/.config/otools/hf_token and the SSH key
+# in ~/.ssh/otools_model_manager_ed25519, neither of which is in the repo.

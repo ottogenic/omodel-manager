@@ -1,0 +1,4 @@
+# Normalize line endings to LF in the repository and working tree on every
+# platform. This is important: `omodel-manager` is an executable with a
+# `#!/usr/bin/env python3` shebang, and CRLF would break it on Linux/WSL.
+* text=auto eol=lf
