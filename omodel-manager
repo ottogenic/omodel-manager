@@ -130,7 +130,7 @@ DEFAULT_CONFIG = {
                 "moe-backend": "marlin",
                 "gpu-memory-utilization": 0.4,
                 "max-model-len": 262144,
-                "max-num-seqs": 4,
+                "max-num-seqs": 10,
                 "max-num-batched-tokens": 8192,
                 "enable-chunked-prefill": True,
                 "async-scheduling": True,
@@ -782,6 +782,11 @@ def _prog():
     return sys.argv[0]
 
 
+def _cli_name():
+    """Display name for suggested commands — always 'omm' so paths don't clutter output."""
+    return "omm"
+
+
 def _rsuf():
     """' --remote X' if a remote is in play, else '' (for example commands)."""
     return f" --remote {REMOTE}" if REMOTE else ""
@@ -803,7 +808,7 @@ def cmd_home(args):
     cfg = load_config()
     models = cfg.get("models", {})
     sample = next(iter(models), "<profile>")
-    p, setup_done = _prog(), os.path.exists(OTOOLS_SSH_KEY)
+    p, setup_done = _cli_name(), os.path.exists(OTOOLS_SSH_KEY)
     print("otools_model_manager -- manage vLLM Docker containers (local or over SSH)\n")
     print("Status:")
     print(f"  config : {CONFIG_PATH}  ({len(models)} model profile(s))")
@@ -823,7 +828,7 @@ def cmd_home(args):
 
 
 def cmd_ps(args):
-    p = _prog()
+    p = _cli_name()
     # Collect targets: explicit --hosts > --remote > defaults.remotes > local.
     if args.hosts:
         targets = args.hosts
@@ -930,7 +935,7 @@ def cmd_models(args):
     for r in rows:
         print("  " + "  ".join(str(r[i]).ljust(w[i]) for i in range(len(headers))))
 
-    p, sample, host = _prog(), next(iter(models)), (REMOTE or "user@host")
+    p, sample, host = _cli_name(), next(iter(models)), (REMOTE or "user@host")
     _suggest([
         ("Run a model", f"{p} launch {sample}{_rsuf()}"),
         ("Run a model on a specific host", f"{p} launch {sample} --remote {host}"),
@@ -1041,7 +1046,7 @@ def cmd_launch(args):
     if res.returncode != 0:
         sys.exit(res.returncode)
     if not args.foreground:
-        p = _prog()
+        p = _cli_name()
         print(f"\nStarted '{args.key}' (container {name}).")
         _suggest([
             ("Watch startup logs (Ctrl-C to stop following)", f"{p} logs {args.key}{_rsuf()} -f"),
@@ -1072,7 +1077,7 @@ def cmd_stop(args):
     res = docker(["rm", "-f", target])
     if res.returncode == 0:
         print(f"Stopped {target}.")
-        p = _prog()
+        p = _cli_name()
         _suggest([
             ("List what's still running", f"{p} ps{_rsuf()}"),
             ("Launch a model", f"{p} launch <profile>{_rsuf()}"),
@@ -1098,9 +1103,9 @@ def cmd_logs(args):
         # Ctrl-C while following just detaches the viewer; the container keeps running.
         print("\nStopped following logs -- the container is still running.")
         _suggest([
-            ("Re-attach to logs", f"{_prog()} logs {args.target}{_rsuf()} -f"),
-            ("Check readiness", f"{_prog()} health {args.target}{_rsuf()}"),
-            ("Stop the model", f"{_prog()} stop {args.target}{_rsuf()}"),
+            ("Re-attach to logs", f"{_cli_name()} logs {args.target}{_rsuf()} -f"),
+            ("Check readiness", f"{_cli_name()} health {args.target}{_rsuf()}"),
+            ("Stop the model", f"{_cli_name()} stop {args.target}{_rsuf()}"),
         ])
         return
     sys.exit(rc)
