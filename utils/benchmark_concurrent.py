@@ -186,10 +186,10 @@ def run_benchmark(concurrency, model, base_url, max_tokens, temperature, top_p):
 
 
 def sweep_concurrency(model_name, model_info, base_url, max_tokens, temperature, top_p,
-                      max_concurrency, step, warmup_count, skip_warmup):
+                      max_concurrency, step, warmup_count, skip_warmup, model_override=None):
     """Sweep concurrency levels for a single model and return results."""
     max_seqs = model_info["vllm_args"].get("max-num-seqs", 4)
-    model_id = model_info.get("model", model_name)
+    model_id = model_override if model_override else model_info.get("model", model_name)
 
     # Determine sweep range: from 1 up to max_seqs (or max_concurrency, whichever is lower)
     sweep_max = min(max_seqs, max_concurrency)
@@ -287,6 +287,8 @@ def main():
                         help="custom prompt (default: standard reasoning prompt)")
     parser.add_argument("--remote", default=None,
                         help="remote host to benchmark against (e.g. 192.168.50.102)")
+    parser.add_argument("--model", default=None,
+                        help="served model name to use in API requests (overrides config)")
     args = parser.parse_args()
 
     global PROMPT
@@ -331,7 +333,7 @@ def main():
             key, model_info, base_url,
             args.max_tokens, args.temperature, args.top_p,
             args.max_concurrency, args.concurrency_step,
-            args.warmup, args.skip_warmup
+            args.warmup, args.skip_warmup, args.model
         )
         model_results[key] = results
 

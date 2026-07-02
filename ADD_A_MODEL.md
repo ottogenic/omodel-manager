@@ -65,8 +65,11 @@ profile; change only what the quant/model needs:
 
 - `image`: the pinned vLLM image that supports this model/quant.
 - `model` + `served-model-name` — put `served-model-name` **inside `vllm_args`**, set
-  to the config key, so the served id matches the config's `match` (a top-level
-  `served-model-name` is silently ignored and the model serves under its full HF id).
+   to the config key, so the served id matches the config's `match` (a top-level
+   `served-model-name` is silently ignored and the model serves under its full HF id).
+   **Important:** `served-model-name` is a vLLM launch flag (lives in `vllm_args`).
+   It is NOT the same as the config's top-level `model` field (the HF repo ID).
+   Downstream tools that call the API must use the served name, not the HF ID.
 - `port` (default 8000 — one model per box at a time).
 - `env`: quant/runtime vars (e.g. `VLLM_NVFP4_GEMM_BACKEND`, `VLLM_ATTENTION_BACKEND`,
   and on Blackwell FP8-MoE `VLLM_USE_DEEP_GEMM=0` — see §1).
@@ -98,23 +101,31 @@ consume — keep it harness-agnostic. Fill from research; the live tests will co
 
 ### 4. Make the model work
 
-1. **Find a free node.** `omodel-manager ps --remote <host>` on each box. If none is
-   free, **ask the operator which running model to stop** — don't evict blindly.
-2. **Launch** the dry-run first, then for real, watching startup:
-   `omodel-manager launch <key> --remote <host> --keep`  — `--keep` is **not optional**
-   on a first launch: the detached default uses `--rm`, which deletes a crashed
-   container *and its logs*, so a startup crash leaves you with nothing to read. Then
-   `omodel-manager logs <key> --remote <host> -f`.
-3. **Review the logs** for: config/flag rejections, OOM / KV-cache / Mamba-cache
-   warnings, quant/backend fallbacks, and `Application startup complete`.
-4. **Functional test** — one request; confirm a clean completion in the logs (no
-   errors). Serve with `--enable-log-requests` so the merged `SamplingParams(...)`
-   line is logged (see §6).
-5. **Concurrency test** — fire N parallel requests matching the profile's
-   `--max-num-seqs`; check logs for preemption/cache errors. **Compare single-prompt
-   vs multi-prompt decode tok/s** (this is where Blackwell FP8-MoE perf shows up).
+ 1. **Find a free node.** Check `~/.config/otools/hosts` for the list of registered
+    hosts. Run `omodel-manager ps` (no `--remote`) to fan across all of them at once.
+    Pick an idle box. If none is free, **ask the operator which running model to stop**
+    — don't evict blindly.
+ 2. **Launch** the dry-run first, then for real, watching startup:
+    `omodel-manager launch <key> --remote <host> --keep`  — `--keep` is **not optional**
+    on a first launch: the detached default uses `--rm`, which deletes a crashed
+    container *and its logs*, so a startup crash leaves you with nothing to read. Then
+    `omodel-manager logs <key> --remote <host> -f`.
+ 3. **Review the logs** for: config/flag rejections, OOM / KV-cache / Mamba-cache
+    warnings, quant/backend fallbacks, and `Application startup complete`.
+ 4. **Wait for readiness.** The model takes 1–3 minutes to start (weights + torch.compile
+    + flashinfer autotuning + CUDA graph capture). Poll `health` until READY before
+    proceeding:
+    ```bash
+    while ! omm health <key> --remote <host> 2>&1 | grep -q READY; do sleep 15; done
+    ```
+ 5. **Functional test** — one request; confirm a clean completion in the logs (no
+    errors). Serve with `--enable-log-requests` so the merged `SamplingParams(...)`
+    line is logged (see §7).
+ 6. **Concurrency test** — fire N parallel requests matching the profile's
+    `--max-num-seqs`; check logs for preemption/cache errors. **Compare single-prompt
+    vs multi-prompt decode tok/s** (this is where Blackwell FP8-MoE perf shows up).
 
-### 5. Validate features & tunable params
+### 6. Validate features & tunable params
 
 Run each check against the **live** endpoint and read the logged `SamplingParams` /
 response to confirm it actually took effect — *don't infer*.
@@ -147,22 +158,32 @@ Confirm the merged truth from logs:
 omodel-manager logs <container> --remote <host> 2>&1 | grep -i sampling
 ```
 
-### 5b. Benchmark concurrency (`max-num-seqs`)
+### 7. Benchmark concurrency (`max-num-seqs`)
 
 Before finalizing `max-num-seqs`, run the concurrency benchmark to find the throughput sweet spot:
 
 ```bash
-python3 utils/benchmark_concurrent.py
+python3 utils/benchmark_concurrent.py --profiles <key> --model <served-model-name> --remote <host>
 ```
 
-This script sends 1, 2, 4, 6, 8, 10 concurrent requests to the live endpoint, measures wall time and per-request latency, and prints a summary table. It uses 256 tokens, thinking off, and a general reasoning prompt — good for baseline comparison.
+This script sends 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 concurrent requests (step=1 by default)
+to the live endpoint, measures wall time and per-request latency, and prints a summary
+table. It uses 256 tokens, thinking off, and a general reasoning prompt — good for
+baseline comparison.
 
 - **System throughput** (total tok/s across all requests) should peak before dropping.
 - **Per-request latency** should stay reasonable (watch for high variance = queuing/preemption).
 - Increase `max-num-seqs` to the highest level before throughput drops or latency becomes inconsistent.
 - After updating, restart the container and verify with `health`.
 
-### 6. Finalize
+**Prerequisite:** the model must be in READY state (see §4 step 4). The benchmark script
+does not wait for startup.
+
+**Note on `--model`:** If the profile sets `served-model-name` in `vllm_args` (different
+from the HF model ID), you must pass `--model <served-model-name>` to the script. Without
+it, the script sends the HF ID and gets 404s.
+
+### 8. Finalize
 
 Only after the model runs clean and you know what's tunable:
 - Correct the `configs/<key>.toml` to match observed reality (esp. `capabilities`).
