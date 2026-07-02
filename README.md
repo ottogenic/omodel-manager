@@ -7,8 +7,9 @@ logs, health-check it, and stop it, all with copy-pasteable next-step hints.
 Built for a DGX Spark setup but works against any host with Docker + NVIDIA GPUs.
 
 - **Stdlib only.** No `pip install`, no dependencies — just Python 3.
-- **Config-driven.** Curated launch profiles live in an editable `model_manager.json`
-  next to the script.
+- **Config-driven.** Curated launch profiles are the committed source of truth in the
+  script's `DEFAULT_CONFIG`; `config --init` writes them to a **local, git-ignored**
+  `model_manager.json` you freely tune (reset anytime with `config --init --force`).
 - **Local or remote.** Run Docker here, or on a GPU box over SSH (`--remote`); one
   `setup` bootstraps the box.
 
@@ -61,8 +62,12 @@ Set `defaults.remote` in the config to make it the default.
 
 ## The config
 
-Launch profiles live in **`model_manager.json`** next to the script (override
-with `--config PATH` or `$OMODEL_MANAGER_CONFIG`). Structure:
+The committed **source of truth** is `DEFAULT_CONFIG` inside the `omodel-manager` script.
+`config --init` writes it to a **local, git-ignored `model_manager.json`** next to the
+script (override with `--config PATH` or `$OMODEL_MANAGER_CONFIG`) — that file is your
+editable sandbox and is what the tool reads. Tune it freely; `config --init --force`
+resets it from the hardcoded defaults. **Promote** a vetted change by editing
+`DEFAULT_CONFIG` and committing — never commit `model_manager.json`. Structure:
 
 ```jsonc
 {
@@ -106,7 +111,9 @@ with `--config PATH` or `$OMODEL_MANAGER_CONFIG`). Structure:
 (`~/.ssh/otools_model_manager_ed25519`, clearly named so it's easy to revoke),
 installs it, installs Docker if missing, adds you to the `docker` group, checks
 the NVIDIA driver + container runtime (CDI-aware), and prompts for an HF token if
-none is set. Run it without `--fix` for a read-only status report.
+none is set. Run it without `--fix` for a read-only status report. Comma-separate several
+hosts (`setup otto@a,otto@b`); reachable ones are saved to `~/.config/otools/hosts` so
+`ps` fans across them by default (no flag).
 
 ## HF token
 

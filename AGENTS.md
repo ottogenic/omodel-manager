@@ -36,16 +36,43 @@ commit). Start from a HuggingFace repo link.
   deployments. Renaming any of them orphans running containers / installed keys. Don't.
 - **Cross-platform paths.** Runs from WSL/Linux and Windows; use `os.path`/`expanduser`.
 
+## Config: source of truth vs. local sandbox  (READ THIS before editing config)
+
+Two layers, deliberately separate:
+
+- **`DEFAULT_CONFIG`** (a dict literal in the `omodel-manager` script) is the **committed
+  source of truth** for curated launch profiles. Changing it is a deliberate, reviewed
+  act that goes through git.
+- **`model_manager.json`** is a **LOCAL, git-ignored** file that `config --init` generates
+  from `DEFAULT_CONFIG`. It is your **testing sandbox**: the tool reads it, you tune it
+  freely (context size, `max-num-seqs`, a new profile), `launch --dry-run` / launch to
+  validate, and `config --init --force` resets it to the hardcoded defaults. It is NEVER
+  committed.
+
+**Workflow — agents: follow this exactly.**
+1. To try a setting, edit **`model_manager.json`** only. Test it live.
+2. Promote a change to source **only after it is validated and approved** — then, and only
+   then, edit **`DEFAULT_CONFIG`** and commit that.
+3. **Do NOT edit `DEFAULT_CONFIG` just to test something**, and do NOT edit both files for a
+   change-in-progress. The JSON is throwaway/local; the code is the vetted default. There
+   is no longer a "keep them in sync" rule — they are *meant* to differ while you iterate.
+4. Operator/host settings go in neither file — see the hosts store below.
+
+**Hosts:** `ps` fans across the hosts registered by `setup` in `~/.config/otools/hosts`
+(one `USER@HOST` per line; `setup --remote a,b` sets up several and overwrites the list).
+These are machine-specific and are NOT stored in `model_manager.json` or `DEFAULT_CONFIG`.
+
 ## Layout of `omodel-manager`
 
 Top-to-bottom, the meaningful sections:
 
 - **Constants & seed** — `__version__`, `_default_config_path()` (resolves `--config` /
   `$OMODEL_MANAGER_CONFIG` / legacy `$OTOOLS_MODEL_MANAGER_CONFIG` / sibling file),
-  `HF_TOKEN_FILE`, label/name constants, `DEFAULT_IMAGE`, and **`DEFAULT_CONFIG`** — the
-  embedded seed written to `model_manager.json` on first run. **Invariant:**
-  `DEFAULT_CONFIG` must stay equal to `model_manager.json` (seed == file). Edit one → edit
-  both (or regenerate with `config --init --force`). The test suite enforces this.
+  `HF_TOKEN_FILE`, `HOSTS_FILE`, label/name constants, `DEFAULT_IMAGE`, and
+  **`DEFAULT_CONFIG`** — the committed **source of truth** for curated profiles.
+  `config --init` writes it to a LOCAL, **git-ignored** `model_manager.json` that the tool
+  reads and you tune. The two are deliberately NOT kept in lockstep — see "Config: source
+  of truth vs. local sandbox" above. `model_manager.json` is never committed.
 - **Config** — `load_config()` / `save_config()`, `_deep_merge()`, `resolve_entry()`
   (applies the `extends` chain), `merge_model()` (merges `defaults` under the resolved
   entry), `container_name()`.
@@ -127,9 +154,11 @@ authoritative over this file). Paste a line to an AI tool or fetch it yourself:
 
 ## How to extend
 
-- **New model:** add a `models.<key>` entry (+ `usecase`) to `DEFAULT_CONFIG`, keep it in
-  sync with `model_manager.json` (regenerate via `config --init --force`). Verify with
-  `list`, `launch <key> --dry-run`, and the tests.
+- **New model:** prototype it in your **local `model_manager.json`** (`launch <key>
+  --dry-run`, then launch to validate). Once proven and approved, **promote** it: add the
+  `models.<key>` entry (+ `usecase`) to **`DEFAULT_CONFIG`** and commit. `config --init
+  --force` regenerates the local JSON from the updated defaults. Verify with `list` and the
+  tests. (See "Config: source of truth vs. local sandbox".)
 - **New config field:** thread it through `merge_model` (and `resolve_entry` if it should
   be inheritable via `extends`), then consume it in `build_run_argv`.
 - **New command:** add a subparser in `main()`, a `cmd_*` that talks to Docker **only**

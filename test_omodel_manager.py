@@ -36,14 +36,6 @@ def fake_docker(stdout="", returncode=0):
 
 
 class ConfigSeedTests(unittest.TestCase):
-    def test_seed_equals_committed_file(self):
-        """DEFAULT_CONFIG must match the on-disk model_manager.json (seed == file)."""
-        on_disk = mm.load_config()
-        seed = json.loads(json.dumps(mm.DEFAULT_CONFIG))  # normalize None->null etc.
-        self.assertEqual(seed, on_disk,
-                         "DEFAULT_CONFIG and model_manager.json diverged -- "
-                         "regenerate with `config --init --force` or update both.")
-
     def test_defaults_force_color(self):
         env = mm.DEFAULT_CONFIG["defaults"]["env"]
         self.assertEqual(env.get("VLLM_LOGGING_COLOR"), "1")
@@ -52,6 +44,34 @@ class ConfigSeedTests(unittest.TestCase):
         blob = json.dumps(mm.DEFAULT_CONFIG)
         self.assertNotIn("hf_", blob.replace("hf_cache", ""))  # no hf_ token strings
         self.assertIsNone(mm.DEFAULT_CONFIG["defaults"]["env"]["HF_TOKEN"])
+
+    def test_defaults_have_no_remotes(self):
+        # host lists are operator/machine-specific -> ~/.config/otools/hosts, not config
+        self.assertNotIn("remotes", mm.DEFAULT_CONFIG["defaults"])
+
+
+class HostsStoreTests(unittest.TestCase):
+    """~/.config/otools/hosts -- managed by `setup`, read by `ps`."""
+
+    def _tmp_hosts(self):
+        import os
+        import tempfile
+        return os.path.join(tempfile.mkdtemp(), "hosts")
+
+    def test_roundtrip_and_dedup(self):
+        old, mm.HOSTS_FILE = mm.HOSTS_FILE, self._tmp_hosts()
+        try:
+            mm.save_hosts(["otto@a", "otto@b", "otto@a"])  # duplicate dropped, order kept
+            self.assertEqual(mm.load_hosts(), ["otto@a", "otto@b"])
+        finally:
+            mm.HOSTS_FILE = old
+
+    def test_missing_file_is_empty(self):
+        old, mm.HOSTS_FILE = mm.HOSTS_FILE, self._tmp_hosts()
+        try:
+            self.assertEqual(mm.load_hosts(), [])
+        finally:
+            mm.HOSTS_FILE = old
 
 
 class ProfileTests(unittest.TestCase):

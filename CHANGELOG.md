@@ -20,6 +20,26 @@ All notable changes to this project are documented here. The format follows
   back to TRITON, the working backend on sm_121 (#43507). Uses
   `tool-call-parser qwen3_coder` (per the model card) and `served-model-name` in
   `vllm_args` so the served id matches the config key.
+- `utils/benchmark_concurrent.py` — sweep concurrency (1..N parallel requests) against a
+  live endpoint to find the `max-num-seqs` throughput sweet spot (documented in
+  `ADD_A_MODEL.md` §5b).
+
+### Changed
+- **Config split into source-of-truth (code) + local sandbox (JSON).** `DEFAULT_CONFIG` in
+  the script is the committed source of truth; `model_manager.json` is now a LOCAL,
+  **git-ignored** file `config --init` generates from it. Tune/test in the JSON freely;
+  promote validated changes into `DEFAULT_CONFIG` and commit. `config --init --force` resets
+  the local file from the hardcoded defaults. The old "seed == file" invariant is gone.
+- **`setup` registers hosts for `ps` in `~/.config/otools/hosts`** instead of
+  `config.defaults.remotes`. It now accepts a comma-separated list
+  (`setup otto@a,otto@b`), bootstraps each, and overwrites the file with the reachable
+  hosts; `ps` reads it by default.
+
+### Removed
+- `defaults.remotes` from the config — host lists are machine-specific and now live in
+  `~/.config/otools/hosts` (managed by `setup`).
+- The `test_seed_equals_committed_file` test — `model_manager.json` is git-ignored, so
+  there is no committed copy to match.
 
 ### Fixed
 - `configs/qwen3.6-35b-nvfp4.toml`: `vision` corrected `false` → the multimodal

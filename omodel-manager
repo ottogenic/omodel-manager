@@ -74,6 +74,7 @@ def _default_config_path():
 CONFIG_PATH = _default_config_path()
 # Secret store -- kept in ~/.config/otools (NOT next to the script / repo).
 HF_TOKEN_FILE = os.path.expanduser("~/.config/otools/hf_token")
+HOSTS_FILE = os.path.expanduser("~/.config/otools/hosts")  # remote hosts `ps` queries (managed by `setup`)
 HF_TOKENS_URL = "https://huggingface.co/settings/tokens"
 LABEL_MANAGER = "otools.manager"
 LABEL_VALUE = "model_manager"
@@ -84,8 +85,9 @@ DEFAULT_IMAGE = ("vllm/vllm-openai@sha256:"
                  "7feb2a09304e3b2d38e224a100316e84fe3205faa7605060609e2c02179cbca6")
 
 # ----------------------------------------------------------------------------
-# Default config -- seeded from Otto's working Qwen3.6 launch command.
-# Edit ~/.config/otools/model_manager.json to add/tune models.
+# Default config -- the committed SOURCE OF TRUTH (curated profiles). `config --init`
+# writes it to a LOCAL, git-ignored model_manager.json (next to this script) that the
+# tool reads and you freely tune; `config --init --force` resets that file from here.
 #   vllm_args: true  -> bare flag (--trust-remote-code)
 #              value -> --flag value  (numbers/strings; JSON strings pass as-is)
 #   defaults.vllm_args merge UNDER each model's vllm_args (model wins).
@@ -98,8 +100,6 @@ DEFAULT_CONFIG = {
         "gpus": "all",
         "remote": None,                     # e.g. "otto@192.168.50.101" to run on the DGX;
                                             #      null = local. Override per-model or with --remote.
-        "remotes": [],                      # list of hosts for `ps` to query by default;
-                                            #      omit --hosts to query these (plus local).
         "hf_cache": "~/.cache/huggingface",
         "env": {
             "HF_TOKEN": None,               # None -> `-e HF_TOKEN` (inherit from shell)
@@ -827,19 +827,42 @@ def cmd_home(args):
     _suggest(items, header="Suggested next steps")
 
 
+def load_hosts():
+    """Remote hosts `ps` queries by default (managed by `setup`). One USER@HOST per
+    line in ~/.config/otools/hosts; blank lines and #-comments are ignored."""
+    try:
+        with open(HOSTS_FILE) as f:
+            return [ln.strip() for ln in f if ln.strip() and not ln.lstrip().startswith("#")]
+    except OSError:
+        return []
+
+
+def save_hosts(hosts):
+    """Overwrite the hosts file with `hosts` (dedup, order-preserving)."""
+    seen, uniq = set(), []
+    for h in hosts:
+        if h and h not in seen:
+            seen.add(h)
+            uniq.append(h)
+    os.makedirs(os.path.dirname(HOSTS_FILE), exist_ok=True)
+    with open(HOSTS_FILE, "w") as f:
+        print("# omodel-manager remote hosts for `ps` (managed by `setup`).", file=f)
+        print("# One USER@HOST per line. Safe to hand-edit.", file=f)
+        for h in uniq:
+            print(h, file=f)
+
+
 def cmd_ps(args):
     p = _cli_name()
-    # Collect targets: explicit --hosts > --remote > defaults.remotes > local.
+    # Collect targets: explicit --hosts > --remote > setup-registered hosts
+    # (~/.config/otools/hosts) > local.
     if args.hosts:
         targets = args.hosts
     elif REMOTE:
         targets = [REMOTE]
     else:
-        try:
-            cfg_remotes = load_config().get("defaults", {}).get("remotes", []) or []
-        except SystemExit:
-            cfg_remotes = []
-        targets = cfg_remotes if cfg_remotes else [None]
+        hosts = load_hosts()
+        targets = hosts if hosts else [None]
 
     # Only demand docker if we're going to query local.
     has_local = None in targets
@@ -1169,14 +1192,32 @@ def _r_ok(target, cmd):
 
 
 def cmd_setup(args):
-    target = args.target or REMOTE
-    if not target:
-        print("ERROR: setup needs a target, e.g. `setup otto@192.168.50.101`.", file=sys.stderr)
+    raw = args.target or REMOTE
+    if not raw:
+        print("ERROR: setup needs a target, e.g. `setup otto@192.168.50.101` "
+              "(comma-separate several: a,b).", file=sys.stderr)
         sys.exit(1)
-    fix = args.fix
     if not shutil.which("ssh"):
         print("ERROR: no `ssh` client on PATH.", file=sys.stderr)
         sys.exit(1)
+    hosts = [h.strip() for h in raw.split(",") if h.strip()]
+    connected, all_ready = [], True
+    for target in hosts:
+        ready, ssh_ok = _setup_host(target, args.fix)
+        all_ready = all_ready and ready
+        if ssh_ok:
+            connected.append(target)
+    if connected:
+        save_hosts(connected)   # forced overwrite: the reachable fleet `ps` queries
+        print()
+        print(f"-> registered {len(connected)} host(s) for `ps` in {HOSTS_FILE}:")
+        for h in connected:
+            print(f"     {h}")
+    sys.exit(0 if all_ready else 1)
+
+
+def _setup_host(target, fix):
+    """Check/install prerequisites for ONE host. Returns (ready, ssh_ok)."""
     print(f"Setup for {target}  "
           f"({'FIX mode -- will make changes' if fix else 'check-only; pass --fix to remediate'})")
     results = []
@@ -1231,22 +1272,10 @@ def cmd_setup(args):
         ok, _ = _r_ok(target, "true")
     results.append(("keyless SSH", ok, "connected with otools key" if ok
                     else "no passwordless login; --fix to set up"))
-    if ok and fix:
-        # Register this host so `ps` queries it by default.
-        try:
-            cfg = load_config()
-            remotes = cfg.setdefault("defaults", {}).setdefault("remotes", []) or []
-            if target not in remotes:
-                remotes.append(target)
-                cfg["defaults"]["remotes"] = remotes
-                save_config(cfg)
-                print(f"-> registered {target} in config.defaults.remotes")
-        except SystemExit:
-            pass   # config doesn't exist yet, that's fine -- SSH still works.
     if not ok:
         _print_results(results)
-        print("\nSSH must work before the rest. Re-run after fixing connectivity.")
-        sys.exit(1)
+        print("\nSSH must work before the rest -- skipping this host.")
+        return False, False
 
     # 3) docker installed
     dok, _ = _r_ok(target, "command -v docker")
@@ -1308,7 +1337,8 @@ def cmd_setup(args):
     ready = all(ok for name, ok, _ in results if name in essentials)
     print(f"\n{'READY: launch away.' if ready else 'NOT READY -- address the [FAIL] rows above'}"
           + ("" if fix else "  (re-run with --fix to remediate)"))
-    sys.exit(0 if ready else 1)
+    ssh_ok = next((o for n, o, _ in results if n == "keyless SSH"), False)
+    return ready, ssh_ok
 
 
 def cmd_config(args):
@@ -1417,8 +1447,11 @@ def main():
     p.add_argument("--all", action="store_true", help="include unmanaged vllm containers")
     p.set_defaults(func=cmd_health)
 
-    p = sub.add_parser("setup", help="check/install remote prerequisites (SSH, docker, group)")
-    p.add_argument("target", nargs="?", help="USER@HOST (default: config defaults.remote)")
+    p = sub.add_parser("setup",
+                       help="check/install remote prereqs (SSH, docker, group) + register host(s) for `ps`")
+    p.add_argument("target", nargs="?",
+                   help="USER@HOST to set up; comma-separate several (a,b). Reachable hosts are "
+                        "saved to ~/.config/otools/hosts so `ps` queries them by default.")
     p.add_argument("--fix", action="store_true", help="remediate failures (generates keys, "
                                                       "installs docker, adds docker group)")
     p.set_defaults(func=cmd_setup)

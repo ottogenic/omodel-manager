@@ -14,6 +14,7 @@ assets/
 *.bak
 .env
 hf_token
+model_manager.json
 
 # Agent-harness scaffolding — keep the repo tool-agnostic (AGENTS.md is the
 # vendor-neutral standard; per-tool instruction files don't belong in the repo)

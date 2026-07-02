@@ -147,12 +147,30 @@ Confirm the merged truth from logs:
 omodel-manager logs <container> --remote <host> 2>&1 | grep -i sampling
 ```
 
+### 5b. Benchmark concurrency (`max-num-seqs`)
+
+Before finalizing `max-num-seqs`, run the concurrency benchmark to find the throughput sweet spot:
+
+```bash
+python3 utils/benchmark_concurrent.py
+```
+
+This script sends 1, 2, 4, 6, 8, 10 concurrent requests to the live endpoint, measures wall time and per-request latency, and prints a summary table. It uses 256 tokens, thinking off, and a general reasoning prompt — good for baseline comparison.
+
+- **System throughput** (total tok/s across all requests) should peak before dropping.
+- **Per-request latency** should stay reasonable (watch for high variance = queuing/preemption).
+- Increase `max-num-seqs` to the highest level before throughput drops or latency becomes inconsistent.
+- After updating, restart the container and verify with `health`.
+
 ### 6. Finalize
 
 Only after the model runs clean and you know what's tunable:
 - Correct the `configs/<key>.toml` to match observed reality (esp. `capabilities`).
-- Commit the launch profile (`DEFAULT_CONFIG` + `model_manager.json`, kept identical)
-  and the config together. Run `python3 -m unittest` in both repos.
+- **Promote** the vetted launch profile into **`DEFAULT_CONFIG`** (the committed source of
+  truth) and commit it together with the `configs/<key>.toml`. Do **not** commit
+  `model_manager.json` — it's your local, git-ignored sandbox where you prototyped and
+  tested; `config --init --force` regenerates it from `DEFAULT_CONFIG`. Run
+  `python3 -m unittest` in both repos.
 - Optionally `omodel-wire --verify --remote <host>` to diff declared vs live.
 - Add a `CHANGELOG.md` entry in each repo.
 
