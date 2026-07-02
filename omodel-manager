@@ -130,7 +130,7 @@ DEFAULT_CONFIG = {
                 "moe-backend": "marlin",
                 "gpu-memory-utilization": 0.4,
                 "max-model-len": 262144,
-                "max-num-seqs": 10,
+                "max-num-seqs": 4,
                 "max-num-batched-tokens": 8192,
                 "enable-chunked-prefill": True,
                 "async-scheduling": True,
