@@ -49,9 +49,9 @@ All notable changes to this project are documented here. The format follows
   back to TRITON, the working backend on sm_121 (#43507). Uses
   `tool-call-parser qwen3_coder` (per the model card) and `served-model-name` in
   `vllm_args` so the served id matches the config key.
-- `utils/benchmark_concurrent.py` — sweep concurrency (1..N parallel requests) against a
-  live endpoint to find the `max-num-seqs` throughput sweet spot (documented in
-  `ADD_A_MODEL.md` §6).
+- `utils/benchmark_concurrent.py` — benchmark a live endpoint under a realistic growing-context
+  load (concurrent multi-turn sessions to ~100k, streaming TTFT/TPOT, `/metrics` preemptions);
+  `--quick` runs a fast concurrency sweep. Documented in `ADD_A_MODEL.md` §6.
 - **Automatic page-cache drop before every `launch`.** `launch` now runs
   `sync; echo 3 > /proc/sys/vm/drop_caches` on the target right before `docker run` —
   no flag, no config, it's just how launch works. On UMA boxes (GB10 / DGX Spark) vLLM's
@@ -86,6 +86,15 @@ All notable changes to this project are documented here. The format follows
   benchmark `--host`).
 
 ### Changed
+- **`benchmark_concurrent.py` now models a realistic growing-context load.** The default is
+  **N concurrent multi-turn sessions whose context grows toward ~100k tokens** (unique code
+  per turn, so prefix caching can't hide prefill), streaming **TTFT/TPOT bucketed by context
+  size** and scraping the server's `/metrics` for **KV-cache pressure and preemptions** — this
+  reproduces the real "two sessions doing real work crawl" that the old short identical-prompt
+  sweep hid (prefix-cache hit + tiny KV → falsely flat). Small flag surface: `--sessions`,
+  `--grow-to`, `--scenario coding|agent`, `--no-think`; the old sweep is preserved behind
+  `--quick`. Thinking defaults **on** (representative for reasoning models). A non-zero
+  `preemptions during run` pinpoints KV overflow as the cause of a slowdown.
 - **Config split into source-of-truth (code) + local sandbox (JSON).** `DEFAULT_CONFIG` in
   the script is the committed source of truth; `model_manager.json` is now a LOCAL,
   **git-ignored** file `config --init` generates from it. Tune/test in the JSON freely;

@@ -1,30 +1,31 @@
 #!/usr/bin/env python3
-"""Benchmark concurrent throughput for all models in omodel-manager config.
+"""Benchmark omodel-manager models under a *realistic* growing-context load.
 
-Reads model profiles from model_manager.json, discovers their ports and
-max-num-seqs, then sweeps concurrency levels to find the throughput sweet spot.
+The default mode runs N concurrent "sessions", each a multi-turn conversation
+whose context GROWS turn over turn (unique code each turn, so prefix caching
+can't fold it) until it reaches a target size (default 100k tokens). It streams
+responses to measure TTFT (time to first token) and TPOT (time per output token)
+and reports how they degrade as context grows -- plus KV-cache pressure and
+preemptions scraped from the server's /metrics. This reproduces the real-world
+"two sessions doing real work slow to a crawl" behaviour that a short, identical-
+prompt sweep hides.
 
 Usage:
-    # Benchmark all models (reads config, probes each port)
-    python3 utils/benchmark_concurrent.py
+    # Realistic: 2 sessions growing to 100k on a coding workload (the default)
+    python3 utils/benchmark_concurrent.py --profiles qwen3.6-27b-nvfp4-256k \
+        --model qwen3.6-27b-nvfp4-256k --host dgx1
 
-    # Benchmark specific profiles only
-    python3 utils/benchmark_concurrent.py --profiles qwen3.6-35b-nvfp4 qwen3.6-35b-a3b-fp8
+    # Push harder: 3 sessions, grow to 64k, agent-style turns
+    python3 utils/benchmark_concurrent.py --profiles nemotron-3-super-120b-nvfp4-256k \
+        --model ... --host dgx1 --sessions 3 --grow-to 64000 --scenario agent
 
-    # Benchmark with custom concurrency sweep
-    python3 utils/benchmark_concurrent.py --max-concurrency 8 --concurrency-step 1
+    # Old fast smoke test (short identical prompts, concurrency sweep)
+    python3 utils/benchmark_concurrent.py --profiles glm-4.7-flash --host dgx1 --quick
 
-    # Use a specific config file
-    python3 utils/benchmark_concurrent.py --config /path/to/model_manager.json
-
-    # Skip warmup for faster runs
-    python3 utils/benchmark_concurrent.py --skip-warmup
-
-    # Custom prompt and token count
-    python3 utils/benchmark_concurrent.py --max-tokens 512 --prompt "Your custom prompt here"
-
-    # Benchmark a remote box by its `omm install` alias (or user@ip / ip)
-    python3 utils/benchmark_concurrent.py --profiles gemma4-26b-a4b --model gemma4-26b-a4b --host dgx1
+Notes:
+    * --host takes an `omm install` alias (e.g. dgx1), a user@ip, or a bare ip.
+    * Pass --model when the profile sets a served-model-name (else you get 404s).
+    * Thinking is ON by default (representative for reasoning models); --no-think off.
 """
 
 import argparse
@@ -32,6 +33,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import urllib.request
 import urllib.error
@@ -41,23 +43,31 @@ from pathlib import Path
 # Defaults
 DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "..", "model_manager.json")
-DEFAULT_PROMPT = (
-    "Solve this step by step: "
-    "A train leaves Station A at 60 km/h. Two hours later, another train leaves Station A "
-    "at 90 km/h in the same direction. Station B is 300 km from Station A. "
-    "How long after the second train leaves will it catch up to the first train? "
-    "Show your work."
-)
-DEFAULT_MAX_TOKENS = 256
-DEFAULT_TEMPERATURE = 0.2
+DEFAULT_GROW_TO = 100_000      # grow each session's context to ~this many prompt tokens
+DEFAULT_SESSIONS = 2           # concurrent growing conversations (your real-world case)
+DEFAULT_MAX_TOKENS = 1024      # per-turn output cap (a realistic coding/agent turn)
+DEFAULT_TEMPERATURE = 0.7
 DEFAULT_TOP_P = 0.95
 
-# Module-level prompt (set in main())
-PROMPT = DEFAULT_PROMPT
+# Quick-mode (legacy) short prompt.
+QUICK_PROMPT = (
+    "Solve this step by step: A train leaves Station A at 60 km/h. Two hours later, "
+    "another train leaves at 90 km/h in the same direction. How long until it catches up?"
+)
+PROMPT = QUICK_PROMPT          # module-level, used by quick mode (set in main())
+
+_plock = threading.Lock()
 
 
+def log(msg):
+    with _plock:
+        print(msg, flush=True)
+
+
+# ============================================================================
+# Config (shared with omodel-manager: profiles + the ~/.config/otools/hosts store)
+# ============================================================================
 def load_config(path):
-    """Load the omodel-manager config file."""
     if not os.path.exists(path):
         print(f"ERROR: config not found: {path}", file=sys.stderr)
         sys.exit(1)
@@ -70,9 +80,8 @@ HOSTS_FILE = os.path.expanduser("~/.config/otools/hosts")
 
 def resolve_host(name):
     """Map a host ALIAS (from `omm install`) to its target, then return just the
-    hostname/IP the benchmark connects to -- same alias store and semantics as
-    `omm --host`. Accepts an alias (`dgx1`), a `user@ip`, or a bare ip; a `user@`
-    prefix is stripped. Unknown names pass through unchanged."""
+    hostname/IP -- same alias store/semantics as `omm --host`. Accepts an alias
+    (`dgx1`), a `user@ip`, or a bare ip; a `user@` prefix is stripped."""
     if not name:
         return None
     target = name
@@ -82,7 +91,7 @@ def resolve_host(name):
                 ln = ln.strip()
                 if not ln or ln.startswith("#"):
                     continue
-                parts = ln.split(None, 1)          # alias<whitespace>user@host
+                parts = ln.split(None, 1)
                 alias = parts[0]
                 tgt = parts[1].strip() if len(parts) == 2 else parts[0]
                 if name == alias:
@@ -93,17 +102,25 @@ def resolve_host(name):
     return target.split("@")[-1] if "@" in target else target
 
 
+def deep_merge(base, over):
+    out = dict(base)
+    for k, v in over.items():
+        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
+            out[k] = deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
 def merge_model(cfg, key):
-    """Resolve a model profile with extends chain and defaults merge."""
+    """Resolve a model profile (extends chain + defaults merge)."""
     defaults = cfg.get("defaults", {})
     models = cfg.get("models", {})
-
     if key not in models:
         print(f"ERROR: no model '{key}' in config. Available: {', '.join(sorted(models))}",
               file=sys.stderr)
         sys.exit(1)
 
-    # Resolve extends chain
     def resolve_entry(k, seen=None):
         seen = seen or set()
         if k in seen:
@@ -118,267 +135,439 @@ def merge_model(cfg, key):
         return dict(m)
 
     m = resolve_entry(key)
-
-    # Merge with defaults
     merged = {
-        "image": m.get("image", defaults.get("image", "")),
         "host": m.get("host", defaults.get("host", "0.0.0.0")),
-        "port": m.get("port"),
+        "port": m.get("port") or 8000,
         "model": m.get("model"),
         "vllm_args": {**defaults.get("vllm_args", {}), **m.get("vllm_args", {})},
-        "env": {**defaults.get("env", {}), **m.get("env", {})},
     }
-
-    if not merged["port"]:
-        merged["port"] = 8000  # default port
-
     return merged
 
 
-def deep_merge(base, over):
-    """Deep merge two dicts."""
-    out = dict(base)
-    for k, v in over.items():
-        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
-            out[k] = deep_merge(out[k], v)
-        else:
-            out[k] = v
+# ============================================================================
+# Server metrics (/metrics) -- the "why" behind a crawl: KV pressure + preemption
+# ============================================================================
+_PROM = re.compile(r"^vllm:(\w+)(?:\{[^}]*\})?\s+([0-9.eE+-]+)\s*$")
+_WANT = {"gpu_cache_usage_perc", "num_requests_waiting",
+         "num_requests_running", "num_preemptions_total"}
+
+
+def fetch_metrics(url):
+    try:
+        with urllib.request.urlopen(url, timeout=3) as resp:
+            body = resp.read().decode("utf-8", "ignore")
+    except Exception:
+        return None
+    out = {}
+    for line in body.splitlines():
+        if not line.startswith("vllm:"):
+            continue
+        m = _PROM.match(line)
+        if not m or m.group(1) not in _WANT:
+            continue
+        try:
+            out[m.group(1)] = float(m.group(2))
+        except ValueError:
+            pass
     return out
 
 
-def make_request(idx, model, base_url, max_tokens, temperature, top_p):
-    """Send a single chat completion request and return (idx, elapsed, output_tokens, success, error)."""
+class MetricsSampler(threading.Thread):
+    """Polls <host>:<port>/metrics in the background while the load runs."""
+
+    def __init__(self, host, port, interval=2.0):
+        super().__init__(daemon=True)
+        self.url = f"http://{host}:{port}/metrics"
+        self.interval = interval
+        self._stop = threading.Event()
+        self.available = False
+        self.cache, self.waiting, self.running, self.preempt = [], [], [], []
+
+    def run(self):
+        while not self._stop.is_set():
+            m = fetch_metrics(self.url)
+            if m:
+                self.available = True
+                if "gpu_cache_usage_perc" in m:
+                    self.cache.append(m["gpu_cache_usage_perc"])
+                if "num_requests_waiting" in m:
+                    self.waiting.append(m["num_requests_waiting"])
+                if "num_requests_running" in m:
+                    self.running.append(m["num_requests_running"])
+                if "num_preemptions_total" in m:
+                    self.preempt.append(m["num_preemptions_total"])
+            self._stop.wait(self.interval)
+
+    def stop(self):
+        self._stop.set()
+
+    def peak_cache_pct(self):
+        if not self.cache:
+            return None
+        v = max(self.cache)
+        return v * 100.0 if v <= 1.0 else v      # vLLM reports a 0..1 fraction
+
+    def max_waiting(self):
+        return int(max(self.waiting)) if self.waiting else None
+
+    def preemptions(self):
+        return int(self.preempt[-1] - min(self.preempt)) if self.preempt else None
+
+
+# ============================================================================
+# Synthetic, growing, *unique* conversation content
+# ============================================================================
+_SYSTEM = {
+    "coding": ("You are a senior engineer doing a long, multi-file refactor. Keep every "
+               "answer short: summarize the change and cite function names. Never repeat "
+               "the file back."),
+    "agent": ("You are an autonomous coding agent with tools {read_file, write_file, "
+              "run_tests}. Reason briefly, then state the next tool call. Keep it short."),
+}
+
+
+def _code_blob(sid, turn, approx_tokens):
+    """~approx_tokens of unique, plausible code (unique ids defeat prefix caching)."""
+    target_chars = approx_tokens * 4
+    out, i, size = [], 0, 0
+    while size < target_chars:
+        b = (f"def s{sid}_t{turn}_op_{i}(a{i}, b{i}, c{i}):\n"
+             f"    # unit {sid}.{turn}.{i} tag-{sid * 31 + turn * 17 + i} (unique, uncacheable)\n"
+             f"    acc_{i} = a{i} * {i * 7 + 1} + b{i} * {i * 3 + 2} - c{i} * {i * 11 + 5}\n"
+             f"    return (acc_{i} ^ {i * 13 + 97}) % {i * 29 + 101}\n\n")
+        out.append(b)
+        size += len(b)
+        i += 1
+    return "".join(out)
+
+
+def turn_user(scenario, sid, turn, chunk_tokens):
+    blob = _code_blob(sid, turn, chunk_tokens)
+    if scenario == "agent":
+        return (f"Tool result read_file(module_{sid}_{turn}.py):\n```python\n{blob}```\n"
+                "Integrate this with the earlier modules; name the next tool call.")
+    lead = ("Here is the start of a large module I'm refactoring:" if turn == 0
+            else "Now consider this additional file that must interoperate:")
+    return (f"{lead}\n```python\n{blob}```\n"
+            "Give a one-paragraph review and name the riskiest function (by name).")
+
+
+# ============================================================================
+# Growing-session load
+# ============================================================================
+def _pct(xs, p):
+    if not xs:
+        return 0.0
+    s = sorted(xs)
+    k = (len(s) - 1) * p / 100.0
+    lo = int(k)
+    hi = min(lo + 1, len(s) - 1)
+    return s[lo] + (s[hi] - s[lo]) * (k - lo)
+
+
+def stream_turn(base_url, model, messages, max_tokens, temperature, top_p, think, timeout=600):
+    """One streamed chat turn. Returns dict with ttft, tpot, out_tokens, prompt_tokens."""
     body = json.dumps({
         "model": model,
-        "messages": [
-            {"role": "user", "content": PROMPT},
-        ],
+        "messages": messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
         "top_p": top_p,
-        "stream": False,
-        "chat_template_kwargs": {"enable_thinking": False}
+        "stream": True,
+        "stream_options": {"include_usage": True},
+        "chat_template_kwargs": {"enable_thinking": think},
     }).encode()
-    req = urllib.request.Request(
-        base_url,
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    req = urllib.request.Request(base_url, data=body,
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    start = time.time()
+    ttft = last = None
+    itl, text = [], []
+    usage = {}
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            for raw in resp:
+                line = raw.decode("utf-8", "ignore").strip()
+                if not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if payload == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(payload)
+                except ValueError:
+                    continue
+                if obj.get("usage"):
+                    usage = obj["usage"]
+                ch = obj.get("choices") or []
+                if ch:
+                    d = ch[0].get("delta") or {}
+                    piece = d.get("content") or d.get("reasoning_content") or d.get("reasoning")
+                    if piece:
+                        now = time.time()
+                        if ttft is None:
+                            ttft = now - start
+                        else:
+                            itl.append(now - last)
+                        last = now
+                        text.append(piece)
+    except Exception as e:
+        return {"ok": False, "err": str(e), "ttft": None, "tpot": None,
+                "out_tokens": 0, "prompt_tokens": usage.get("prompt_tokens", 0), "content": ""}
+    return {"ok": True, "err": None, "ttft": ttft,
+            "tpot": (sum(itl) / len(itl)) if itl else None,
+            "out_tokens": usage.get("completion_tokens", len(itl) + 1),
+            "prompt_tokens": usage.get("prompt_tokens", 0),
+            "content": "".join(text)}
+
+
+def run_session(sid, base_url, model, args, chunk_tokens, think, max_turns=80):
+    """One growing conversation: add a unique code chunk each turn until the context
+    reaches --grow-to. Returns a list of per-turn records."""
+    messages = [{"role": "system", "content": _SYSTEM[args.scenario]},
+                {"role": "user", "content": turn_user(args.scenario, sid, 0, chunk_tokens)}]
+    turns = []
+    for t in range(max_turns):
+        est = sum(len(m.get("content", "")) for m in messages) // 4   # fallback if no usage
+        r = stream_turn(base_url, model, messages, args.max_tokens,
+                        args.temperature, args.top_p, think)
+        ctx = r["prompt_tokens"] or est
+        if not r["ok"]:
+            log(f"  [s{sid} t{t}] ctx~{ctx // 1000}k  FAILED: {r['err'][:80]}")
+            turns.append({"sid": sid, "turn": t, "ctx": ctx, "ok": False})
+            break
+        turns.append({"sid": sid, "turn": t, "ctx": ctx, "ttft": r["ttft"],
+                      "tpot": r["tpot"], "out": r["out_tokens"], "ok": True})
+        tpot_ms = (r["tpot"] * 1000) if r["tpot"] else 0
+        log(f"  [s{sid} t{t}] ctx {ctx // 1000:>3}k  ttft {r['ttft'] or 0:4.1f}s  "
+            f"tpot {tpot_ms:5.1f}ms  out {r['out_tokens']}")
+        if ctx >= args.grow_to:
+            break
+        messages.append({"role": "assistant", "content": r["content"] or "ok"})
+        messages.append({"role": "user", "content": turn_user(args.scenario, sid, t + 1, chunk_tokens)})
+    return turns
+
+
+_BUCKETS = [(0, 8000, "<8k"), (8000, 16000, "8-16k"), (16000, 32000, "16-32k"),
+            (32000, 64000, "32-64k"), (64000, 100000, "64-100k"), (100000, 10 ** 9, ">=100k")]
+
+
+def report_growing(model_name, sessions, sampler, wall, args):
+    ok_turns = [t for s in sessions for t in s if t.get("ok")]
+    print(f"\n{'=' * 74}")
+    print(f"GROWING-SESSION RESULT: {model_name}")
+    print(f"  {args.sessions} concurrent session(s), scenario={args.scenario}, "
+          f"grow-to={args.grow_to // 1000}k, thinking={'off' if args.no_think else 'on'}, "
+          f"wall={wall:.0f}s")
+    print(f"{'=' * 74}")
+    if not ok_turns:
+        print("  No successful turns -- check --model / host / that the server is up.")
+        return
+
+    print(f"  {'context':<10} {'TTFT p50/p95':>16} {'TPOT p50/p95 (ms)':>20} "
+          f"{'decode tok/s':>13} {'turns':>6}")
+    first_decode = last_decode = None
+    for lo, hi, label in _BUCKETS:
+        b = [t for t in ok_turns if lo <= t["ctx"] < hi]
+        if not b:
+            continue
+        ttfts = [t["ttft"] for t in b if t["ttft"] is not None]
+        tpots = [t["tpot"] for t in b if t["tpot"]]
+        dec = (1.0 / _pct(tpots, 50)) if tpots else 0.0
+        if first_decode is None and dec:
+            first_decode = dec
+        if dec:
+            last_decode = dec
+        print(f"  {label:<10} {_pct(ttfts, 50):5.1f}/{_pct(ttfts, 95):<9.1f}"
+              f"{_pct(tpots, 50) * 1000:8.1f}/{_pct(tpots, 95) * 1000:<11.1f}"
+              f"{dec:>13.1f} {len(b):>6}")
+
+    print(f"\n  KV cache peak: "
+          + (f"{sampler.peak_cache_pct():.0f}%" if sampler.peak_cache_pct() is not None else "n/a")
+          + "   max queue (waiting): "
+          + (f"{sampler.max_waiting()}" if sampler.max_waiting() is not None else "n/a")
+          + "   preemptions during run: "
+          + (f"{sampler.preemptions()}" if sampler.preemptions() is not None else "n/a"))
+    if not sampler.available:
+        print("  (/metrics not reachable -- run against the box's IP to see KV/preemption data)")
+
+    print("\n  READING:")
+    if first_decode and last_decode and last_decode < first_decode:
+        print(f"    - decode fell from {first_decode:.0f} to {last_decode:.0f} tok/s as context grew "
+              f"({first_decode / last_decode:.1f}x slower) -- the bandwidth wall.")
+    pre = sampler.preemptions()
+    if pre:
+        print(f"    - {pre} preemption(s) occurred: KV cache overflowed and sequences were evicted/"
+              "recomputed. THIS is the crawl. Lower concurrent sessions, shrink max-model-len, or "
+              "raise gpu-memory-utilization.")
+    elif sampler.available:
+        print("    - no preemptions: the slowdown is pure bandwidth (KV grows), not eviction.")
+    print(f"    - at {args.sessions} concurrent sessions this model stayed usable up to the last "
+          "context bucket above with acceptable TPOT; pick your real session budget accordingly.")
+
+
+def run_growing(model_name, model_info, base_url, host, port, args):
+    model_id = args.model or model_info.get("model", model_name)
+    think = not args.no_think
+    chunk = max(3000, args.grow_to // 16)          # ~16 turns to reach the target
+    print(f"\n{'=' * 74}\nModel: {model_name}  (id: {model_id})\n"
+          f"  Growing {args.sessions} session(s) to ~{args.grow_to // 1000}k tokens "
+          f"(~{chunk // 1000}k/turn) ...\n{'=' * 74}")
+
+    sampler = MetricsSampler(host, port)
+    sampler.start()
+    t0 = time.time()
+    sessions = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.sessions) as pool:
+        futs = {pool.submit(run_session, sid, base_url, model_id, args, chunk, think): sid
+                for sid in range(args.sessions)}
+        for f in concurrent.futures.as_completed(futs):
+            try:
+                sessions.append(f.result())
+            except Exception as e:
+                log(f"  session {futs[f]} crashed: {e}")
+    wall = time.time() - t0
+    sampler.stop()
+    sampler.join(timeout=3)
+    report_growing(model_name, sessions, sampler, wall, args)
+    return sessions
+
+
+# ============================================================================
+# Quick mode (legacy): short identical prompts, concurrency sweep -- a smoke test
+# ============================================================================
+def quick_request(idx, model, base_url, max_tokens, temperature, top_p):
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": PROMPT}],
+        "max_tokens": max_tokens, "temperature": temperature, "top_p": top_p,
+        "stream": False, "chat_template_kwargs": {"enable_thinking": False},
+    }).encode()
+    req = urllib.request.Request(base_url, data=body,
+                                 headers={"Content-Type": "application/json"}, method="POST")
     start = time.time()
     try:
         with urllib.request.urlopen(req, timeout=300) as resp:
             data = json.loads(resp.read().decode())
-        elapsed = time.time() - start
-        completion_tokens = data.get("usage", {}).get("completion_tokens", 0)
-        return (idx, elapsed, completion_tokens, True, None)
+        return (idx, time.time() - start, data.get("usage", {}).get("completion_tokens", 0), True, None)
     except Exception as e:
-        elapsed = time.time() - start
-        return (idx, elapsed, 0, False, str(e))
+        return (idx, time.time() - start, 0, False, str(e))
 
 
-def run_benchmark(concurrency, model, base_url, max_tokens, temperature, top_p):
-    """Run `concurrency` simultaneous requests and return aggregate stats."""
+def quick_run(concurrency, model, base_url, max_tokens, temperature, top_p):
     print(f"  Concurrency {concurrency}: ", end="", flush=True)
-
-    futures = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
-        for i in range(concurrency):
-            futures.append(pool.submit(make_request, i, model, base_url,
-                                       max_tokens, temperature, top_p))
-
-        results = []
-        for future in concurrent.futures.as_completed(futures):
-            results.append(future.result())
-
+        futures = [pool.submit(quick_request, i, model, base_url, max_tokens, temperature, top_p)
+                   for i in range(concurrency)]
+        results = [f.result() for f in concurrent.futures.as_completed(futures)]
     successful = [r for r in results if r[3]]
     failed = [r for r in results if not r[3]]
-
     if not successful:
+        print("all failed")
         return None
-
     total_time = max(r[1] for r in results)
-    total_output_tokens = sum(r[2] for r in successful)
+    total_tokens = sum(r[2] for r in successful)
     avg_time = sum(r[1] for r in successful) / len(successful)
-    throughput = total_output_tokens / total_time if total_time > 0 else 0
-
-    status = "OK" if not failed else f"FAIL({len(failed)})"
-    print(f"{concurrency:>2}x | {throughput:>6.1f} tok/s | {avg_time:>6.2f}s avg | {status}")
-
-    return {
-        "concurrency": concurrency,
-        "total_time": total_time,
-        "avg_latency": avg_time,
-        "total_tokens": total_output_tokens,
-        "throughput": throughput,
-        "successful": len(successful),
-        "failed": len(failed),
-    }
+    throughput = total_tokens / total_time if total_time > 0 else 0
+    print(f"{concurrency:>2}x | {throughput:>6.1f} tok/s | {avg_time:>6.2f}s avg | "
+          f"{'OK' if not failed else f'FAIL({len(failed)})'}")
+    return {"concurrency": concurrency, "avg_latency": avg_time,
+            "throughput": throughput, "successful": len(successful), "failed": len(failed)}
 
 
-def sweep_concurrency(model_name, model_info, base_url, max_tokens, temperature, top_p,
-                      max_concurrency, step, warmup_count, skip_warmup, model_override=None):
-    """Sweep concurrency levels for a single model and return results."""
+def quick_sweep(model_name, model_info, base_url, args, model_id):
     max_seqs = model_info["vllm_args"].get("max-num-seqs", 4)
-    model_id = model_override if model_override else model_info.get("model", model_name)
-
-    # Determine sweep range: from 1 up to max_seqs (or max_concurrency, whichever is lower)
-    sweep_max = min(max_seqs, max_concurrency) if max_concurrency else max_seqs
-    levels = list(range(1, sweep_max + 1, step))
+    sweep_max = min(max_seqs, args.max_concurrency) if args.max_concurrency else max_seqs
+    levels = list(range(1, sweep_max + 1, args.concurrency_step))
     if 1 not in levels:
         levels.insert(0, 1)
-
-    print(f"\n{'='*70}")
-    print(f"Model: {model_name}")
-    print(f"  HF ID: {model_id}")
-    print(f"  max-num-seqs (config): {max_seqs}")
-    print(f"  Sweeping concurrency: {levels}")
-    print(f"{'='*70}")
-
-    # Warmup
-    if not skip_warmup:
-        print(f"\n  Warmup ({warmup_count} requests)...")
-        run_benchmark(min(warmup_count, 2), model_id, base_url,
-                      max_tokens, temperature, top_p)
-        time.sleep(2)
-
+    print(f"\n{'=' * 70}\nModel: {model_name}  (id: {model_id})\n"
+          f"  max-num-seqs {max_seqs}; quick sweep {levels}\n{'=' * 70}")
     results = []
     for level in levels:
-        result = run_benchmark(level, model_id, base_url,
-                               max_tokens, temperature, top_p)
-        if result is None:
-            print(f"  *** All requests failed at concurrency={level}, stopping. ***")
+        r = quick_run(level, model_id, base_url, args.max_tokens, args.temperature, args.top_p)
+        if r is None:
             break
-        results.append(result)
-
-        # Early exit if throughput drops significantly
-        if len(results) >= 2:
-            prev_tp = results[-2]["throughput"]
-            curr_tp = results[-1]["throughput"]
-            if curr_tp < prev_tp * 0.5:
-                print(f"  *** Throughput dropped >50% from {prev_tp:.1f} to {curr_tp:.1f} tok/s. Stopping. ***")
-                break
-
-        if result["failed"] > 0:
-            print(f"  *** {result['failed']} failures at concurrency={level}. Stopping. ***")
+        results.append(r)
+        if len(results) >= 2 and r["throughput"] < results[-2]["throughput"] * 0.5:
+            print("  *** throughput dropped >50%, stopping. ***")
             break
-
         time.sleep(1)
-
+    if results:
+        best = max(results, key=lambda x: x["throughput"])
+        print(f"  peak {best['throughput']:.1f} tok/s at {best['concurrency']}x")
     return results
 
 
-def print_summary(model_results):
-    """Print consolidated summary across all models."""
-    print(f"\n{'='*70}")
-    print("CONSOLIDATED SUMMARY")
-    print(f"{'='*70}")
-    print(f"{'Model':<30} {'Peak Throughput':>14} {'Best Concurrency':>16} {'Avg Latency':>12} {'Status'}")
-    print("-" * 70)
-
-    for model_name, results in model_results.items():
-        if not results:
-            print(f"{model_name:<30} {'N/A':>14} {'N/A':>16} {'N/A':>12} {'FAILED'}")
-            continue
-
-        best_tp = max(results, key=lambda r: r["throughput"])
-        best_lat = min(results, key=lambda r: r["avg_latency"])
-        status = "OK" if best_tp["failed"] == 0 else f"FAIL({best_tp['failed']})"
-
-        print(f"{model_name:<30} {best_tp['throughput']:>13.1f} tok/s {best_tp['concurrency']:>16}x {best_lat['avg_latency']:>11.2f}s {status}")
-
-    print(f"{'='*70}")
-    print("\nRECOMMENDATION:")
-    print("  Set each model's max-num-seqs to its peak throughput concurrency.")
-    print("  Restart the container after updating the config.")
-
-
+# ============================================================================
 def main():
-    parser = argparse.ArgumentParser(
-        description="Benchmark concurrent throughput for all models in omodel-manager config")
-    parser.add_argument("--config", default=DEFAULT_CONFIG,
-                        help="path to model_manager.json (default: %(default)s)")
-    parser.add_argument("--profiles", nargs="+", default=None,
-                        help="specific profile keys to benchmark (default: all)")
-    parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS,
-                        help="max output tokens per request (default: %(default)s)")
-    parser.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE,
-                        help="sampling temperature (default: %(default)s)")
-    parser.add_argument("--top-p", type=float, default=DEFAULT_TOP_P,
-                        help="top-p sampling (default: %(default)s)")
-    parser.add_argument("--max-concurrency", type=int, default=None,
-                        help="max concurrency to test (default: profile's max-num-seqs)")
-    parser.add_argument("--concurrency-step", type=int, default=1,
-                        help="step between concurrency levels (default: %(default)s)")
-    parser.add_argument("--warmup", type=int, default=2,
-                        help="number of warmup requests (default: %(default)s)")
-    parser.add_argument("--skip-warmup", action="store_true",
-                        help="skip warmup")
-    parser.add_argument("--prompt", default=None,
-                        help="custom prompt (default: standard reasoning prompt)")
-    parser.add_argument("--host", default=None,
-                        help="host to benchmark against: an alias from `omm install` (e.g. dgx1), "
-                             "a user@ip, or a bare ip. Resolves aliases via ~/.config/otools/hosts, "
-                             "same as `omm --host`.")
-    parser.add_argument("--remote", default=None,
-                        help="legacy alias for --host (kept for back-compat)")
-    parser.add_argument("--model", default=None,
-                        help="served model name to use in API requests (overrides config)")
-    args = parser.parse_args()
+    p = argparse.ArgumentParser(
+        description="Benchmark omodel-manager models under a realistic growing-context load.")
+    p.add_argument("--config", default=DEFAULT_CONFIG, help="path to model_manager.json")
+    p.add_argument("--profiles", nargs="+", default=None,
+                   help="profile keys to benchmark (default: all)")
+    p.add_argument("--model", default=None,
+                   help="served model name for API requests (needed if the profile sets one)")
+    p.add_argument("--host", default=None,
+                   help="alias from `omm install` (e.g. dgx1), a user@ip, or a bare ip")
+    p.add_argument("--remote", default=None, help="legacy alias for --host")
+    # Growing-session (default) knobs -- kept intentionally few.
+    p.add_argument("--sessions", type=int, default=DEFAULT_SESSIONS,
+                   help="concurrent growing conversations (default: %(default)s)")
+    p.add_argument("--grow-to", type=int, default=DEFAULT_GROW_TO,
+                   help="grow each session's context to ~this many tokens (default: %(default)s)")
+    p.add_argument("--scenario", choices=["coding", "agent"], default="coding",
+                   help="turn shape (default: %(default)s)")
+    p.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS,
+                   help="output tokens per turn (default: %(default)s)")
+    p.add_argument("--no-think", action="store_true",
+                   help="disable thinking (default: on -- representative for reasoning models)")
+    p.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE)
+    p.add_argument("--top-p", type=float, default=DEFAULT_TOP_P)
+    # Quick (legacy smoke test) mode.
+    p.add_argument("--quick", action="store_true",
+                   help="run the old short-prompt concurrency sweep instead (fast smoke test)")
+    p.add_argument("--max-concurrency", type=int, default=None, help="[--quick] max concurrency")
+    p.add_argument("--concurrency-step", type=int, default=1, help="[--quick] step")
+    p.add_argument("--prompt", default=None, help="[--quick] custom short prompt")
+    args = p.parse_args()
 
     global PROMPT
-    PROMPT = args.prompt if args.prompt else DEFAULT_PROMPT
+    PROMPT = args.prompt or QUICK_PROMPT
 
-    # --host is the preferred name; --remote is the legacy alias for the same thing.
     host_arg = args.host or args.remote
-    resolved_host = resolve_host(host_arg)      # alias -> ip; strips any user@ prefix
+    resolved_host = resolve_host(host_arg)
 
-    print(f"Benchmarking omodel-manager models")
+    print("Benchmarking omodel-manager models")
     print(f"Config: {args.config}")
-    print(f"Tokens: {args.max_tokens} | Temp: {args.temperature} | Top-p: {args.top_p}")
-    print(f"Prompt: {PROMPT[:60]}...")
+    if args.quick:
+        print(f"Mode: quick sweep | tokens {args.max_tokens} | temp {args.temperature}")
+    else:
+        print(f"Mode: growing sessions | {args.sessions} session(s) -> {args.grow_to // 1000}k "
+              f"| scenario {args.scenario} | thinking {'off' if args.no_think else 'on'}")
     if host_arg:
-        shown = f"{host_arg} -> {resolved_host}" if resolved_host != host_arg else resolved_host
-        print(f"Host: {shown}")
+        print(f"Host: {host_arg} -> {resolved_host}" if resolved_host != host_arg
+              else f"Host: {resolved_host}")
 
-    # Load config
     cfg = load_config(args.config)
-    defaults = cfg.get("defaults", {})
     models = cfg.get("models", {})
-
     if not models:
         print("ERROR: no models defined in config.", file=sys.stderr)
         sys.exit(1)
+    profile_keys = args.profiles if args.profiles else sorted(models.keys())
 
-    # Determine which profiles to benchmark
-    if args.profiles:
-        profile_keys = args.profiles
-    else:
-        profile_keys = sorted(models.keys())
-
-    # Resolve and benchmark each profile
-    model_results = {}
     for key in profile_keys:
         try:
             model_info = merge_model(cfg, key)
         except SystemExit:
             continue
-
-        # Build base URL from config (host:port), override with --host/--remote if given.
-        host = resolved_host if resolved_host else model_info.get("host", "0.0.0.0")
+        host = resolved_host or model_info.get("host", "0.0.0.0")
         port = model_info.get("port", 8000)
         base_url = f"http://{host}:{port}/v1/chat/completions"
-
-        results = sweep_concurrency(
-            key, model_info, base_url,
-            args.max_tokens, args.temperature, args.top_p,
-            args.max_concurrency, args.concurrency_step,
-            args.warmup, args.skip_warmup, args.model
-        )
-        model_results[key] = results
-
-    # Print consolidated summary
-    print_summary(model_results)
+        model_id = args.model or model_info.get("model", key)
+        if args.quick:
+            quick_sweep(key, model_info, base_url, args, model_id)
+        else:
+            run_growing(key, model_info, base_url, host, port, args)
 
 
 if __name__ == "__main__":

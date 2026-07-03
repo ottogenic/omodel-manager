@@ -227,33 +227,41 @@ Confirm the merged truth from logs:
 omodel-manager logs <container> --host <host> 2>&1 | grep -i sampling
 ```
 
-### 6. Benchmark concurrency (`max-num-seqs`)
+### 6. Benchmark under a realistic growing-context load
 
-Before finalizing `max-num-seqs`, run the concurrency benchmark to find the throughput sweet spot:
+A short identical-prompt sweep flatters every model (prefix caching + tiny KV). Real
+coding/agent work is a **few concurrent sessions whose context grows toward 100k** — that's
+what makes a memory-bandwidth-bound box (DGX Spark) crawl. Benchmark that:
 
 ```bash
 python3 utils/benchmark_concurrent.py --profiles <key> --model <served-model-name> --host <host>
 ```
 
-`--host` takes the same alias as `omm --host` (resolved via `~/.config/otools/hosts`), or
-a `user@ip` / bare ip. (`--remote` still works as a legacy alias.)
+Default = **2 concurrent sessions, each a multi-turn conversation growing to ~100k tokens**
+(unique code per turn, so prefix caching can't hide the prefill cost), thinking **on**. It
+streams responses and reports **TTFT** and **TPOT** (time per output token) *bucketed by
+context size*, and scrapes the server's `/metrics` for KV-cache pressure and **preemptions**.
 
-This script sends 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 concurrent requests (step=1 by default)
-to the live endpoint, measures wall time and per-request latency, and prints a summary
-table. It uses 256 tokens, thinking off, and a general reasoning prompt — good for
-baseline comparison.
+- `--host` takes the same alias as `omm --host` (or `user@ip` / bare ip; `--remote` is legacy).
+- Tune the load with `--sessions N` and `--grow-to TOKENS`; `--scenario agent` shapes turns as
+  tool results. `--no-think` disables thinking. `--quick` runs the old short-prompt sweep.
+- **Run it against the box's IP** (not through an SSH alias that only proxies docker) so the
+  `/metrics` endpoint is reachable — otherwise KV/preemption data shows `n/a`.
 
-- **System throughput** (total tok/s across all requests) should peak before dropping.
-- **Per-request latency** should stay reasonable (watch for high variance = queuing/preemption).
-- Increase `max-num-seqs` to the highest level before throughput drops or latency becomes inconsistent.
-- After updating, restart the container and verify with `health`.
+**Read the result, not just peak tok/s:**
+- **Decode tok/s falling** as the context bucket grows is expected (the bandwidth wall). Note
+  *how far* it falls and at what context it becomes unusable for your work.
+- **`preemptions during run` > 0** is the crawl: KV overflowed and sequences were evicted/
+  recomputed. Fix by lowering the concurrent-session budget, shrinking `--max-model-len`, or
+  raising `gpu-memory-utilization` — not by bumping `max-num-seqs`.
+- **Record two numbers** for the config's tuning notes: a sensible `max-num-seqs`, **and** the
+  safe number of concurrent full-length (≈your real context) sessions before TPOT/preemptions
+  degrade. Restart the container and re-`health` after any change.
 
-**Prerequisite:** the model must be in READY state (see §4 step 4). The benchmark script
-does not wait for startup.
+**Prerequisite:** the model must be READY (see §4 step 4) — the script doesn't wait for startup.
 
-**Note on `--model`:** If the profile sets `served-model-name` in `vllm_args` (different
-from the HF model ID), you must pass `--model <served-model-name>` to the script. Without
-it, the script sends the HF ID and gets 404s.
+**Note on `--model`:** if the profile sets `served-model-name` in `vllm_args`, pass
+`--model <served-model-name>` or the script sends the HF ID and gets 404s.
 
 ### 7. Finalize
 

@@ -179,6 +179,14 @@ authoritative over this file). Paste a line to an AI tool or fetch it yourself:
   memory is cheap but verify output quality at very long contexts.
 - **`install` does NOT auto-install nvidia-container-toolkit** — it checks and advises with
   the install link (distro-specific; left to the operator).
+- **Benchmark the real workload, not a toy one.** Decode on this box is memory-bandwidth-bound,
+  so throughput collapses as **KV cache grows with context**, not with request count. A short
+  identical-prompt sweep hits prefix cache and tiny KV → looks great, then two real long-context
+  sessions crawl. `utils/benchmark_concurrent.py` defaults to **growing multi-turn sessions to
+  ~100k** with streaming TTFT/TPOT and `/metrics` preemption scraping; `--quick` is the old
+  best-case smoke test. A non-zero `preemptions during run` = KV overflow (the crawl), fixed by
+  fewer concurrent sessions / smaller `max-model-len` / higher `gpu-memory-utilization`, not by
+  raising `max-num-seqs`.
 
 ## How to extend
 
