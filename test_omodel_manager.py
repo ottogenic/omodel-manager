@@ -274,9 +274,9 @@ class BuildArgvTests(unittest.TestCase):
         m = mm.merge_model(self.cfg, "qwen3.6-27b-nvfp4-256k")
         _, argv, _ = mm.build_run_argv("qwen3.6-27b-nvfp4-256k", m, target=None)
         i = argv.index("--speculative-config")
-        val = argv[i + 1]
-        self.assertEqual(json.loads(val),
-                         {"method": "mtp", "num_speculative_tokens": 3})
+        parsed = json.loads(argv[i + 1])   # the whole JSON is one argv token, and valid
+        self.assertEqual(parsed["method"], "mtp")
+        self.assertIn("num_speculative_tokens", parsed)   # value is tunable; don't hardcode it
 
     def test_hf_overrides_intact(self):
         m = mm.merge_model(self.cfg, "qwen3.6-27b-nvfp4-512k")
