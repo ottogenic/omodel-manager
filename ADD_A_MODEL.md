@@ -234,10 +234,12 @@ coding/agent work is a **few concurrent sessions whose context grows toward 100k
 what makes a memory-bandwidth-bound box (DGX Spark) crawl. Benchmark that:
 
 ```bash
-python3 utils/benchmark_concurrent.py --profiles <key> --model <served-model-name> --host <host>
+python3 utils/benchmark_concurrent.py --host <host>
 ```
 
-Default = **2 concurrent sessions, each a multi-turn conversation growing to ~100k tokens**
+It's a **generic** throughput probe — it doesn't read the config; it auto-discovers the
+served model from `/v1/models` and benchmarks whatever is running on that host. Default =
+**2 concurrent sessions, each a multi-turn conversation growing to ~100k tokens**
 (unique code per turn, so prefix caching can't hide the prefill cost), thinking **on**. It
 streams responses and reports **TTFT** and **TPOT** (time per output token) *bucketed by
 context size*, and scrapes the server's `/metrics` for KV-cache pressure and **preemptions**.
@@ -260,8 +262,8 @@ context size*, and scrapes the server's `/metrics` for KV-cache pressure and **p
 
 **Prerequisite:** the model must be READY (see §4 step 4) — the script doesn't wait for startup.
 
-**Note on `--model`:** if the profile sets `served-model-name` in `vllm_args`, pass
-`--model <served-model-name>` or the script sends the HF ID and gets 404s.
+The model is auto-discovered from `/v1/models`; pass `--model <id>` only to override or if
+discovery fails.
 
 ### 7. Finalize
 

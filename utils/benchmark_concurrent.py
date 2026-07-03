@@ -1,30 +1,31 @@
 #!/usr/bin/env python3
-"""Benchmark omodel-manager models under a *realistic* growing-context load.
+"""Benchmark ANY running vLLM/OpenAI endpoint under a realistic growing-context load.
 
-The default mode runs N concurrent "sessions", each a multi-turn conversation
-whose context GROWS turn over turn (unique code each turn, so prefix caching
-can't fold it) until it reaches a target size (default 100k tokens). It streams
-responses to measure TTFT (time to first token) and TPOT (time per output token)
-and reports how they degrade as context grows -- plus KV-cache pressure and
-preemptions scraped from the server's /metrics. This reproduces the real-world
-"two sessions doing real work slow to a crawl" behaviour that a short, identical-
-prompt sweep hides.
+This is a generic throughput probe -- it does NOT read the omodel-manager config or
+care which profile is running. Point it at a host; it auto-discovers the served model
+via /v1/models and drives load. The default mode runs N concurrent "sessions", each a
+multi-turn conversation whose context GROWS turn over turn (unique code each turn, so
+prefix caching can't fold it) until it reaches a target size (default 100k tokens). It
+streams responses to measure TTFT (time to first token) and TPOT (time per output
+token), reports how they degrade as context grows, and scrapes the server's /metrics
+for KV-cache pressure and preemptions. This reproduces the real-world "two sessions
+doing real work slow to a crawl" behaviour that a short, identical-prompt sweep hides.
 
 Usage:
-    # Realistic: 2 sessions growing to 100k on a coding workload (the default)
-    python3 utils/benchmark_concurrent.py --profiles qwen3.6-27b-nvfp4-256k \
-        --model qwen3.6-27b-nvfp4-256k --host dgx1
+    # Realistic: 2 sessions growing to 100k, model auto-discovered (the default)
+    python3 utils/benchmark_concurrent.py --host dgx1
 
     # Push harder: 3 sessions, grow to 64k, agent-style turns
-    python3 utils/benchmark_concurrent.py --profiles nemotron-3-super-120b-nvfp4-256k \
-        --model ... --host dgx1 --sessions 3 --grow-to 64000 --scenario agent
+    python3 utils/benchmark_concurrent.py --host 192.168.50.102 --sessions 3 \
+        --grow-to 64000 --scenario agent
 
     # Old fast smoke test (short identical prompts, concurrency sweep)
-    python3 utils/benchmark_concurrent.py --profiles glm-4.7-flash --host dgx1 --quick
+    python3 utils/benchmark_concurrent.py --host dgx1 --quick
 
 Notes:
     * --host takes an `omm install` alias (e.g. dgx1), a user@ip, or a bare ip.
-    * Pass --model when the profile sets a served-model-name (else you get 404s).
+    * --model is optional -- it's auto-discovered from /v1/models; pass it only to
+      override or if discovery fails.
     * Thinking is ON by default (representative for reasoning models); --no-think off.
 """
 
@@ -38,16 +39,14 @@ import time
 import urllib.request
 import urllib.error
 import concurrent.futures
-from pathlib import Path
 
 # Defaults
-DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "..", "model_manager.json")
 DEFAULT_GROW_TO = 100_000      # grow each session's context to ~this many prompt tokens
-DEFAULT_SESSIONS = 2           # concurrent growing conversations (your real-world case)
+DEFAULT_SESSIONS = 2           # concurrent growing conversations (the real-world case)
 DEFAULT_MAX_TOKENS = 1024      # per-turn output cap (a realistic coding/agent turn)
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_TOP_P = 0.95
+DEFAULT_PORT = 8000
 
 # Quick-mode (legacy) short prompt.
 QUICK_PROMPT = (
@@ -65,16 +64,8 @@ def log(msg):
 
 
 # ============================================================================
-# Config (shared with omodel-manager: profiles + the ~/.config/otools/hosts store)
+# Host resolution (shared with omodel-manager's ~/.config/otools/hosts store)
 # ============================================================================
-def load_config(path):
-    if not os.path.exists(path):
-        print(f"ERROR: config not found: {path}", file=sys.stderr)
-        sys.exit(1)
-    with open(path) as f:
-        return json.load(f)
-
-
 HOSTS_FILE = os.path.expanduser("~/.config/otools/hosts")
 
 
@@ -102,53 +93,23 @@ def resolve_host(name):
     return target.split("@")[-1] if "@" in target else target
 
 
-def deep_merge(base, over):
-    out = dict(base)
-    for k, v in over.items():
-        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
-            out[k] = deep_merge(out[k], v)
-        else:
-            out[k] = v
-    return out
-
-
-def merge_model(cfg, key):
-    """Resolve a model profile (extends chain + defaults merge)."""
-    defaults = cfg.get("defaults", {})
-    models = cfg.get("models", {})
-    if key not in models:
-        print(f"ERROR: no model '{key}' in config. Available: {', '.join(sorted(models))}",
-              file=sys.stderr)
-        sys.exit(1)
-
-    def resolve_entry(k, seen=None):
-        seen = seen or set()
-        if k in seen:
-            print(f"ERROR: circular extends involving '{k}'", file=sys.stderr)
-            sys.exit(1)
-        seen.add(k)
-        m = models[k]
-        if m.get("extends"):
-            base = resolve_entry(m["extends"], seen)
-            child = {kk: vv for kk, vv in m.items() if kk != "extends"}
-            return deep_merge(base, child)
-        return dict(m)
-
-    m = resolve_entry(key)
-    merged = {
-        "host": m.get("host", defaults.get("host", "0.0.0.0")),
-        "port": m.get("port") or 8000,
-        "model": m.get("model"),
-        "vllm_args": {**defaults.get("vllm_args", {}), **m.get("vllm_args", {})},
-    }
-    return merged
+def discover_model(host, port):
+    """Return the first served model id from /v1/models, or None."""
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/v1/models", timeout=10) as r:
+            data = json.loads(r.read().decode())
+        ids = [m.get("id") for m in data.get("data", []) if m.get("id")]
+        return ids[0] if ids else None
+    except Exception:
+        return None
 
 
 # ============================================================================
 # Server metrics (/metrics) -- the "why" behind a crawl: KV pressure + preemption
 # ============================================================================
 _PROM = re.compile(r"^vllm:(\w+)(?:\{[^}]*\})?\s+([0-9.eE+-]+)\s*$")
-_WANT = {"gpu_cache_usage_perc", "num_requests_waiting",
+# vLLM V1 renamed gpu_cache_usage_perc -> kv_cache_usage_perc; accept both.
+_WANT = {"gpu_cache_usage_perc", "kv_cache_usage_perc", "num_requests_waiting",
          "num_requests_running", "num_preemptions_total"}
 
 
@@ -179,16 +140,18 @@ class MetricsSampler(threading.Thread):
         super().__init__(daemon=True)
         self.url = f"http://{host}:{port}/metrics"
         self.interval = interval
-        self._stop = threading.Event()
+        self._done = threading.Event()
         self.available = False
         self.cache, self.waiting, self.running, self.preempt = [], [], [], []
 
     def run(self):
-        while not self._stop.is_set():
+        while not self._done.is_set():
             m = fetch_metrics(self.url)
             if m:
                 self.available = True
-                if "gpu_cache_usage_perc" in m:
+                if "kv_cache_usage_perc" in m:
+                    self.cache.append(m["kv_cache_usage_perc"])
+                elif "gpu_cache_usage_perc" in m:
                     self.cache.append(m["gpu_cache_usage_perc"])
                 if "num_requests_waiting" in m:
                     self.waiting.append(m["num_requests_waiting"])
@@ -196,10 +159,10 @@ class MetricsSampler(threading.Thread):
                     self.running.append(m["num_requests_running"])
                 if "num_preemptions_total" in m:
                     self.preempt.append(m["num_preemptions_total"])
-            self._stop.wait(self.interval)
+            self._done.wait(self.interval)
 
     def stop(self):
-        self._stop.set()
+        self._done.set()
 
     def peak_cache_pct(self):
         if not self.cache:
@@ -351,10 +314,10 @@ _BUCKETS = [(0, 8000, "<8k"), (8000, 16000, "8-16k"), (16000, 32000, "16-32k"),
             (32000, 64000, "32-64k"), (64000, 100000, "64-100k"), (100000, 10 ** 9, ">=100k")]
 
 
-def report_growing(model_name, sessions, sampler, wall, args):
+def report_growing(model_id, sessions, sampler, wall, args):
     ok_turns = [t for s in sessions for t in s if t.get("ok")]
     print(f"\n{'=' * 74}")
-    print(f"GROWING-SESSION RESULT: {model_name}")
+    print(f"GROWING-SESSION RESULT: {model_id}")
     print(f"  {args.sessions} concurrent session(s), scenario={args.scenario}, "
           f"grow-to={args.grow_to // 1000}k, thinking={'off' if args.no_think else 'on'}, "
           f"wall={wall:.0f}s")
@@ -405,11 +368,10 @@ def report_growing(model_name, sessions, sampler, wall, args):
           "context bucket above with acceptable TPOT; pick your real session budget accordingly.")
 
 
-def run_growing(model_name, model_info, base_url, host, port, args):
-    model_id = args.model or model_info.get("model", model_name)
+def run_growing(model_id, base_url, host, port, args):
     think = not args.no_think
     chunk = max(3000, args.grow_to // 16)          # ~16 turns to reach the target
-    print(f"\n{'=' * 74}\nModel: {model_name}  (id: {model_id})\n"
+    print(f"\n{'=' * 74}\nModel: {model_id}\n"
           f"  Growing {args.sessions} session(s) to ~{args.grow_to // 1000}k tokens "
           f"(~{chunk // 1000}k/turn) ...\n{'=' * 74}")
 
@@ -428,7 +390,7 @@ def run_growing(model_name, model_info, base_url, host, port, args):
     wall = time.time() - t0
     sampler.stop()
     sampler.join(timeout=3)
-    report_growing(model_name, sessions, sampler, wall, args)
+    report_growing(model_id, sessions, sampler, wall, args)
     return sessions
 
 
@@ -474,14 +436,12 @@ def quick_run(concurrency, model, base_url, max_tokens, temperature, top_p):
             "throughput": throughput, "successful": len(successful), "failed": len(failed)}
 
 
-def quick_sweep(model_name, model_info, base_url, args, model_id):
-    max_seqs = model_info["vllm_args"].get("max-num-seqs", 4)
-    sweep_max = min(max_seqs, args.max_concurrency) if args.max_concurrency else max_seqs
+def quick_sweep(model_id, base_url, args):
+    sweep_max = args.max_concurrency or 8
     levels = list(range(1, sweep_max + 1, args.concurrency_step))
     if 1 not in levels:
         levels.insert(0, 1)
-    print(f"\n{'=' * 70}\nModel: {model_name}  (id: {model_id})\n"
-          f"  max-num-seqs {max_seqs}; quick sweep {levels}\n{'=' * 70}")
+    print(f"\n{'=' * 70}\nModel: {model_id}\n  quick sweep {levels}\n{'=' * 70}")
     results = []
     for level in levels:
         r = quick_run(level, model_id, base_url, args.max_tokens, args.temperature, args.top_p)
@@ -501,15 +461,13 @@ def quick_sweep(model_name, model_info, base_url, args, model_id):
 # ============================================================================
 def main():
     p = argparse.ArgumentParser(
-        description="Benchmark omodel-manager models under a realistic growing-context load.")
-    p.add_argument("--config", default=DEFAULT_CONFIG, help="path to model_manager.json")
-    p.add_argument("--profiles", nargs="+", default=None,
-                   help="profile keys to benchmark (default: all)")
-    p.add_argument("--model", default=None,
-                   help="served model name for API requests (needed if the profile sets one)")
+        description="Benchmark any running vLLM endpoint under a realistic growing-context load.")
     p.add_argument("--host", default=None,
                    help="alias from `omm install` (e.g. dgx1), a user@ip, or a bare ip")
     p.add_argument("--remote", default=None, help="legacy alias for --host")
+    p.add_argument("--port", type=int, default=DEFAULT_PORT, help="server port (default: %(default)s)")
+    p.add_argument("--model", default=None,
+                   help="served model name (default: auto-discovered from /v1/models)")
     # Growing-session (default) knobs -- kept intentionally few.
     p.add_argument("--sessions", type=int, default=DEFAULT_SESSIONS,
                    help="concurrent growing conversations (default: %(default)s)")
@@ -526,7 +484,7 @@ def main():
     # Quick (legacy smoke test) mode.
     p.add_argument("--quick", action="store_true",
                    help="run the old short-prompt concurrency sweep instead (fast smoke test)")
-    p.add_argument("--max-concurrency", type=int, default=None, help="[--quick] max concurrency")
+    p.add_argument("--max-concurrency", type=int, default=None, help="[--quick] max concurrency (default 8)")
     p.add_argument("--concurrency-step", type=int, default=1, help="[--quick] step")
     p.add_argument("--prompt", default=None, help="[--quick] custom short prompt")
     args = p.parse_args()
@@ -535,39 +493,29 @@ def main():
     PROMPT = args.prompt or QUICK_PROMPT
 
     host_arg = args.host or args.remote
-    resolved_host = resolve_host(host_arg)
+    if not host_arg:
+        print("ERROR: pass --host (an alias from `omm install`, a user@ip, or an ip).", file=sys.stderr)
+        sys.exit(1)
+    host = resolve_host(host_arg)
+    port = args.port
+    base_url = f"http://{host}:{port}/v1/chat/completions"
 
-    print("Benchmarking omodel-manager models")
-    print(f"Config: {args.config}")
+    model_id = args.model or discover_model(host, port)
+    if not model_id:
+        print(f"ERROR: couldn't discover a model at http://{host}:{port}/v1/models. "
+              "Is the server up? Pass --model to override.", file=sys.stderr)
+        sys.exit(1)
+
+    print("Benchmarking a live vLLM endpoint")
+    print(f"Host: {host_arg} -> {host}:{port}" if host_arg != host else f"Host: {host}:{port}")
+    print(f"Model: {model_id}" + ("  (auto-discovered)" if not args.model else ""))
     if args.quick:
         print(f"Mode: quick sweep | tokens {args.max_tokens} | temp {args.temperature}")
+        quick_sweep(model_id, base_url, args)
     else:
         print(f"Mode: growing sessions | {args.sessions} session(s) -> {args.grow_to // 1000}k "
               f"| scenario {args.scenario} | thinking {'off' if args.no_think else 'on'}")
-    if host_arg:
-        print(f"Host: {host_arg} -> {resolved_host}" if resolved_host != host_arg
-              else f"Host: {resolved_host}")
-
-    cfg = load_config(args.config)
-    models = cfg.get("models", {})
-    if not models:
-        print("ERROR: no models defined in config.", file=sys.stderr)
-        sys.exit(1)
-    profile_keys = args.profiles if args.profiles else sorted(models.keys())
-
-    for key in profile_keys:
-        try:
-            model_info = merge_model(cfg, key)
-        except SystemExit:
-            continue
-        host = resolved_host or model_info.get("host", "0.0.0.0")
-        port = model_info.get("port", 8000)
-        base_url = f"http://{host}:{port}/v1/chat/completions"
-        model_id = args.model or model_info.get("model", key)
-        if args.quick:
-            quick_sweep(key, model_info, base_url, args, model_id)
-        else:
-            run_growing(key, model_info, base_url, host, port, args)
+        run_growing(model_id, base_url, host, port, args)
 
 
 if __name__ == "__main__":

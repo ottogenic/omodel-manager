@@ -49,9 +49,11 @@ All notable changes to this project are documented here. The format follows
   back to TRITON, the working backend on sm_121 (#43507). Uses
   `tool-call-parser qwen3_coder` (per the model card) and `served-model-name` in
   `vllm_args` so the served id matches the config key.
-- `utils/benchmark_concurrent.py` — benchmark a live endpoint under a realistic growing-context
-  load (concurrent multi-turn sessions to ~100k, streaming TTFT/TPOT, `/metrics` preemptions);
-  `--quick` runs a fast concurrency sweep. Documented in `ADD_A_MODEL.md` §6.
+- `utils/benchmark_concurrent.py` — **generic** (config-free) throughput probe: point it at
+  `--host` and it auto-discovers the served model from `/v1/models`, then drives a realistic
+  growing-context load (concurrent multi-turn sessions to ~100k, streaming TTFT/TPOT, `/metrics`
+  KV-pressure + preemptions); `--quick` runs a fast concurrency sweep. Documented in
+  `ADD_A_MODEL.md` §6.
 - **Automatic page-cache drop before every `launch`.** `launch` now runs
   `sync; echo 3 > /proc/sys/vm/drop_caches` on the target right before `docker run` —
   no flag, no config, it's just how launch works. On UMA boxes (GB10 / DGX Spark) vLLM's
