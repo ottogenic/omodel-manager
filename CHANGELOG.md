@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Documentation
+- **Naming conventions codified** in `CONTRIBUTING.md`: kebab-case for the CLI surface
+  (executable, subcommands, flags), snake_case for imported Python files (modules/tests) —
+  the latter required, since `python -m unittest <name>` / `import` reject hyphenated
+  module names. Documents why the existing split is intentional, not accidental.
+- Corrected two stale `CONTRIBUTING.md` notes that still described the pre-refactor
+  `model_manager.json` as committed and kept identical to `DEFAULT_CONFIG`; it is now the
+  git-ignored local sandbox (source of truth is `DEFAULT_CONFIG`).
+
 ### Added
 - **Remote UX overhaul.**
   - **`--host ALIAS|USER@HOST`** replaces `--remote` (kept as a hidden legacy alias) and
