@@ -1,0 +1,75 @@
+# gemma4-31b-nvfp4 — sampling & thinking reference
+#
+# Gemma 4 31B IT NVFP4: 4-bit quantized (ModelOpt) multimodal model from Google DeepMind.
+# Text + image inputs, text output. Structured thinking via <|channel>thought delimiters.
+# Custom tool-call protocol with dedicated special tokens.
+#
+# Attention layers stay BF16 (modelopt defaults exclude self-attention from quantization);
+# only MLP and token embeddings are NVFP4. Actual VRAM ~30GB despite "4-bit" label.
+# Requires Blackwell (B200/B300/sm_121+) for NVFP4 tensor cores.
+#
+# Thinking is controlled via chat_template_kwargs.enable_thinking (per-request) or
+# --default-chat-template-kwargs (server-wide). The model uses <|channel>thought\n...
+# <|channel|> delimiters for structured reasoning traces.
+#
+# Verified: model card benchmarks (GPQA Diamond 85.35%, AIME 2025 87.60%), vLLM recipe
+# at recipes.vllm.ai/Google/gemma-4-31B-it. Live validation TBD on Blackwell hardware.
+
+match  = ["gemma4-31b-nvfp4", "nvidia/Gemma-4-31B-IT-NVFP4"]
+source = "https://huggingface.co/nvidia/Gemma-4-31B-IT-NVFP4"
+
+[capabilities]
+vision           = { input = ["text", "image"], output = ["text"] }  # supports images; video via frame extraction
+reasoning        = true
+tool_call        = true
+thinking_control = "enable_thinking"  # enable_thinking | reasoning_effort | soft_switch | none
+
+[context]
+native       = 262144
+min_thinking = 131072
+
+# ── Task-mode presets ────────────────────────────────────────────────────────
+# Model card benchmarks use temperature=1.0, top_p=0.95, max_new_tokens=131072.
+#   temperature (1.0)       1.0 = card baseline for reasoning; 0.6 for precise coding
+#   top_p       (0.95)      card baseline; tighten to ~0.8 for focused tasks
+#   top_k       (-1 off)    20 tightens cheaply
+#   presence_penalty  (0.0) anti-loop; +0.5…+1.5 breaks repetition
+#   max_output              32k for thinking (reasoning trace eats budget)
+
+[presets.reason]              # research & planning (thinking on) -- card "General"
+thinking   = true
+max_output = 32768
+[presets.reason.sampling]
+temperature      = 1.0        # card: General/reasoning baseline
+top_p            = 0.95
+
+[presets.code]                # precise coding (thinking on)
+thinking   = true
+max_output = 32768
+[presets.code.sampling]
+temperature = 0.6
+top_p       = 0.95
+top_k       = 20
+
+[presets.agent]               # unattended worker: coding sampling + preserved thinking
+thinking   = true
+max_output = 32768
+options.chat_template_kwargs = { preserve_thinking = true }
+[presets.agent.sampling]
+temperature = 0.6
+top_p       = 0.95
+top_k       = 20
+
+[presets.instruct]            # fast, no thinking
+thinking   = false
+max_output = 32768
+[presets.instruct.sampling]
+temperature = 0.7
+top_p       = 0.80
+top_k       = 20
+
+# ── Ctrl+T thinking-depth variants (raw options only) ────────────────────────
+[variants.think]
+options.chat_template_kwargs = { enable_thinking = true }
+[variants.no-think]
+options.chat_template_kwargs = { enable_thinking = false }

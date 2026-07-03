@@ -18,7 +18,7 @@ tool_call        = true
 thinking_control = "enable_thinking"
 
 [context]
-native = 131072
+native = 202752   # true native (max_position_embeddings; 198*1024), rope_scaling null
 
 [presets.reason]              # default / hard problems (card: temp 1.0, top_p 0.95)
 thinking = true

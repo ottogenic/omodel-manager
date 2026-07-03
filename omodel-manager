@@ -81,8 +81,7 @@ LABEL_VALUE = "model_manager"
 LABEL_MODEL = "otools.model"
 LABEL_PORT = "otools.port"
 NAME_PREFIX = "otools-vllm-"
-DEFAULT_IMAGE = ("vllm/vllm-openai@sha256:"
-                 "7feb2a09304e3b2d38e224a100316e84fe3205faa7605060609e2c02179cbca6")
+DEFAULT_IMAGE = "vllm/vllm-openai:nightly-aarch64"  # rolling aarch64 nightly for GB10/sm_121
 
 # ----------------------------------------------------------------------------
 # Default config -- the committed SOURCE OF TRUTH (curated profiles). `config --init`
@@ -128,7 +127,7 @@ DEFAULT_CONFIG = {
                 "kv-cache-dtype": "fp8",
                 "attention-backend": "flashinfer",
                 "moe-backend": "marlin",
-                "gpu-memory-utilization": 0.4,
+                "gpu-memory-utilization": 0.85,
                 "max-model-len": 262144,
                 "max-num-seqs": 10,
                 "max-num-batched-tokens": 8192,
@@ -139,7 +138,7 @@ DEFAULT_CONFIG = {
                                        '"moe_backend":"triton"}'),
                 "load-format": "fastsafetensors",
                 "reasoning-parser": "qwen3",
-                "tool-call-parser": "qwen3_xml",
+                "tool-call-parser": "qwen3_coder",
                 "enable-auto-tool-choice": True,
                 "enable-log-requests": True,
             },
@@ -169,10 +168,11 @@ DEFAULT_CONFIG = {
                 "served-model-name": "qwen3.6-35b-a3b-fp8",
                 "tensor-parallel-size": 1,
                 "kv-cache-dtype": "fp8",
-                "gpu-memory-utilization": 0.9,
+                "gpu-memory-utilization": 0.85,
                 "max-model-len": 262144,
                 "max-num-seqs": 4,
                 "enable-chunked-prefill": True,
+                "speculative-config": '{"method":"mtp","num_speculative_tokens":3}',
                 "reasoning-parser": "qwen3",
                 "tool-call-parser": "qwen3_coder",
                 "enable-auto-tool-choice": True,
@@ -189,7 +189,6 @@ DEFAULT_CONFIG = {
                 "BF16 weights ~70GB -- needs a large-VRAM GPU (or raise tensor-parallel-size); "
                 "tune gpu-memory-utilization / max-num-seqs to your hardware.",
             ],
-            "image": "vllm/vllm-openai:v0.20.0",
             "model": "Qwen/Qwen3.6-35B-A3B",
             "port": 8000,
             "usecase": ["Reasoning", "Agentic", "General"],
@@ -198,11 +197,12 @@ DEFAULT_CONFIG = {
                 "tensor-parallel-size": 1,
                 "dtype": "bfloat16",
                 "kv-cache-dtype": "fp8",
-                "gpu-memory-utilization": 0.9,
+                "gpu-memory-utilization": 0.85,
                 "max-model-len": 262144,
                 "max-num-seqs": 2,
                 "enable-chunked-prefill": True,
-                "speculative-config": '{"method":"mtp","num_speculative_tokens":3}',
+                "speculative-config": ('{"method":"mtp","num_speculative_tokens":3,'
+                                       '"moe_backend":"triton"}'),
                 "enable-auto-tool-choice": True,
                 "tool-call-parser": "qwen3_coder",
                 "reasoning-parser": "qwen3",
@@ -211,13 +211,13 @@ DEFAULT_CONFIG = {
         },
         "nemotron-3-super-120b-nvfp4-256k": {
             "notes": [
-                "Container PINNED to v0.20.0 (NOT nightly).",
+                "Rolling nightly-aarch64 image (GB10/sm_121, CUDA 13); NVIDIA's Spark "
+                "cookbook ships cu130-nightly -- switch to that if nemotron_h fails to load.",
                 "super_v3_reasoning_parser.py is auto-downloaded (see assets) and "
                 "mounted to /app -- no need to have it in your cwd.",
                 "256K context, up to 4 concurrent users (max-num-seqs 4). ~4KB/token KV "
                 "(fp8, hybrid) -> 256K seq ~1 GiB; 4 of them ~4 GiB.",
             ],
-            "image": "vllm/vllm-openai:v0.20.0",
             "model": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
             "port": 8000,
             "usecase": ["Reasoning", "Agentic", "Long-context"],
@@ -242,9 +242,9 @@ DEFAULT_CONFIG = {
                 "dtype": "auto",
                 "quantization": "fp4",
                 "kv-cache-dtype": "fp8",
-                "mamba_ssm_cache_dtype": "float16",
+                "mamba_ssm_cache_dtype": "float32",
                 "moe-backend": "marlin",
-                "gpu-memory-utilization": 0.90,
+                "gpu-memory-utilization": 0.85,
                 "max-model-len": 262144,
                 "max-num-seqs": 4,
                 "enable-chunked-prefill": True,
@@ -275,12 +275,13 @@ DEFAULT_CONFIG = {
         "qwen3.6-27b-nvfp4-256k": {
             "notes": ["unsloth Qwen3.6-27B NVFP4 -- 256K (native) context, MTP speculative "
                       "decoding, up to 2 concurrent users."],
-            "image": "vllm/vllm-openai:v0.20.0",
             "model": "unsloth/Qwen3.6-27B-NVFP4",
             "port": 8000,
             "usecase": ["Coding", "Agentic", "Reasoning"],
             "env": {
                 "VLLM_NVFP4_GEMM_BACKEND": "marlin",
+                "VLLM_USE_FLASHINFER_MOE_FP4": "0",
+                "VLLM_TEST_FORCE_FP8_MARLIN": "1",
                 "VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1",
             },
             "vllm_args": {
@@ -288,7 +289,7 @@ DEFAULT_CONFIG = {
                 "tensor-parallel-size": 1,
                 "dtype": "bfloat16",
                 "kv-cache-dtype": "fp8",
-                "gpu-memory-utilization": 0.90,
+                "gpu-memory-utilization": 0.85,
                 "max-model-len": 262144,
                 "max-num-seqs": 2,
                 "enable-chunked-prefill": True,
@@ -302,12 +303,13 @@ DEFAULT_CONFIG = {
         "qwen3.6-27b-nvfp4-512k": {
             "notes": ["unsloth Qwen3.6-27B NVFP4 -- 512K context via YaRN rope scaling "
                       "(--hf-overrides), single user (max-num-seqs 1), no spec decoding."],
-            "image": "vllm/vllm-openai:v0.20.0",
             "model": "unsloth/Qwen3.6-27B-NVFP4",
             "port": 8000,
             "usecase": ["Long-context", "Coding", "Reasoning"],
             "env": {
                 "VLLM_NVFP4_GEMM_BACKEND": "marlin",
+                "VLLM_USE_FLASHINFER_MOE_FP4": "0",
+                "VLLM_TEST_FORCE_FP8_MARLIN": "1",
                 "VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1",
             },
             "vllm_args": {
@@ -315,7 +317,7 @@ DEFAULT_CONFIG = {
                 "tensor-parallel-size": 1,
                 "dtype": "bfloat16",
                 "kv-cache-dtype": "fp8",
-                "gpu-memory-utilization": 0.92,
+                "gpu-memory-utilization": 0.85,
                 "max-model-len": 524288,
                 "max-num-seqs": 1,
                 "enable-chunked-prefill": True,
@@ -347,9 +349,40 @@ DEFAULT_CONFIG = {
                 "reasoning-parser": "glm45",
                 "enable-auto-tool-choice": True,
                 "max-model-len": 202752,
-                "max-num-seqs": 64,
-                "max-num-batched-tokens": 4096,
+                "max-num-seqs": 12,
+                "max-num-batched-tokens": 8192,
                 "gpu-memory-utilization": 0.85,
+            },
+        },
+        "gemma4-31b-nvfp4": {
+            "notes": [
+                "Gemma 4 31B IT NVFP4 (4-bit MLP/embeddings via ModelOpt; attention stays "
+                "BF16 -> real footprint ~30GB). Multimodal (text+image), reasoning + tools.",
+                "Needs the Gemma4-specific image (Gemma4ForConditionalGeneration / "
+                "transformers ~5.5); rolling gemma4-cu130 tag.",
+                "Do NOT pass --quantization; vLLM auto-detects (explicit -> ValueError, vLLM #40291).",
+                "kv-cache fp8 intentionally OMITTED on Spark (predictability + sm121 FP8-kernel "
+                "risk; ~30GB model leaves KV room).",
+                "DENSE 31B is bandwidth-heavy on GB10 (~7 tok/s); the Gemma-4-26B-A4B MoE "
+                "(~52 tok/s) is a better Spark fit -- consider a separate profile.",
+            ],
+            "image": "vllm/vllm-openai:gemma4-cu130",
+            "model": "nvidia/Gemma-4-31B-IT-NVFP4",
+            "port": 8000,
+            "usecase": ["Reasoning", "Vision", "Agentic", "Coding", "General"],
+            "vllm_args": {
+                "served-model-name": "gemma4-31b-nvfp4",
+                "tensor-parallel-size": 1,
+                "gpu-memory-utilization": 0.85,
+                "max-model-len": 262144,
+                "max-num-seqs": 4,
+                "enable-chunked-prefill": True,
+                "async-scheduling": True,
+                "enable-prefix-caching": True,
+                "enable-auto-tool-choice": True,
+                "reasoning-parser": "gemma4",
+                "tool-call-parser": "gemma4",
+                "enable-log-requests": True,
             },
         },
     },
