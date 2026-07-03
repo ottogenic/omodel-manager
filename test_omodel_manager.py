@@ -210,7 +210,10 @@ class ProfileTests(unittest.TestCase):
                 name, argv, warnings = mm.build_run_argv(key, merged, target=None)
                 self.assertEqual(argv[0], "run")
                 self.assertIn(merged["image"], argv)
-                self.assertIn("--model", argv)
+                # model is a POSITIONAL arg right after the image (`vllm serve <model>`),
+                # not the deprecated `--model` flag.
+                self.assertEqual(argv[argv.index(merged["image"]) + 1], merged["model"])
+                self.assertNotIn("--model", argv)
                 self.assertIn("--port", argv)
                 self.assertNotIn(None, argv)
                 # format_run must not raise for any profile

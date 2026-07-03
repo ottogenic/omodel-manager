@@ -832,9 +832,11 @@ def build_run_argv(key, merged, foreground=False, target=None, keep=False):
         else:
             argv += ["-e", f"{k}={os.path.expandvars(str(v))}"]
 
-    # Image, then vLLM server args.
+    # Image, then vLLM server args. The model is a POSITIONAL arg (`vllm serve <model>`),
+    # not `--model`: current vLLM deprecated the flag and prints a warning as the very
+    # first log line, which reads alarmingly when the tool is shared.
     argv += [merged["image"]]
-    argv += ["--model", str(merged["model"]),
+    argv += [str(merged["model"]),
              "--host", str(merged["host"]),
              "--port", str(merged["port"])]
     for flag, val in merged["vllm_args"].items():
