@@ -52,7 +52,7 @@ Optional: `python omodel-manager shell-init` adds an `omm` shell alias.
 | `pull-status <profile>` | Progress of a backgrounded launch/pull |
 | `logs <profile> [-f]` | Show/follow a container's logs (Ctrl-C detaches cleanly) |
 | `health [<profile>]` | `GET /v1/models` on running containers |
-| `ps [--all]` | Running containers **plus** every registered host, each `running`/`idle`/`unreachable` |
+| `ps [--all]` | Running containers **plus** every registered host, each `running`/`idle`/`pulling`/`unreachable` |
 | `stop <profile>` (alias `kill`) | Stop + remove a container (`-y` to skip confirm) |
 | `fetch <profile>` | Pre-download a profile's declared assets |
 | `install <user@ip> [alias] [--fix]` (alias `setup`) | Bootstrap a remote (SSH, docker, group, HF token, drop-caches sudo rule) + register it under an alias |

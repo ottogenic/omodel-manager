@@ -92,10 +92,11 @@ All notable changes to this project are documented here. The format follows
   promote validated changes into `DEFAULT_CONFIG` and commit. `config --init --force` resets
   the local file from the hardcoded defaults. The old "seed == file" invariant is gone.
 - **`ps` now shows the whole fleet.** It lists every registered host, marking each
-  `running` / `idle` / `unreachable` (SSH-unreachable hosts included) and labeling rows by
-  alias — so agents pick a free box from `ps` instead of grepping the config. Hosts are
-  registered by `install` (was `setup`) in `~/.config/otools/hosts` instead of
-  `config.defaults.remotes`.
+  `running` / `idle` / `pulling` / `unreachable` — a box with a background image pull in
+  progress reads `pulling image` (not `idle`), so you don't double-launch on it. Rows are
+  labeled by alias and the `NAME` column shows the short profile key (the `otools-vllm-`
+  prefix is stripped for display; the container name is unchanged). Hosts are registered by
+  `install` (was `setup`) in `~/.config/otools/hosts` instead of `config.defaults.remotes`.
 
 ### Removed
 - `defaults.remotes` from the config — host lists are machine-specific and now live in

@@ -139,6 +139,43 @@ class NonBlockingLaunchTests(unittest.TestCase):
         self.assertEqual(mm._launch_status("err\nOTOOLS_LAUNCH_FAILED\n"), "failed")
         self.assertEqual(mm._launch_status("Pulling fs layer 40%%..."), "running")
 
+    def test_pulling_keys_local(self):
+        import shutil as _sh
+        if not _sh.which("sh"):
+            self.skipTest("needs a POSIX sh")
+        home = tempfile.mkdtemp()
+        d = os.path.join(home, ".config", "otools")
+        os.makedirs(d)
+        with open(os.path.join(d, "launch-modelA.log"), "w") as f:
+            f.write("Pulling fs layer...\n")            # no marker -> mid-pull
+        with open(os.path.join(d, "launch-modelB.log"), "w") as f:
+            f.write("done\nOTOOLS_LAUNCH_OK\n")          # completed -> not pulling
+        old = os.environ.get("HOME")
+        os.environ["HOME"] = home
+        try:
+            keys = mm._pulling_keys(None)
+        finally:
+            if old is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = old
+        self.assertEqual(keys, ["modelA"])
+
+    def test_pulling_keys_none_when_empty(self):
+        import shutil as _sh
+        if not _sh.which("sh"):
+            self.skipTest("needs a POSIX sh")
+        home = tempfile.mkdtemp()          # no ~/.config/otools at all
+        old = os.environ.get("HOME")
+        os.environ["HOME"] = home
+        try:
+            self.assertEqual(mm._pulling_keys(None), [])
+        finally:
+            if old is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = old
+
 
 class LaunchGuardTests(unittest.TestCase):
     """`launch` must refuse a silent local run when hosts are registered."""

@@ -987,6 +987,25 @@ def save_hosts(pairs):
             print(target if alias == target else "%s\t%s" % (alias, target), file=f)
 
 
+def _pulling_keys(target):
+    """Profile keys with a background launch still in progress on `target` -- a
+    launch-<key>.log that exists but hasn't recorded a terminal marker yet. Lets
+    `ps` flag a box that's mid-pull instead of showing it as free. Best-effort."""
+    cmd = ('for f in "$HOME"/.config/otools/launch-*.log; do [ -e "$f" ] || continue; '
+           "grep -qE 'OTOOLS_LAUNCH_OK|OTOOLS_LAUNCH_FAILED' \"$f\" || "
+           '{ b=$(basename "$f" .log); echo "${b#launch-}"; }; done')
+    try:
+        if target:
+            res = run_remote(target, cmd, capture=True, batch=True)
+        else:
+            res = subprocess.run(["sh", "-c", cmd], text=True, capture_output=True)
+    except OSError:
+        return []
+    if res.returncode != 0:
+        return []
+    return [ln.strip() for ln in res.stdout.splitlines() if ln.strip()]
+
+
 def cmd_ps(args):
     p = _cli_name()
     registered = load_hosts()                       # [(alias, target)]
@@ -1014,7 +1033,7 @@ def cmd_ps(args):
         print("ERROR: `ssh` not found on PATH (needed for --host).", file=sys.stderr)
         sys.exit(1)
 
-    all_rows, state = [], {}
+    all_rows, state, pulling = [], {}, {}
     for t in targets:
         try:
             rows = list_managed(include_all=args.all, remote=t)
@@ -1024,9 +1043,10 @@ def cmd_ps(args):
         for r in rows:
             r["_host"] = t
         all_rows.extend(rows)
-        state[t] = "running" if rows else "idle"
+        pulling[t] = _pulling_keys(t)            # background launches still mid-pull
+        state[t] = "running" if rows else ("pulling" if pulling[t] else "idle")
 
-    if not all_rows and not show_idle:
+    if not all_rows and not show_idle and not any(pulling.values()):
         print("No running managed vLLM containers."
               + ("" if args.all else "  (try --all to include unmanaged ones)"))
         _suggest([
@@ -1040,12 +1060,20 @@ def cmd_ps(args):
         labels = r.get("Labels", "")
         model = _label(labels, LABEL_MODEL) or r.get("Image", "")[:30]
         port = _label(labels, LABEL_PORT) or "?"
-        print(f"{hlabel(r.get('_host')):<20} {r.get('Names',''):<28} {model:<30} {str(port):<6} {r.get('Status','')}")
+        name = r.get("Names", "")
+        if name.startswith(NAME_PREFIX):             # show the short profile key, not otools-vllm-*
+            name = name[len(NAME_PREFIX):]
+        print(f"{hlabel(r.get('_host')):<20} {name:<28} {model:<30} {str(port):<6} {r.get('Status','')}")
+    # A box mid-pull isn't free -- surface it so we don't double-launch on it.
+    for t in targets:
+        for key in pulling.get(t, []):
+            print(f"{hlabel(t):<20} {key:<28} {'—':<30} {'—':<6} pulling image")
     if show_idle:                                    # surface idle/unreachable hosts so agents can pick one
         for t in targets:
-            if state.get(t) in ("idle", "unreachable"):
-                status = "idle" if state[t] == "idle" else "unreachable (ssh)"
-                print(f"{hlabel(t):<20} {'—':<28} {'—':<30} {'—':<6} {status}")
+            if state.get(t) == "idle":
+                print(f"{hlabel(t):<20} {'—':<28} {'—':<30} {'—':<6} idle")
+            elif state.get(t) == "unreachable":
+                print(f"{hlabel(t):<20} {'—':<28} {'—':<30} {'—':<6} unreachable (ssh)")
 
     if all_rows:
         example = _label(all_rows[0].get("Labels", ""), LABEL_MODEL) or all_rows[0].get("Names", "<name>")
