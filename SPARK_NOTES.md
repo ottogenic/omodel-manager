@@ -27,7 +27,7 @@ speculative decoding (MTP) is a real multiplier. Quality, though, moves the othe
 | **MLA attention (GLM)** | Other MLA backends error on sm_121 | Use **`TRITON_MLA`** — the only working MLA backend here. | (on-box) |
 | **FlashInfer + Gemma** | FlashInfer rejects some `head_size`s | Don't pin FlashInfer attention for Gemma; let vLLM pick. | (on-box) |
 | **Nemotron-H Mamba cache** | `mamba_ssm_cache_dtype float16` is TRT-LLM-only (stochastic rounding) → accuracy risk on vLLM | Set **`float32`** (NVIDIA Spark cookbook). | NVIDIA Spark cookbook |
-| **Container images** | This space moves weekly; pins go stale | Default to rolling **`:nightly-aarch64`**; pin only where a build is *required* (Gemma4 → `gemma4-cu130`). | (policy) |
+| **Container images** | Rolling **`:nightly-aarch64`** silently regressed Qwen3.6-NVFP4 to pure-garbage output (`dev601`) — and it's an arm64-only build, a *different lineage* than the multi-arch default (verify with `docker manifest inspect`) | **Pin a known-good build by digest; nightly is opt-in.** Bump only when a feature needs it, re-validate *generation* (not just startup) on-box first, and comment the pin with its version. (Gemma4 still needs `gemma4-cu130`.) | this repo, 2026-07-03 |
 | **Two Sparks** | Need >128 GB / bigger models | Link via ConnectX-7 200GbE (RoCE, *not* NVLink) for **TP=2** (up to ~405B). Single box is **TP=1**. | (hardware) |
 
 ---
@@ -41,12 +41,14 @@ when the referenced fix lands or when you next have the box.
    because GB10 has no native FP4 MoE kernels (#43906). **When a nightly lands native
    FP4 / CUTLASS MoE for sm_121, A/B it on-box vs Marlin; if it wins, drop the env var.**
    This is the on-box A/B deferred in the DGX tuning commit — not yet run.
-2. **MTP speculative-decode depth.** We set `num_speculative_tokens=3` on the 35B FP8/BF16
-   and 35B-NVFP4 profiles. **Measure acceptance rate on-box and tune 2–4** for best decode
-   tok/s; wrong depth wastes draft compute.
-3. **gpu-memory-utilization headroom.** Normalized to **0.85** as a UMA-safety default.
-   Now that `launch` always drops caches, **test raising toward 0.9** for more KV cache and
-   confirm the false-OOM stays gone.
+2. **MTP speculative-decode depth — resolved: use 2.** On-box (35B-NVFP4, GB10) per-position
+   acceptance is ~89% / ~72% at depth 1/2 → `num_speculative_tokens=2` gives ~143 tok/s
+   (≈2× spec-off); 3 over-drafts the single MTP head (position-3 acceptance craters). All
+   Qwen3.6 profiles set to **2**. Nemotron (different arch) left at 3 pending its own check.
+3. **gpu-memory-utilization — LOWER with MTP, not higher.** 0.85 OOMs the 35B-NVFP4+MTP
+   config: the UMA graph-mem estimator reads **negative** (~−20 GiB, #35313) and over-sizes
+   the KV cache past physical memory. **0.7 is the validated value** (~21 GiB real headroom).
+   Drop-caches doesn't help here — it's anonymous graph memory, not reclaimable page cache.
 4. **Unvalidated-on-hardware values.** These shipped from research + roofline, marked for
    live validation: `gemma4-26b-a4b` `max-num-seqs 8`; the 26B/31B Gemma tuning generally;
    the 35B MTP configs. Run §5–§6 of ADD_A_MODEL against each before trusting them.
