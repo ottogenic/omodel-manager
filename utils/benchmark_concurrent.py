@@ -192,7 +192,7 @@ def sweep_concurrency(model_name, model_info, base_url, max_tokens, temperature,
     model_id = model_override if model_override else model_info.get("model", model_name)
 
     # Determine sweep range: from 1 up to max_seqs (or max_concurrency, whichever is lower)
-    sweep_max = min(max_seqs, max_concurrency)
+    sweep_max = min(max_seqs, max_concurrency) if max_concurrency else max_seqs
     levels = list(range(1, sweep_max + 1, step))
     if 1 not in levels:
         levels.insert(0, 1)
@@ -325,7 +325,9 @@ def main():
             continue
 
         # Build base URL from config (host:port), override with --remote if given
-        host = args.remote if args.remote else model_info.get("host", "0.0.0.0")
+        # Strip user@ prefix from --remote (e.g. "otto@192.168.50.102" -> "192.168.50.102")
+        remote_host = args.remote.split("@")[-1] if args.remote and "@" in args.remote else args.remote
+        host = remote_host if remote_host else model_info.get("host", "0.0.0.0")
         port = model_info.get("port", 8000)
         base_url = f"http://{host}:{port}/v1/chat/completions"
 
