@@ -81,7 +81,12 @@ LABEL_VALUE = "model_manager"
 LABEL_MODEL = "otools.model"
 LABEL_PORT = "otools.port"
 NAME_PREFIX = "otools-vllm-"
-DEFAULT_IMAGE = "vllm/vllm-openai:nightly-aarch64"  # rolling aarch64 nightly for GB10/sm_121
+# Pinned by DIGEST on purpose. The rolling `:nightly-aarch64` tag rolled in a build
+# (0.23.1rc1.dev601) that produced pure-garbage output (repeated single tokens) for
+# Qwen3.6-NVFP4 on GB10/sm_121 -- a moving nightly is not a safe default. This is the
+# last-known-good digest; bump it deliberately only after validating a newer build on-box.
+DEFAULT_IMAGE = ("vllm/vllm-openai@sha256:"
+                 "7feb2a09304e3b2d38e224a100316e84fe3205faa7605060609e2c02179cbca6")
 
 # ----------------------------------------------------------------------------
 # Default config -- the committed SOURCE OF TRUTH (curated profiles). `config --init`
@@ -134,7 +139,9 @@ DEFAULT_CONFIG = {
                 "enable-chunked-prefill": True,
                 "async-scheduling": True,
                 "enable-prefix-caching": True,
-                "speculative-config": ('{"method":"mtp","num_speculative_tokens":3,'
+                # GB10: 2 is the MTP sweet spot; 3 over-drafts the single MTP head off its
+                # own unverified guesses (acceptance falls off). Verify accept-rate on-box.
+                "speculative-config": ('{"method":"mtp","num_speculative_tokens":2,'
                                        '"moe_backend":"triton"}'),
                 "load-format": "fastsafetensors",
                 "reasoning-parser": "qwen3",
