@@ -89,6 +89,13 @@ class HostsStoreTests(unittest.TestCase):
         self.assertEqual(mm.load_hosts(), [])
         self.assertEqual(mm.host_targets(), [])
 
+    def test_host_label_prefers_alias(self):
+        # suggested commands should echo the alias, not the raw user@ip
+        mm.save_hosts([("dgx1", "otto@192.168.50.101")])
+        self.assertEqual(mm._host_label("otto@192.168.50.101"), "dgx1")
+        self.assertEqual(mm._host_label("otto@unknown"), "otto@unknown")  # no alias -> raw
+        self.assertIsNone(mm._host_label(None))
+
 
 class NonBlockingLaunchTests(unittest.TestCase):
     """Background pull+run helpers and the pull-status log classifier."""

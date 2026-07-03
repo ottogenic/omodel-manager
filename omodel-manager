@@ -861,9 +861,20 @@ def _cli_name():
     return "omm"
 
 
+def _host_label(target):
+    """A registered alias for this host if one exists, else the raw target -- so
+    suggested commands read `--host dgx1`, not `--host user@ip`."""
+    if not target:
+        return target
+    for alias, t in load_hosts():
+        if t == target and alias != t:
+            return alias
+    return target
+
+
 def _rsuf():
-    """' --host X' if a remote is in play, else '' (for example commands)."""
-    return f" --host {REMOTE}" if REMOTE else ""
+    """' --host X' (alias-preferred) if a remote is in play, else '' (for examples)."""
+    return f" --host {_host_label(REMOTE)}" if REMOTE else ""
 
 
 def _suggest(items, header="Next steps"):
@@ -1259,7 +1270,7 @@ def cmd_launch(args):
 
     # Refuse to clobber an existing container (running OR stopped) or double-bind a port.
     if not args.dry_run:
-        rflag = f" --host {REMOTE}" if REMOTE else ""
+        rflag = f" --host {_host_label(REMOTE)}" if REMOTE else ""
         allc = docker(["ps", "-a", "--format", "{{.Names}}"], capture=True)
         if allc.returncode == 0 and name in allc.stdout.split():
             print(f"ERROR: container '{name}' already exists (running or stopped). "
