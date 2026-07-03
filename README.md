@@ -10,8 +10,8 @@ Built for a DGX Spark setup but works against any host with Docker + NVIDIA GPUs
 - **Config-driven.** Curated launch profiles are the committed source of truth in the
   script's `DEFAULT_CONFIG`; `config --init` writes them to a **local, git-ignored**
   `model_manager.json` you freely tune (reset anytime with `config --init --force`).
-- **Local or remote.** Run Docker here, or on a GPU box over SSH (`--remote`); one
-  `setup` bootstraps the box.
+- **Local or remote.** Run Docker here, or on a GPU box over SSH (`--host`); one
+  `install` bootstraps the box and gives it a short alias (`dgx1`).
 
 ---
 
@@ -19,7 +19,7 @@ Built for a DGX Spark setup but works against any host with Docker + NVIDIA GPUs
 
 - Python 3.8+ (stdlib only)
 - Local: Docker with the NVIDIA container runtime/CDI
-- Remote: an `ssh` client locally; Docker on the remote (see `setup`)
+- Remote: an `ssh` client locally; Docker on the remote (see `install`)
 
 ## Quick start
 
@@ -30,35 +30,41 @@ python omodel-manager list
 # Run one locally
 python omodel-manager launch qwen3.6-35b-nvfp4
 
-# ...or on a remote box (bootstrap it first)
-python omodel-manager setup otto@192.168.50.102 --fix
-python omodel-manager launch qwen3.6-35b-nvfp4 --remote otto@192.168.50.102
-python omodel-manager logs   qwen3.6-35b-nvfp4 --remote otto@192.168.50.102 -f
-python omodel-manager health qwen3.6-35b-nvfp4 --remote otto@192.168.50.102
+# ...or on a remote box: bootstrap + name it once, then use the alias
+python omodel-manager install otto@192.168.50.102 dgx1 --fix
+python omodel-manager launch qwen3.6-35b-nvfp4 --host dgx1
+python omodel-manager logs   qwen3.6-35b-nvfp4 --host dgx1 -f
+python omodel-manager health qwen3.6-35b-nvfp4 --host dgx1
 ```
 
 Run with no arguments for a status/home screen with suggested next steps. Every
 command prints a **Next steps** block so you never have to memorize the vocabulary.
 
-Optional: `python omodel-manager install-aliases` adds an `omm` shell alias.
+Optional: `python omodel-manager shell-init` adds an `omm` shell alias.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `list` (alias `models`) | Table of profiles: context, concurrency, use-case |
-| `launch <profile>` | Start a profile (detached). `--dry-run`, `--foreground`, `--keep`, `--force` |
+| `launch <profile>` | Start a profile (detached). `--dry-run`, `--foreground`, `--keep`, `--force`, `--wait`, `--local`. Uncached image → pulls in the background and returns immediately |
+| `pull <profile>` | Pre-pull a profile's image so `launch` starts instantly |
+| `pull-status <profile>` | Progress of a backgrounded launch/pull |
 | `logs <profile> [-f]` | Show/follow a container's logs (Ctrl-C detaches cleanly) |
 | `health [<profile>]` | `GET /v1/models` on running containers |
-| `ps [--all]` | List running managed containers |
+| `ps [--all]` | Running containers **plus** every registered host, each `running`/`idle`/`unreachable` |
 | `stop <profile>` (alias `kill`) | Stop + remove a container (`-y` to skip confirm) |
 | `fetch <profile>` | Pre-download a profile's declared assets |
-| `setup [host] [--fix]` | Check/bootstrap a remote (SSH, docker, group, HF token) |
+| `install <user@ip> [alias] [--fix]` (alias `setup`) | Bootstrap a remote (SSH, docker, group, HF token) + register it under an alias |
+| `uninstall <alias\|host> [--purge]` | Unregister a host + revoke the otools key (`--purge` also drops docker-group/containers) |
 | `config [--path/--init/--edit]` | Show/init/edit the config file |
-| `install-aliases` | Add the `omm` shell alias |
+| `shell-init` (alias `install-aliases`) | Add the `omm` shell alias |
 
-`--remote USER@HOST` runs any docker-touching command on that host over SSH.
-Set `defaults.remote` in the config to make it the default.
+`--host ALIAS|USER@HOST` runs any docker-touching command on that host over SSH —
+an alias from `install` (e.g. `dgx1`) or a raw `user@ip`. (`--remote` is a legacy
+alias for `--host`.) Set `defaults.remote` in the config to make it the default. If
+any host is registered, `launch` won't silently run local — pick a `--host`, or pass
+`--local` to force local.
 
 ## The config
 
@@ -105,20 +111,27 @@ resets it from the hardcoded defaults. **Promote** a vetted change by editing
   and mounted; for remote launches they're `scp`'d to the box.
 - **`env`**: `null`/`"inherit"` inherits from your shell; a value is passed explicitly.
 
-## Remote & setup
+## Remote, install & uninstall
 
-`setup [host] --fix` bootstraps a box: generates a **dedicated** SSH key
+`install <user@ip> [alias] --fix` bootstraps a box: generates a **dedicated** SSH key
 (`~/.ssh/otools_model_manager_ed25519`, clearly named so it's easy to revoke),
 installs it, installs Docker if missing, adds you to the `docker` group, checks
 the NVIDIA driver + container runtime (CDI-aware), and prompts for an HF token if
-none is set. Run it without `--fix` for a read-only status report. Comma-separate several
-hosts (`setup otto@a,otto@b`); reachable ones are saved to `~/.config/otools/hosts` so
-`ps` fans across them by default (no flag).
+none is set. Run it without `--fix` for a read-only status report. It also **registers**
+the host — under `alias` (e.g. `dgx1`) — in `~/.config/otools/hosts`, **merging** into
+that list so other hosts stay. Then `ps` fans across every host by default and
+`--host dgx1` resolves the alias. A bare `user@host` line works too; the file is safe to
+hand-edit.
+
+`uninstall <alias|host>` reverses it: drops the host from the registry and revokes the
+otools key from the remote's `authorized_keys`. It leaves Docker, the docker group, and
+the shared local key alone by default; `--purge` additionally stops the box's otools
+containers and removes its docker-group membership.
 
 ## HF token
 
 Needed for gated models (e.g. `nvidia/*`). Provide via `$HF_TOKEN` or let
-`setup --fix` store it at `~/.config/otools/hf_token` (chmod 600). Launches
+`install ... --fix` store it at `~/.config/otools/hf_token` (chmod 600). Launches
 forward it automatically (inherited locally; by value to the remote). It's never
 written into the repo or shown unmasked in dry-run output.
 

@@ -9,7 +9,9 @@ exercise the pure builders (config merge / extends / argv / masking / paths) and
 mock the one Docker choke point (`docker()`) where needed. Keep them fast.
 """
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import pathlib
@@ -51,27 +53,121 @@ class ConfigSeedTests(unittest.TestCase):
 
 
 class HostsStoreTests(unittest.TestCase):
-    """~/.config/otools/hosts -- managed by `setup`, read by `ps`."""
+    """~/.config/otools/hosts -- alias-aware; managed by `install`, read by `ps`."""
 
     def _tmp_hosts(self):
-        import os
-        import tempfile
         return os.path.join(tempfile.mkdtemp(), "hosts")
 
-    def test_roundtrip_and_dedup(self):
-        old, mm.HOSTS_FILE = mm.HOSTS_FILE, self._tmp_hosts()
-        try:
-            mm.save_hosts(["otto@a", "otto@b", "otto@a"])  # duplicate dropped, order kept
-            self.assertEqual(mm.load_hosts(), ["otto@a", "otto@b"])
-        finally:
-            mm.HOSTS_FILE = old
+    def setUp(self):
+        self._old, mm.HOSTS_FILE = mm.HOSTS_FILE, self._tmp_hosts()
+
+    def tearDown(self):
+        mm.HOSTS_FILE = self._old
+
+    def test_bare_roundtrip_and_dedup(self):
+        # Bare user@host entries store as (target, target) pairs; dupes dropped, order kept.
+        mm.save_hosts(["otto@a", "otto@b", "otto@a"])
+        self.assertEqual(mm.load_hosts(), [("otto@a", "otto@a"), ("otto@b", "otto@b")])
+        self.assertEqual(mm.host_targets(), ["otto@a", "otto@b"])
+
+    def test_alias_roundtrip(self):
+        mm.save_hosts([("dgx1", "otto@a"), ("dgx2", "otto@b")])
+        self.assertEqual(mm.load_hosts(), [("dgx1", "otto@a"), ("dgx2", "otto@b")])
+
+    def test_dedup_by_target_keeps_first_alias(self):
+        mm.save_hosts([("dgx1", "otto@a"), ("other", "otto@a")])  # same target twice
+        self.assertEqual(mm.load_hosts(), [("dgx1", "otto@a")])
+
+    def test_resolve_host_alias_and_passthrough(self):
+        mm.save_hosts([("dgx1", "otto@a")])
+        self.assertEqual(mm.resolve_host("dgx1"), "otto@a")     # alias -> target
+        self.assertEqual(mm.resolve_host("otto@b"), "otto@b")   # unknown/raw passes through
+        self.assertEqual(mm.resolve_host(""), "")               # empty passes through
+        self.assertIsNone(mm.resolve_host(None))
 
     def test_missing_file_is_empty(self):
-        old, mm.HOSTS_FILE = mm.HOSTS_FILE, self._tmp_hosts()
-        try:
-            self.assertEqual(mm.load_hosts(), [])
-        finally:
-            mm.HOSTS_FILE = old
+        self.assertEqual(mm.load_hosts(), [])
+        self.assertEqual(mm.host_targets(), [])
+
+
+class NonBlockingLaunchTests(unittest.TestCase):
+    """Background pull+run helpers and the pull-status log classifier."""
+
+    def setUp(self):
+        self._docker = mm.docker
+
+    def tearDown(self):
+        mm.docker = self._docker
+
+    def test_image_present_true_false(self):
+        mm.docker = fake_docker(returncode=0)
+        self.assertTrue(mm._image_present("vllm/x:tag"))
+        mm.docker = fake_docker(returncode=1)
+        self.assertFalse(mm._image_present("vllm/x:tag"))
+
+    def test_bg_command_shape(self):
+        argv = ["run", "-d", "--rm", "--name", "otools-vllm-k", "img:tag", "--model", "m"]
+        cmd = mm._launch_bg_command("k", "img:tag", argv)
+        self.assertIn("docker pull", cmd)
+        self.assertIn("docker run", cmd)
+        self.assertIn("OTOOLS_LAUNCH_OK", cmd)
+        self.assertIn("OTOOLS_LAUNCH_FAILED", cmd)
+        self.assertIn("launch-k.log", cmd)
+        self.assertTrue(cmd.rstrip().endswith("&"))   # backgrounds itself
+        self.assertIn("nohup", cmd)
+
+    def test_bg_command_quotes_json_arg(self):
+        # A JSON vLLM arg must survive as one shell token inside the backgrounded run.
+        argv = ["run", "img:tag", "--speculative-config", '{"method":"mtp"}']
+        cmd = mm._launch_bg_command("k", "img:tag", argv)
+        self.assertIn('method', cmd)
+        # the whole command must be valid shell (balanced quoting) -> shlex parses it
+        import shlex as _sh
+        self.assertIsInstance(_sh.split(cmd.replace("&", "")), list)
+
+    def test_launch_status_classifier(self):
+        self.assertEqual(mm._launch_status(""), "none")
+        self.assertEqual(mm._launch_status("   \n"), "none")
+        self.assertEqual(mm._launch_status("pulling...\nOTOOLS_LAUNCH_OK\n"), "ok")
+        self.assertEqual(mm._launch_status("err\nOTOOLS_LAUNCH_FAILED\n"), "failed")
+        self.assertEqual(mm._launch_status("Pulling fs layer 40%%..."), "running")
+
+
+class LaunchGuardTests(unittest.TestCase):
+    """`launch` must refuse a silent local run when hosts are registered."""
+
+    def setUp(self):
+        self._hosts, self._remote, self._need = mm.HOSTS_FILE, mm.REMOTE, mm.need_docker
+        mm.HOSTS_FILE = os.path.join(tempfile.mkdtemp(), "hosts")
+        mm.REMOTE = None
+        mm.need_docker = lambda: None      # isolate from a real docker/ssh
+        self.cfg = mm.load_config()
+        self.key = "glm-4.7-flash"         # a profile with no per-model remote / assets
+
+    def tearDown(self):
+        mm.HOSTS_FILE, mm.REMOTE, mm.need_docker = self._hosts, self._remote, self._need
+
+    def _launch(self, **kw):
+        base = dict(key=self.key, remote=None, local=False, dry_run=True,
+                    foreground=False, keep=False, force=False, no_fetch=True,
+                    refresh=False, wait=False)
+        base.update(kw)
+        # Swallow the dry-run banner so the test suite stays quiet.
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            mm.cmd_launch(SimpleNamespace(**base))
+
+    def test_guard_blocks_local_when_hosts_registered(self):
+        mm.save_hosts([("dgx1", "otto@a")])
+        with self.assertRaises(SystemExit):
+            self._launch()
+
+    def test_local_flag_bypasses_guard(self):
+        mm.save_hosts([("dgx1", "otto@a")])
+        self._launch(local=True)   # --local + --dry-run: must not raise
+
+    def test_no_hosts_allows_local(self):
+        self._launch()             # empty registry: local is fine
 
 
 class ProfileTests(unittest.TestCase):

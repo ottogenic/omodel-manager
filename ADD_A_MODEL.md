@@ -30,6 +30,24 @@ trust the evidence and note it.
 
 ---
 
+> **Track it with a todo list.** This is a multi-step workflow. Before you start,
+> create a tracked checklist with your harness's todo tool (e.g. `todowrite`, or
+> `TaskCreate`/`TaskUpdate`) covering the steps below — §0 prep, §1 research, §2
+> profile, §3 config, §4 make-it-work, §5 validate params, §6 benchmark, §7 finalize
+> — and keep exactly one item in progress. Don't run this from memory.
+
+## 0. Pick and prepare a host
+
+1. **List hosts.** `omodel-manager ps` shows every registered host and marks each
+   `running` / `idle` / `unreachable`. Pick an idle box and use **its alias** from
+   here on. Don't grep `model_manager.json` or the configs for a host address.
+2. **No host registered yet?** Bootstrap and name one:
+   `omodel-manager install user@ip <alias> --fix` (remediates SSH / docker / docker
+   group and prompts for an HF token). This stores `alias → user@ip` in
+   `~/.config/otools/hosts` so every later step can use `--host <alias>`.
+3. From here on, pass **`--host <alias>`** on every remote command. If any host is
+   registered, `launch` refuses a host-less run (pass `--local` only to force local).
+
 ## 1. Research the model
 
 1. **Fetch `config.json`** (`<repo>/raw/main/config.json`). Extract: `model_type`,
@@ -59,8 +77,9 @@ context, quant + the vLLM flags it implies, and any known-issue mitigations.
 
 ## 2. Draft the launch profile (omodel-manager)
 
-Add a profile to `DEFAULT_CONFIG` in `omodel-manager` **and** `model_manager.json`
-(they must stay identical — the test enforces it). Base it on the closest existing
+Add a profile to **`model_manager.json` only** (the local, git-ignored sandbox).
+**Do NOT edit `DEFAULT_CONFIG` yet** — that is the committed source of truth and
+should only be changed after the model is proven. Base it on the closest existing
 profile; change only what the quant/model needs:
 
 - `image`: the pinned vLLM image that supports this model/quant.
@@ -78,6 +97,12 @@ profile; change only what the quant/model needs:
   `--reasoning-parser`, `--tool-call-parser`, `--enable-auto-tool-choice`, spec-decode, etc.
 - `usecase` tags; `notes` capturing the research (pinned image reason, known issues).
 - `assets` if the model needs side files (custom parser plugin, chat template).
+
+**Testing only — do these things:**
+- Edit `model_manager.json` only. Never touch `DEFAULT_CONFIG` during testing.
+- **Never run `config --init` or `config --init --force`** during testing — it
+  overwrites `model_manager.json` from `DEFAULT_CONFIG`, destroying your local edits.
+- Validate with `launch <key> --dry-run`, then `launch <key> --host <host> --keep`.
 
 Do **not** commit yet.
 
@@ -101,31 +126,34 @@ consume — keep it harness-agnostic. Fill from research; the live tests will co
 
 ### 4. Make the model work
 
- 1. **Find a free node.** Check `~/.config/otools/hosts` for the list of registered
-    hosts. Run `omodel-manager ps` (no `--remote`) to fan across all of them at once.
-    Pick an idle box. If none is free, **ask the operator which running model to stop**
-    — don't evict blindly.
+ 1. **Confirm a free node.** You picked one in §0 — re-run `omodel-manager ps` to be
+    sure it's still `idle` (nothing grabbed it since). If none is free, **ask the
+    operator which running model to stop** — don't evict blindly.
  2. **Launch** the dry-run first, then for real, watching startup:
-    `omodel-manager launch <key> --remote <host> --keep`  — `--keep` is **not optional**
+    `omodel-manager launch <key> --host <host> --keep`  — `--keep` is **not optional**
     on a first launch: the detached default uses `--rm`, which deletes a crashed
-    container *and its logs*, so a startup crash leaves you with nothing to read. Then
-    `omodel-manager logs <key> --remote <host> -f`.
+    container *and its logs*, so a startup crash leaves you with nothing to read. If
+    the image isn't cached yet, `launch` pulls it in the background and returns at once
+    — poll `omodel-manager pull-status <key> --host <host>` until it says the container
+    started. Then `omodel-manager logs <key> --host <host> -f`.
  3. **Review the logs** for: config/flag rejections, OOM / KV-cache / Mamba-cache
     warnings, quant/backend fallbacks, and `Application startup complete`.
  4. **Wait for readiness.** The model takes 1–3 minutes to start (weights + torch.compile
     + flashinfer autotuning + CUDA graph capture). Poll `health` until READY before
     proceeding:
     ```bash
-    while ! omm health <key> --remote <host> 2>&1 | grep -q READY; do sleep 15; done
+    while ! omm health <key> --host <host> 2>&1 | grep -q READY; do sleep 15; done
     ```
  5. **Functional test** — one request; confirm a clean completion in the logs (no
     errors). Serve with `--enable-log-requests` so the merged `SamplingParams(...)`
-    line is logged (see §7).
- 6. **Concurrency test** — fire N parallel requests matching the profile's
-    `--max-num-seqs`; check logs for preemption/cache errors. **Compare single-prompt
-    vs multi-prompt decode tok/s** (this is where Blackwell FP8-MoE perf shows up).
+    line is logged (see §5).
+ 6. **Concurrency smoke test** — fire a handful of parallel requests to confirm the
+    server survives concurrency (no preemption/cache errors in the logs). Save the real
+    throughput sweep — single vs multi-prompt decode tok/s, tuning `--max-num-seqs`,
+    where Blackwell FP8-MoE perf shows up — for the benchmark in **§6**; don't duplicate
+    it here.
 
-### 6. Validate features & tunable params
+### 5. Validate features & tunable params
 
 Run each check against the **live** endpoint and read the logged `SamplingParams` /
 response to confirm it actually took effect — *don't infer*.
@@ -155,10 +183,10 @@ response to confirm it actually took effect — *don't infer*.
 
 Confirm the merged truth from logs:
 ```bash
-omodel-manager logs <container> --remote <host> 2>&1 | grep -i sampling
+omodel-manager logs <container> --host <host> 2>&1 | grep -i sampling
 ```
 
-### 7. Benchmark concurrency (`max-num-seqs`)
+### 6. Benchmark concurrency (`max-num-seqs`)
 
 Before finalizing `max-num-seqs`, run the concurrency benchmark to find the throughput sweet spot:
 
@@ -183,14 +211,16 @@ does not wait for startup.
 from the HF model ID), you must pass `--model <served-model-name>` to the script. Without
 it, the script sends the HF ID and gets 404s.
 
-### 8. Finalize
+### 7. Finalize
 
 Only after the model runs clean and you know what's tunable:
 - Correct the `configs/<key>.toml` to match observed reality (esp. `capabilities`).
 - **Promote** the vetted launch profile into **`DEFAULT_CONFIG`** (the committed source of
-  truth) and commit it together with the `configs/<key>.toml`. Do **not** commit
-  `model_manager.json` — it's your local, git-ignored sandbox where you prototyped and
-  tested; `config --init --force` regenerates it from `DEFAULT_CONFIG`. Run
+  truth) by copying the entry from `model_manager.json` into the `DEFAULT_CONFIG` dict
+  in `omodel-manager`. Then run `config --init --force` to regenerate `model_manager.json`
+  from the updated defaults (this resets it; re-add any local tweaks if needed).
+- Commit `DEFAULT_CONFIG` and `configs/<key>.toml` together. Do **not** commit
+  `model_manager.json` — it's your local, git-ignored sandbox. Run
   `python3 -m unittest` in both repos.
 - Optionally `omodel-wire --verify --remote <host>` to diff declared vs live.
 - Add a `CHANGELOG.md` entry in each repo.
@@ -201,7 +231,7 @@ Only after the model runs clean and you know what's tunable:
 
 - [ ] `config.json` + card read; capabilities & flags noted
 - [ ] deep research done; known issues (esp. Blackwell) captured
-- [ ] launch profile drafted (not committed)
+- [ ] launch profile drafted in `model_manager.json` only (not committed, not in `DEFAULT_CONFIG`)
 - [ ] `configs/<key>.toml` drafted
 - [ ] launched on a free node; startup logs clean
 - [ ] functional + concurrency test pass; single/multi tok/s noted

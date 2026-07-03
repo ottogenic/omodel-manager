@@ -23,7 +23,7 @@ commit). Start from a HuggingFace repo link.
 **Constraints (do not violate):**
 - **Standard library only.** No third-party imports, ever. Runs with a bare `python3`.
 - **Single script + data files.** The tool is `omodel-manager`; `model_manager.json`
-  holds launch profiles; `configs/*.md` hold the generic model configs.
+  holds launch profiles; `configs/*.toml` hold the generic model configs.
 - **No local shell.** Build a `docker` **argv list** and run via `subprocess.run([...])`
   (through `docker()`), never `shell=True`. Over SSH the argv is `shlex.quote`d into a
   single remote command — this is what keeps JSON args like `--speculative-config` and
@@ -35,6 +35,24 @@ commit). Start from a HuggingFace repo link.
   and the token store `~/.config/otools/hf_token` are load-bearing for existing
   deployments. Renaming any of them orphans running containers / installed keys. Don't.
 - **Cross-platform paths.** Runs from WSL/Linux and Windows; use `os.path`/`expanduser`.
+
+**Tool usage rules (do not violate):**
+
+- **Todo tracking.** For any task with more than two discrete steps, call your harness's todo/checklist tool (whatever it's named — e.g. `todowrite`, or `TaskCreate`/`TaskUpdate`) to create a tracked list before starting work. Do not substitute a free-text / markdown "plan" in the chat — it is not tracked and does not survive context drift. Use the actual tool. Keep exactly one item `in_progress` at a time. Mark an item `completed` immediately when it's done — never batch completions at the end. If scope changes mid-task, update the list rather than silently deviating. A single-step task or a plain question does not need a todo list.
+
+- **Plan execution.** When the user approves a plan (e.g. "go", "go for it", "proceed"), execute every remaining step in sequence without stopping between them. Approval of a plan is approval of the whole plan, not just the next step. Do not end a turn by asking whether to proceed to the next step. Advance the todo list and continue. Ask a question only if genuinely blocked or before an action in the "confirm first" list below.
+
+- **Discover prerequisites yourself.** When a step covers prerequisites (e.g. finding a free host, reading a config), discover them as part of the step instead of asking the user for information the step is meant to produce.
+
+- **Do not re-analyze the same tool output.** State the conclusion once and move on.
+
+- **Use the tool's built-in commands, not manual SSH.** When a task requires remote action, use `omodel-manager` subcommands (`ps`, `launch`, `logs`, `health`, `docker`, …) rather than `ssh`-ing into the box manually. The tool's `--host` flag (an alias from `install`, or `user@ip`) handles SSH, key pinning, and path resolution — manual SSH bypasses those and can produce inconsistent results.
+
+- **Always target a host explicitly.** Pass `--host <alias>` on every `launch`/`ps`/`logs`/`health` that should run remotely. Don't rely on habit or launch locally by accident: if hosts are registered, `launch` refuses a host-less run and tells you to pick one (or pass `--local` to force local). Prefer aliases (`dgx1`) over raw `user@ip`.
+
+- **Find a free host with `ps`, don't grep the config.** `ps` lists every registered host and marks each `running` / `idle` / `unreachable`. Read it to pick an idle box — do NOT open `model_manager.json` or the configs to hunt for a host address.
+
+- **`launch` is non-blocking on a cold image.** If the image isn't cached, `launch` starts the pull+run in the background and returns immediately (so the tool call won't time out). Then poll `pull-status <key> --host <alias>` until it reports the container started, and `health` for readiness. Use `launch --wait` only when you deliberately want it to block; `pull <key> --host <alias>` pre-caches an image.
 
 ## Config: source of truth vs. local sandbox  (READ THIS before editing config)
 
@@ -58,8 +76,10 @@ Two layers, deliberately separate:
    is no longer a "keep them in sync" rule — they are *meant* to differ while you iterate.
 4. Operator/host settings go in neither file — see the hosts store below.
 
-**Hosts:** `ps` fans across the hosts registered by `setup` in `~/.config/otools/hosts`
-(one `USER@HOST` per line; `setup --remote a,b` sets up several and overwrites the list).
+**Hosts:** `ps` and `--host` resolve against the hosts registered by `install` in
+`~/.config/otools/hosts` — one `alias<TAB>user@host` per line (a bare `user@host` is also
+valid). `install user@ip [alias]` bootstraps a box and **merges** it into the store (other
+hosts stay); `uninstall <alias|host>` drops it and revokes the otools key from the remote.
 These are machine-specific and are NOT stored in `model_manager.json` or `DEFAULT_CONFIG`.
 
 ## Layout of `omodel-manager`
@@ -86,10 +106,13 @@ Top-to-bottom, the meaningful sections:
 - **Build** — `build_run_argv()` (config → `docker run` argv), `format_run()` (readable,
   secret-masked, multi-line rendering for dry-run/echo).
 - **Commands** — `cmd_home` (no-arg landing), `cmd_ps`, `cmd_models`/`list`, `cmd_launch`,
-  `cmd_fetch`, `cmd_stop`, `cmd_logs`, `cmd_health`, `cmd_setup`, `cmd_config`,
-  `cmd_install_aliases`. Helpers: `_label`, `_fmt_tokens`, `_suggest` (breadcrumbs),
-  `resolve_target` (key ↔ container name, exact match).
-- **CLI** — `main()` (argparse subparsers; `--version`; a shared `--remote` parent).
+  `cmd_pull`, `cmd_pull_status`, `cmd_fetch`, `cmd_stop`, `cmd_logs`, `cmd_health`,
+  `cmd_install` (a.k.a. `setup`), `cmd_uninstall`, `cmd_config`, `cmd_shell_init` (a.k.a.
+  `install-aliases`). Helpers: `_label`, `_fmt_tokens`, `_suggest` (breadcrumbs),
+  `resolve_target` (key ↔ container name), `resolve_host` (alias → `user@host`),
+  `load_hosts`/`save_hosts`/`host_targets`, and `_image_present`/`_launch_bg_command`/
+  `_launch_status` (the non-blocking launch path).
+- **CLI** — `main()` (argparse subparsers; `--version`; a shared `--host`/`--remote` parent).
 
 ## Reference — Docker / vLLM / SSH (WebFetch pointer lines)
 
@@ -129,7 +152,7 @@ authoritative over this file). Paste a line to an AI tool or fetch it yourself:
   Remotely it's forwarded by value (`-e HF_TOKEN=…`), which IS visible in `docker inspect`
   on the box — acceptable (you own the box), documented, and masked in `format_run`.
 - **GPU-runtime check is multi-signal.** Modern Docker (25+/29) uses **CDI**, so
-  `docker info`'s `.Runtimes` has no `nvidia`. `setup` passes if any of: registered nvidia
+  `docker info`'s `.Runtimes` has no `nvidia`. `install` passes if any of: registered nvidia
   runtime, `nvidia-ctk` present, or a CDI spec in `/etc/cdi`.
 - **`extends` can't remove keys.** Deep-merge only overrides/adds. When one profile must
   *omit* something a sibling has (e.g. 512K drops `--speculative-config`), write two full
@@ -149,7 +172,7 @@ authoritative over this file). Paste a line to an AI tool or fetch it yourself:
   unless a model needs it explicitly.
 - **YaRN long-context extrapolates** past the trained window (e.g. 27B 512K, `factor 2.0`);
   memory is cheap but verify output quality at very long contexts.
-- **`setup` does NOT auto-install nvidia-container-toolkit** — it checks and advises with
+- **`install` does NOT auto-install nvidia-container-toolkit** — it checks and advises with
   the install link (distro-specific; left to the operator).
 
 ## How to extend
@@ -176,4 +199,4 @@ python3 omodel-manager launch <profile> --dry-run   # exact docker command, mask
 ```
 
 Prefer `--dry-run` while iterating. Tests must not launch containers, hit the network, or
-write to `$HOME` dotfiles (`install-aliases`/`save_hf_token` write real files).
+write to `$HOME` dotfiles (`shell-init`/`save_hf_token` write real files).

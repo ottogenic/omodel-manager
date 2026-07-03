@@ -15,22 +15,22 @@ Design:
     `ps` / `stop` / `logs` only ever touch containers this tool started.
   * The docker command is assembled as an argv list and run WITHOUT a shell,
     so values like --speculative-config '{"method":"mtp",...}' need no quoting.
-  * HF_TOKEN: taken from $HF_TOKEN if set, else the store `setup` writes at
+  * HF_TOKEN: taken from $HF_TOKEN if set, else the store `install` writes at
     ~/.config/otools/hf_token (0600). Locally it's passed as `-e HF_TOKEN`
     (inherited, keeps it out of argv); for remote it's forwarded by value.
-    `setup` checks for it and, with --fix, prompts with steps to create one.
-  * REMOTE: with --remote USER@HOST (or defaults.remote / per-model remote in
+    `install` checks for it and, with --fix, prompts with steps to create one.
+  * REMOTE: with --host ALIAS|USER@HOST (or defaults.remote / per-model remote in
     config) every docker call runs on that box over SSH. Bind-mount paths resolve
     against the REMOTE $HOME, declared assets are scp'd over, HF_TOKEN is forwarded
-    from your local shell, and `health` targets the remote host. `setup` bootstraps
+    from your local shell, and `health` targets the remote host. `install` bootstraps
     the box (keyless SSH, docker install, docker group) -- run it first. It uses a
     dedicated, clearly-named key (~/.ssh/otools_model_manager_ed25519, comment
     "otools_model_manager@<laptop>") and pins it (-i + IdentitiesOnly) so the tool's
     access is self-contained and easy to revoke later.
 
 Stdlib only. Commands:
-  omodel-manager setup otto@192.168.50.101 --fix   # bootstrap the remote box
-  omodel-manager --... launch <key> --remote otto@192.168.50.101
+  omodel-manager install otto@192.168.50.101 dgx1 --fix   # bootstrap + name a host
+  omodel-manager --... launch <key> --host dgx1
   omodel-manager ps                 # running managed containers (default)
   omodel-manager ps --all           # also list other vllm/* containers
   omodel-manager models             # profiles defined in the config file
@@ -74,7 +74,7 @@ def _default_config_path():
 CONFIG_PATH = _default_config_path()
 # Secret store -- kept in ~/.config/otools (NOT next to the script / repo).
 HF_TOKEN_FILE = os.path.expanduser("~/.config/otools/hf_token")
-HOSTS_FILE = os.path.expanduser("~/.config/otools/hosts")  # remote hosts `ps` queries (managed by `setup`)
+HOSTS_FILE = os.path.expanduser("~/.config/otools/hosts")  # remote hosts `ps` queries (managed by `install`)
 HF_TOKENS_URL = "https://huggingface.co/settings/tokens"
 LABEL_MANAGER = "otools.manager"
 LABEL_VALUE = "model_manager"
@@ -130,7 +130,7 @@ DEFAULT_CONFIG = {
                 "moe-backend": "marlin",
                 "gpu-memory-utilization": 0.4,
                 "max-model-len": 262144,
-                "max-num-seqs": 4,
+                "max-num-seqs": 10,
                 "max-num-batched-tokens": 8192,
                 "enable-chunked-prefill": True,
                 "async-scheduling": True,
@@ -601,11 +601,11 @@ def need_docker():
         res = run_remote(REMOTE, "command -v docker >/dev/null 2>&1 && echo ok",
                          capture=True, batch=True)
         if res.returncode != 0:
-            print(f"ERROR: cannot reach {REMOTE} over SSH (try `setup --remote {REMOTE}`).\n"
+            print(f"ERROR: cannot reach {REMOTE} over SSH (try `install {REMOTE}`).\n"
                   f"  {res.stderr.strip()}", file=sys.stderr)
             sys.exit(1)
         if res.stdout.strip() != "ok":
-            print(f"ERROR: docker not found on {REMOTE} (run `setup --remote {REMOTE} --fix`).",
+            print(f"ERROR: docker not found on {REMOTE} (run `install {REMOTE} --fix`).",
                   file=sys.stderr)
             sys.exit(1)
         return
@@ -754,7 +754,7 @@ def build_run_argv(key, merged, foreground=False, target=None, keep=False):
                 argv += ["-e", f"{k}={file_val}"]          # from the saved token store
             else:
                 argv += ["-e", k]
-                warnings.append(f"env {k} not set (run `setup --fix` to add HF_TOKEN)"
+                warnings.append(f"env {k} not set (run `install <host> --fix` to add HF_TOKEN)"
                                 if k == "HF_TOKEN" else f"env {k} not set locally"
                                 + (" -> relying on remote env" if target else ""))
         else:
@@ -788,8 +788,8 @@ def _cli_name():
 
 
 def _rsuf():
-    """' --remote X' if a remote is in play, else '' (for example commands)."""
-    return f" --remote {REMOTE}" if REMOTE else ""
+    """' --host X' if a remote is in play, else '' (for example commands)."""
+    return f" --host {REMOTE}" if REMOTE else ""
 
 
 def _suggest(items, header="Next steps"):
@@ -812,13 +812,13 @@ def cmd_home(args):
     print("otools_model_manager -- manage vLLM Docker containers (local or over SSH)\n")
     print("Status:")
     print(f"  config : {CONFIG_PATH}  ({len(models)} model profile(s))")
-    print(f"  remote : {REMOTE or 'local (no defaults.remote set; use --remote, or set it in config)'}")
+    print(f"  host   : {REMOTE or 'local (no default host; use --host, or set defaults.remote)'}")
     print(f"  setup  : {'done -- key ' + OTOOLS_SSH_KEY if setup_done else 'not run yet'}")
     host = REMOTE or "user@host"
     items = []
     if not setup_done:
-        items.append(("Bootstrap a host (keyless SSH, docker, HF token)",
-                      f"{p} setup {host} --fix"))
+        items.append(("Bootstrap + name a host (keyless SSH, docker, HF token)",
+                      f"{p} install {host} dgx1 --fix"))
     items += [
         ("List available models (context, concurrency, use-case)", f"{p} list"),
         ("Run a model", f"{p} launch {sample}{_rsuf()}"),
@@ -828,62 +828,100 @@ def cmd_home(args):
 
 
 def load_hosts():
-    """Remote hosts `ps` queries by default (managed by `setup`). One USER@HOST per
-    line in ~/.config/otools/hosts; blank lines and #-comments are ignored."""
+    """Registered remote hosts (managed by `install`). Returns a list of
+    (alias, target) tuples, order-preserving. File format: one `alias<TAB>user@host`
+    per line in ~/.config/otools/hosts; a bare `user@host` line has alias == itself.
+    Blank lines and #-comments are ignored."""
+    out = []
     try:
         with open(HOSTS_FILE) as f:
-            return [ln.strip() for ln in f if ln.strip() and not ln.lstrip().startswith("#")]
+            for ln in f:
+                ln = ln.strip()
+                if not ln or ln.startswith("#"):
+                    continue
+                parts = ln.split(None, 1)          # first whitespace splits alias from target
+                if len(parts) == 2:
+                    out.append((parts[0], parts[1].strip()))
+                else:
+                    out.append((parts[0], parts[0]))
     except OSError:
-        return []
+        pass
+    return out
 
 
-def save_hosts(hosts):
-    """Overwrite the hosts file with `hosts` (dedup, order-preserving)."""
+def host_targets():
+    """Just the user@host targets `ps` queries (aliases dropped)."""
+    return [t for _, t in load_hosts()]
+
+
+def resolve_host(name):
+    """Map an alias to its user@host target; pass a raw user@host / unknown through
+    unchanged (SSH surfaces a clear error if it's bogus)."""
+    if not name:
+        return name
+    for alias, target in load_hosts():
+        if name == alias:
+            return target
+    return name
+
+
+def save_hosts(pairs):
+    """Overwrite the hosts file. `pairs` items are (alias, target) tuples or bare
+    `user@host` strings (alias defaults to the target). Dedup by target, order-kept."""
     seen, uniq = set(), []
-    for h in hosts:
-        if h and h not in seen:
-            seen.add(h)
-            uniq.append(h)
+    for p in pairs:
+        alias, target = (p, p) if isinstance(p, str) else (p[0] or p[1], p[1])
+        if target and target not in seen:
+            seen.add(target)
+            uniq.append((alias, target))
     os.makedirs(os.path.dirname(HOSTS_FILE), exist_ok=True)
     with open(HOSTS_FILE, "w") as f:
-        print("# omodel-manager remote hosts for `ps` (managed by `setup`).", file=f)
-        print("# One USER@HOST per line. Safe to hand-edit.", file=f)
-        for h in uniq:
-            print(h, file=f)
+        print("# omodel-manager remote hosts (managed by `install`).", file=f)
+        print("# Format: `alias<TAB>user@host`  (or a bare `user@host`). Safe to hand-edit.", file=f)
+        for alias, target in uniq:
+            print(target if alias == target else "%s\t%s" % (alias, target), file=f)
 
 
 def cmd_ps(args):
     p = _cli_name()
-    # Collect targets: explicit --hosts > --remote > setup-registered hosts
-    # (~/.config/otools/hosts) > local.
+    registered = load_hosts()                       # [(alias, target)]
+    alias_of = {t: a for a, t in registered}
+    hlabel = lambda t: alias_of.get(t) or (t if t else "localhost")
+
+    # Targets, and whether to also show registered hosts that have nothing running.
+    # explicit --hosts > --host/--remote > registered hosts > local.
     if args.hosts:
-        targets = args.hosts
+        targets = [resolve_host(h) for h in args.hosts]
+        show_idle = True
     elif REMOTE:
         targets = [REMOTE]
+        show_idle = False
+    elif registered:
+        targets = [t for _, t in registered]
+        show_idle = True
     else:
-        hosts = load_hosts()
-        targets = hosts if hosts else [None]
+        targets = [None]
+        show_idle = False
 
-    # Only demand docker if we're going to query local.
-    has_local = None in targets
-    if has_local:
+    if None in targets:
         need_docker()
-    else:
-        # Check ssh is available for remote targets.
-        if any(t for t in targets) and not shutil.which("ssh"):
-            print("ERROR: `ssh` not found on PATH (needed for --remote).", file=sys.stderr)
-            sys.exit(1)
+    elif any(targets) and not shutil.which("ssh"):
+        print("ERROR: `ssh` not found on PATH (needed for --host).", file=sys.stderr)
+        sys.exit(1)
 
-    all_rows = []
+    all_rows, state = [], {}
     for t in targets:
         try:
             rows = list_managed(include_all=args.all, remote=t)
         except SystemExit:
+            state[t] = "unreachable"
             continue
         for r in rows:
-            r["_host"] = t if t else "localhost"
+            r["_host"] = t
         all_rows.extend(rows)
-    if not all_rows:
+        state[t] = "running" if rows else "idle"
+
+    if not all_rows and not show_idle:
         print("No running managed vLLM containers."
               + ("" if args.all else "  (try --all to include unmanaged ones)"))
         _suggest([
@@ -891,22 +929,34 @@ def cmd_ps(args):
             ("Run a model", f"{p} launch <profile>{_rsuf()}"),
         ])
         return
+
     print(f"{'HOST':<20} {'NAME':<28} {'MODEL':<30} {'PORT':<6} {'STATUS'}")
     for r in all_rows:
         labels = r.get("Labels", "")
         model = _label(labels, LABEL_MODEL) or r.get("Image", "")[:30]
         port = _label(labels, LABEL_PORT) or "?"
-        host = r.get("_host", "localhost")
-        print(f"{host:<20} {r.get('Names',''):<28} {model:<30} {str(port):<6} {r.get('Status','')}")
-    example = _label(all_rows[0].get("Labels", ""), LABEL_MODEL) or all_rows[0].get("Names", "<name>")
-    # Derive the --remote suffix from the host where the first container lives.
-    first_host = all_rows[0].get("_host", "localhost")
-    rsuf = f" --remote {first_host}" if first_host != "localhost" else ""
-    _suggest([
-        ("View a model's logs (Ctrl-C to stop following)", f"{p} logs {example}{rsuf} -f"),
-        ("Check readiness", f"{p} health{rsuf}"),
-        ("Stop a model", f"{p} stop {example}{rsuf}"),
-    ])
+        print(f"{hlabel(r.get('_host')):<20} {r.get('Names',''):<28} {model:<30} {str(port):<6} {r.get('Status','')}")
+    if show_idle:                                    # surface idle/unreachable hosts so agents can pick one
+        for t in targets:
+            if state.get(t) in ("idle", "unreachable"):
+                status = "idle" if state[t] == "idle" else "unreachable (ssh)"
+                print(f"{hlabel(t):<20} {'—':<28} {'—':<30} {'—':<6} {status}")
+
+    if all_rows:
+        example = _label(all_rows[0].get("Labels", ""), LABEL_MODEL) or all_rows[0].get("Names", "<name>")
+        fh = all_rows[0].get("_host")
+        hsuf = f" --host {hlabel(fh)}" if fh else ""
+        _suggest([
+            ("View a model's logs (Ctrl-C to stop following)", f"{p} logs {example}{hsuf} -f"),
+            ("Check readiness", f"{p} health{hsuf}"),
+            ("Stop a model", f"{p} stop {example}{hsuf}"),
+        ])
+    else:
+        idle = [hlabel(t) for t in targets if state.get(t) == "idle"]
+        _suggest([
+            ("Launch on a free host", f"{p} launch <profile> --host {idle[0] if idle else '<alias>'}"),
+            ("List available models", f"{p} list"),
+        ])
 
 
 def _label(labels_str, key):
@@ -961,9 +1011,9 @@ def cmd_models(args):
     p, sample, host = _cli_name(), next(iter(models)), (REMOTE or "user@host")
     _suggest([
         ("Run a model", f"{p} launch {sample}{_rsuf()}"),
-        ("Run a model on a specific host", f"{p} launch {sample} --remote {host}"),
+        ("Run a model on a specific host", f"{p} launch {sample} --host {host}"),
         ("Run a model and watch its logs",
-         f"{p} launch {sample} --remote {host} && {p} logs {sample} --remote {host} -f"),
+         f"{p} launch {sample} --host {host} && {p} logs {sample} --host {host} -f"),
     ])
 
 
@@ -1024,13 +1074,57 @@ def push_assets_remote(target, key, mounts, dry=False):
     return out
 
 
+def _image_present(image):
+    """True if the image is already cached on the active docker host (no pull)."""
+    return docker(["image", "inspect", image], capture=True).returncode == 0
+
+
+def _launch_log_path(key):
+    return f"~/.config/otools/launch-{key}.log"
+
+
+def _launch_bg_command(key, image, run_argv):
+    """Shell command that pulls the image, starts the container detached, and writes
+    a status marker to ~/.config/otools/launch-<key>.log, then backgrounds itself so
+    the dispatcher returns at once. Runs on whichever host docker uses (local shell
+    or the remote over SSH)."""
+    run_str = "docker " + " ".join(shlex.quote(a) for a in run_argv)
+    inner = ("docker pull %s && %s && echo OTOOLS_LAUNCH_OK || echo OTOOLS_LAUNCH_FAILED"
+             % (shlex.quote(image), run_str))
+    log = "$HOME/.config/otools/launch-%s.log" % key
+    return ('mkdir -p "$HOME/.config/otools"; '
+            "nohup sh -c %s > %s 2>&1 &" % (shlex.quote(inner), log))
+
+
+def _launch_status(body):
+    """Classify a background-launch log: 'none' | 'ok' | 'failed' | 'running'."""
+    if not body or not body.strip():
+        return "none"
+    if "OTOOLS_LAUNCH_OK" in body:
+        return "ok"
+    if "OTOOLS_LAUNCH_FAILED" in body:
+        return "failed"
+    return "running"
+
+
 def cmd_launch(args):
     cfg = load_config()
     merged = merge_model(cfg, args.key)
-    # Per-model remote target overrides the config default (but not an explicit --remote).
+    # Per-model remote target overrides the config default (but not an explicit --host).
     global REMOTE
     if not args.remote and merged.get("remote"):
-        REMOTE = merged["remote"]
+        REMOTE = resolve_host(merged["remote"])
+    # Guard: hosts are registered but none was chosen -> don't silently launch local.
+    if not REMOTE and not args.local:
+        registered = load_hosts()
+        if registered:
+            names = ", ".join(a for a, _ in registered)
+            print(f"ERROR: no host selected, but {len(registered)} host(s) are registered "
+                  f"({names}).\n"
+                  f"  Run on one:      {_cli_name()} launch {args.key} --host <alias>\n"
+                  f"  Force local:     {_cli_name()} launch {args.key} --local\n"
+                  f"  Find a free one: {_cli_name()} ps", file=sys.stderr)
+            sys.exit(1)
     need_docker()
     # Download/verify declared assets locally, then (if remote) push them to the box.
     asset_mounts = resolve_assets(args.key, merged, do_fetch=not args.no_fetch,
@@ -1043,7 +1137,7 @@ def cmd_launch(args):
 
     # Refuse to clobber an existing container (running OR stopped) or double-bind a port.
     if not args.dry_run:
-        rflag = f" --remote {REMOTE}" if REMOTE else ""
+        rflag = f" --host {REMOTE}" if REMOTE else ""
         allc = docker(["ps", "-a", "--format", "{{.Names}}"], capture=True)
         if allc.returncode == 0 and name in allc.stdout.split():
             print(f"ERROR: container '{name}' already exists (running or stopped). "
@@ -1063,6 +1157,34 @@ def cmd_launch(args):
         print(f"--- DRY RUN: would launch '{args.key}'{where} ---")
         print(format_run(argv, REMOTE))
         return
+    image = merged["image"]
+    cached = _image_present(image)
+    if not cached and not args.wait and not args.foreground:
+        # Non-blocking launch: an uncached image pull can take minutes and time out
+        # an agent's tool call. Pull + run in the background and return immediately.
+        bg = _launch_bg_command(args.key, image, argv)
+        loc = f"on {REMOTE}" if REMOTE else "locally"
+        print(f"Image '{image}' is not cached {loc}; pulling in the background and starting "
+              f"'{args.key}' when it's ready (container '{name}', port {merged['port']}).")
+        if REMOTE:
+            run_remote(REMOTE, bg, batch=True)
+        else:
+            subprocess.run(["sh", "-c", bg])
+        p = _cli_name()
+        _suggest([
+            ("Check pull/launch progress", f"{p} pull-status {args.key}{_rsuf()}"),
+            ("Watch container logs once it starts", f"{p} logs {args.key}{_rsuf()} -f"),
+            ("Check readiness", f"{p} health {args.key}{_rsuf()}"),
+            ("(Next time) pull inline and block", f"{p} launch {args.key}{_rsuf()} --wait"),
+        ])
+        return
+    if not cached:
+        # Blocking launch (--wait/--foreground) with an uncached image: pull inline.
+        print(f"Image '{image}' is not cached{where}; pulling (can take several minutes) ...")
+        if docker(["pull", image]).returncode != 0:
+            print(f"ERROR: failed to pull '{image}'.", file=sys.stderr)
+            sys.exit(1)
+
     print(f"Launching '{args.key}' as container '{name}' on port {merged['port']}{where} ...")
     print(format_run(argv, REMOTE))
     res = docker(argv, tty=args.foreground)
@@ -1077,6 +1199,67 @@ def cmd_launch(args):
             ("List running models", f"{p} ps{_rsuf()}"),
             ("Stop this model", f"{p} stop {args.key}{_rsuf()}"),
         ])
+
+
+def cmd_pull(args):
+    """Pre-pull a profile's image so a later `launch` starts instantly."""
+    cfg = load_config()
+    merged = merge_model(cfg, args.key)
+    global REMOTE
+    if not args.remote and merged.get("remote"):
+        REMOTE = resolve_host(merged["remote"])
+    need_docker()
+    image = merged["image"]
+    where = f" on {REMOTE}" if REMOTE else " locally"
+    if _image_present(image):
+        print(f"Image '{image}' is already cached{where}.")
+        return
+    print(f"Pulling '{image}'{where} ...")
+    sys.exit(docker(["pull", image]).returncode)
+
+
+def cmd_pull_status(args):
+    """Report the background launch/pull recorded in ~/.config/otools/launch-<key>.log."""
+    global REMOTE
+    cfg = load_config(create=False) if os.path.exists(CONFIG_PATH) else {"models": {}}
+    merged = merge_model(cfg, args.key) if args.key in cfg.get("models", {}) else {}
+    if not args.remote and merged.get("remote"):
+        REMOTE = resolve_host(merged["remote"])
+    where = f" on {REMOTE}" if REMOTE else " locally"
+    log = _launch_log_path(args.key)
+    if REMOTE:
+        if not shutil.which("ssh"):
+            print("ERROR: `ssh` not found on PATH.", file=sys.stderr)
+            sys.exit(1)
+        res = run_remote(REMOTE, f"cat {log} 2>/dev/null", capture=True, batch=True)
+        body = res.stdout if res.returncode == 0 else ""
+    else:
+        try:
+            body = open(os.path.expanduser(log)).read()
+        except OSError:
+            body = ""
+    p = _cli_name()
+    status = _launch_status(body)
+    if status == "none":
+        print(f"No background-launch log for '{args.key}'{where} ({log}).")
+        print(f"  Nothing is pulling -- start one with `{p} launch {args.key}{_rsuf()}`.")
+        return
+    lines = body.strip().splitlines()
+    if status == "ok":
+        print(f"'{args.key}': image pulled and container started{where}.")
+        _suggest([
+            ("Check readiness", f"{p} health {args.key}{_rsuf()}"),
+            ("Watch logs", f"{p} logs {args.key}{_rsuf()} -f"),
+        ])
+    elif status == "failed":
+        print(f"'{args.key}': background launch FAILED{where}. Last lines:")
+        for ln in lines[-10:]:
+            print(f"   {ln}")
+        sys.exit(1)
+    else:
+        print(f"'{args.key}': still pulling/starting{where}.")
+        print(f"   {lines[-1]}")
+        _suggest([("Poll again", f"{p} pull-status {args.key}{_rsuf()}")])
 
 
 def cmd_fetch(args):
@@ -1191,29 +1374,82 @@ def _r_ok(target, cmd):
     return res.returncode == 0, (res.stdout or "").strip()
 
 
-def cmd_setup(args):
+def cmd_install(args):
+    """Bootstrap remote prereqs AND register the host (with an optional alias) so
+    `ps` and `--host` can find it. Merges into the registry -- other hosts stay."""
     raw = args.target or REMOTE
     if not raw:
-        print("ERROR: setup needs a target, e.g. `setup otto@192.168.50.101` "
-              "(comma-separate several: a,b).", file=sys.stderr)
+        print("ERROR: install needs a target, e.g. `install otto@192.168.50.101 dgx1` "
+              "(user@ip and an optional alias; comma-separate several hosts if you skip the alias).",
+              file=sys.stderr)
         sys.exit(1)
     if not shutil.which("ssh"):
         print("ERROR: no `ssh` client on PATH.", file=sys.stderr)
         sys.exit(1)
     hosts = [h.strip() for h in raw.split(",") if h.strip()]
+    alias = (getattr(args, "alias", None) or "").strip() or None
+    if alias and len(hosts) != 1:
+        print("ERROR: an alias names a single host -- pass just one user@ip when you give an alias.",
+              file=sys.stderr)
+        sys.exit(1)
+    existing = load_hosts()                      # [(alias, target)] already registered
+    prior_alias = {t: a for a, t in existing}
     connected, all_ready = [], True
     for target in hosts:
         ready, ssh_ok = _setup_host(target, args.fix)
         all_ready = all_ready and ready
         if ssh_ok:
-            connected.append(target)
+            connected.append((alias or prior_alias.get(target) or target, target))
     if connected:
-        save_hosts(connected)   # forced overwrite: the reachable fleet `ps` queries
+        # Merge, don't overwrite: keep other registered hosts, add/replace these.
+        new_targets = {t for _, t in connected}
+        merged = [(a, t) for a, t in existing if t not in new_targets] + connected
+        save_hosts(merged)
         print()
-        print(f"-> registered {len(connected)} host(s) for `ps` in {HOSTS_FILE}:")
-        for h in connected:
-            print(f"     {h}")
+        print(f"-> registered {len(connected)} host(s) for `ps` / `--host` in {HOSTS_FILE}:")
+        for a, t in connected:
+            print(f"     {a:<12} {t}" if a != t else f"     {t}")
     sys.exit(0 if all_ready else 1)
+
+
+def cmd_uninstall(args):
+    """Undo `install`: drop the host from the registry and revoke the otools key
+    from its authorized_keys. With --purge, also remove it from the docker group
+    and stop its otools containers (best-effort). Leaves the shared local key."""
+    name = args.target
+    if not name:
+        print("ERROR: uninstall needs an alias or user@ip, e.g. `uninstall dgx1`.", file=sys.stderr)
+        sys.exit(1)
+    target = resolve_host(name)
+    existing = load_hosts()
+    aliases = {a for a, _ in existing}
+    targets = {t for _, t in existing}
+    if target not in targets and name not in aliases:
+        print(f"WARNING: {name!r} is not registered in {HOSTS_FILE}; "
+              f"still attempting to revoke the key on {target}.")
+
+    if shutil.which("ssh"):
+        print(f"-> revoking the otools key on {target} "
+              f"(authorized_keys line matching '{OTOOLS_SSH_COMMENT}') ...")
+        revoke = ("sed -i '/%s/d' ~/.ssh/authorized_keys 2>/dev/null || true"
+                  % OTOOLS_SSH_COMMENT)
+        rc = subprocess.run(ssh_argv(target) + [revoke]).returncode
+        print("   done." if rc == 0 else f"   could not reach {target}; skipped key revoke.")
+        if args.purge:
+            print(f"-> --purge: stopping otools containers and removing the docker group "
+                  f"membership on {target} (sudo; may prompt) ...")
+            purge = ("docker ps -aq --filter name=%s | xargs -r docker rm -f 2>/dev/null; "
+                     "sudo gpasswd -d $USER docker 2>/dev/null || true" % NAME_PREFIX)
+            run_remote(target, purge, tty=True, batch=False)
+    else:
+        print("WARNING: no `ssh` client on PATH -- skipping remote key revoke.")
+
+    remaining = [(a, t) for a, t in existing if t != target and a != name]
+    save_hosts(remaining)
+    print(f"-> removed {name} from {HOSTS_FILE} ({len(remaining)} host(s) remain).")
+    print(f"\nNote: the shared local key {OTOOLS_SSH_KEY} was left in place "
+          f"(other hosts may still use it).")
+    print(f"  To remove it everywhere: rm {OTOOLS_SSH_KEY} {OTOOLS_SSH_PUB}")
 
 
 def _setup_host(target, fix):
@@ -1362,7 +1598,7 @@ def cmd_config(args):
     print(json.dumps(cfg, indent=2))
 
 
-def cmd_install_aliases(args):
+def cmd_shell_init(args):
     """Append an `omm` alias for this script to the user's shell rc (idempotent)."""
     script = os.path.abspath(__file__)
     alias_line = f"alias omm='python3 {shlex.quote(script)}'"
@@ -1394,11 +1630,11 @@ def main():
                          "or $OMODEL_MANAGER_CONFIG). Must precede the subcommand.")
     sub = ap.add_subparsers(dest="cmd")
 
-    # Shared --remote option for commands that talk to docker.
+    # Shared --host option (--remote is a legacy alias) for commands that talk to docker.
     remote_parent = argparse.ArgumentParser(add_help=False)
-    remote_parent.add_argument("--remote", metavar="USER@HOST",
-                               help="run docker on this host over SSH "
-                                    "(default: config defaults.remote, else local)")
+    remote_parent.add_argument("--host", "--remote", dest="remote", metavar="ALIAS|USER@HOST",
+                               help="target host over SSH: an alias from `install` (e.g. dgx1) or "
+                                    "user@ip (default: config defaults.remote, else local)")
 
     p = sub.add_parser("ps", help="list running managed vLLM containers (default)",
                        parents=[remote_parent])
@@ -1421,7 +1657,22 @@ def main():
     p.add_argument("--force", action="store_true", help="launch even if the port looks busy")
     p.add_argument("--no-fetch", action="store_true", help="don't download declared assets first")
     p.add_argument("--refresh", action="store_true", help="re-download assets even if cached")
+    p.add_argument("--wait", action="store_true",
+                   help="pull inline and block until the container starts (default: if the image "
+                        "is uncached, pull + launch in the background and return immediately)")
+    p.add_argument("--local", action="store_true",
+                   help="launch on this machine even though hosts are registered (skips the guard)")
     p.set_defaults(func=cmd_launch)
+
+    p = sub.add_parser("pull", help="pre-pull a profile's image so `launch` starts instantly",
+                       parents=[remote_parent])
+    p.add_argument("key", help="profile key from the config")
+    p.set_defaults(func=cmd_pull)
+
+    p = sub.add_parser("pull-status", help="show progress of a backgrounded launch/pull",
+                       parents=[remote_parent])
+    p.add_argument("key", help="profile key from the config")
+    p.set_defaults(func=cmd_pull_status)
 
     p = sub.add_parser("fetch", help="download a profile's declared assets (without launching)")
     p.add_argument("key", help="profile key from the config")
@@ -1447,14 +1698,25 @@ def main():
     p.add_argument("--all", action="store_true", help="include unmanaged vllm containers")
     p.set_defaults(func=cmd_health)
 
-    p = sub.add_parser("setup",
-                       help="check/install remote prereqs (SSH, docker, group) + register host(s) for `ps`")
+    p = sub.add_parser("install", aliases=["setup"],
+                       help="bootstrap a remote (SSH, docker, group) + register it (with an alias) "
+                            "for `ps`/`--host`")
     p.add_argument("target", nargs="?",
-                   help="USER@HOST to set up; comma-separate several (a,b). Reachable hosts are "
-                        "saved to ~/.config/otools/hosts so `ps` queries them by default.")
+                   help="USER@HOST to install; comma-separate several (a,b) when giving no alias. "
+                        "Reachable hosts are saved to ~/.config/otools/hosts so `ps` and `--host` "
+                        "find them.")
+    p.add_argument("alias", nargs="?",
+                   help="short name for this host, e.g. dgx1 (then `launch <model> --host dgx1`)")
     p.add_argument("--fix", action="store_true", help="remediate failures (generates keys, "
                                                       "installs docker, adds docker group)")
-    p.set_defaults(func=cmd_setup)
+    p.set_defaults(func=cmd_install)
+
+    p = sub.add_parser("uninstall",
+                       help="unregister a host and revoke the otools key from it (--purge for more)")
+    p.add_argument("target", help="alias or USER@HOST to remove (from `ps`/`install`)")
+    p.add_argument("--purge", action="store_true",
+                   help="also stop its otools containers and drop the remote docker-group membership")
+    p.set_defaults(func=cmd_uninstall)
 
     p = sub.add_parser("config", help="show/init/edit the config file")
     p.add_argument("--path", action="store_true", help="print the config path")
@@ -1463,9 +1725,10 @@ def main():
     p.add_argument("--force", action="store_true", help="overwrite on --init")
     p.set_defaults(func=cmd_config)
 
-    p = sub.add_parser("install-aliases", help="add an `omm` shell alias for this script")
+    p = sub.add_parser("shell-init", aliases=["install-aliases"],
+                       help="add an `omm` shell alias for this script")
     p.add_argument("--dry-run", action="store_true", help="show what would change, don't write")
-    p.set_defaults(func=cmd_install_aliases)
+    p.set_defaults(func=cmd_shell_init)
 
     args = ap.parse_args()
 
@@ -1474,14 +1737,15 @@ def main():
     if args.config:
         CONFIG_PATH = os.path.expanduser(args.config)
 
-    # Resolve the remote target: explicit --remote > config defaults.remote > local.
+    # Resolve the target host: explicit --host/--remote > config defaults.remote > local.
+    # resolve_host() maps an alias to its user@host (a raw user@host passes through).
     chosen = getattr(args, "remote", None)
     if not chosen and os.path.exists(CONFIG_PATH):
         try:
             chosen = (load_config().get("defaults", {}) or {}).get("remote")
         except SystemExit:
             chosen = None
-    REMOTE = chosen or None
+    REMOTE = resolve_host(chosen) if chosen else None
 
     if not args.cmd:
         # no subcommand -> friendly home screen (status + suggested next steps)

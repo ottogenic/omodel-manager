@@ -7,8 +7,28 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Remote UX overhaul.**
+  - **`--host ALIAS|USER@HOST`** replaces `--remote` (kept as a hidden legacy alias) and
+    resolves aliases from the hosts store.
+  - **`install <user@ip> [alias]`** (renames `setup`, kept as an alias): bootstraps a box
+    *and* registers it under an alias, **merging** into `~/.config/otools/hosts` (other
+    hosts stay) rather than overwriting.
+  - **`uninstall <alias|host>`** (`--purge`): unregister a host and revoke the otools key
+    from its `authorized_keys`; `--purge` also stops its otools containers and drops the
+    docker-group membership. The shared local key is left in place.
+  - **Non-blocking launch:** `launch` pre-checks the image and, if uncached, pulls + runs
+    in the **background** and returns immediately (so an agent's tool call won't time out).
+    New **`pull`** (pre-cache an image) and **`pull-status`** (poll a backgrounded launch
+    via `~/.config/otools/launch-<key>.log`) subcommands, plus **`launch --wait`** to pull
+    inline and block.
+  - **`launch --local` guard:** with hosts registered, a host-less `launch` is refused —
+    pick a `--host`, or pass `--local` to force local — preventing accidental local runs.
+  - **Alias-aware hosts store:** `~/.config/otools/hosts` now takes `alias<TAB>user@host`
+    lines (a bare `user@host` still works); `resolve_host()` maps aliases everywhere.
+  - **`shell-init`** renames `install-aliases` (kept as an alias) to disambiguate from the
+    new host `install`.
 - `configs/` — generic, **harness-agnostic** per-model configs (capabilities +
-  per-mode `presets` sampling + a tuning README), one `.md` per model keyed to a
+  per-mode `presets` sampling + a tuning README), one `.toml` per model keyed to a
   `model_manager.json` profile. This is the source of truth that downstream
   adapters consume (omodel-wire → OpenCode; pi.dev / Claude Code later). Manager
   only stores + validates them (`test_configs.py`). First config: `qwen3.6-35b-nvfp4`.
@@ -22,7 +42,7 @@ All notable changes to this project are documented here. The format follows
   `vllm_args` so the served id matches the config key.
 - `utils/benchmark_concurrent.py` — sweep concurrency (1..N parallel requests) against a
   live endpoint to find the `max-num-seqs` throughput sweet spot (documented in
-  `ADD_A_MODEL.md` §5b).
+  `ADD_A_MODEL.md` §6).
 
 ### Changed
 - **Config split into source-of-truth (code) + local sandbox (JSON).** `DEFAULT_CONFIG` in
@@ -30,14 +50,15 @@ All notable changes to this project are documented here. The format follows
   **git-ignored** file `config --init` generates from it. Tune/test in the JSON freely;
   promote validated changes into `DEFAULT_CONFIG` and commit. `config --init --force` resets
   the local file from the hardcoded defaults. The old "seed == file" invariant is gone.
-- **`setup` registers hosts for `ps` in `~/.config/otools/hosts`** instead of
-  `config.defaults.remotes`. It now accepts a comma-separated list
-  (`setup otto@a,otto@b`), bootstraps each, and overwrites the file with the reachable
-  hosts; `ps` reads it by default.
+- **`ps` now shows the whole fleet.** It lists every registered host, marking each
+  `running` / `idle` / `unreachable` (SSH-unreachable hosts included) and labeling rows by
+  alias — so agents pick a free box from `ps` instead of grepping the config. Hosts are
+  registered by `install` (was `setup`) in `~/.config/otools/hosts` instead of
+  `config.defaults.remotes`.
 
 ### Removed
 - `defaults.remotes` from the config — host lists are machine-specific and now live in
-  `~/.config/otools/hosts` (managed by `setup`).
+  `~/.config/otools/hosts` (managed by `install`).
 - The `test_seed_equals_committed_file` test — `model_manager.json` is git-ignored, so
   there is no committed copy to match.
 
