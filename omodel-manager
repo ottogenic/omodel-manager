@@ -99,6 +99,10 @@ DEFAULT_CONFIG = {
         "gpus": "all",
         "remote": None,                     # e.g. "otto@192.168.50.101" to run on the DGX;
                                             #      null = local. Override per-model or with --remote.
+        "drop_caches": False,               # drop the OS page cache right before `docker run`
+                                            #      (UMA false-OOM/freeze guard, vLLM #35313). Needs
+                                            #      passwordless sudo on the target. Off by default;
+                                            #      per-launch: --drop-caches / --no-drop-caches.
         "hf_cache": "~/.cache/huggingface",
         "env": {
             "HF_TOKEN": None,               # None -> `-e HF_TOKEN` (inherit from shell)
@@ -363,8 +367,8 @@ DEFAULT_CONFIG = {
                 "Do NOT pass --quantization; vLLM auto-detects (explicit -> ValueError, vLLM #40291).",
                 "kv-cache fp8 intentionally OMITTED on Spark (predictability + sm121 FP8-kernel "
                 "risk; ~30GB model leaves KV room).",
-                "DENSE 31B is bandwidth-heavy on GB10 (~7 tok/s); the Gemma-4-26B-A4B MoE "
-                "(~52 tok/s) is a better Spark fit -- consider a separate profile.",
+                "DENSE 31B is bandwidth-heavy on GB10 (~7 tok/s); the gemma4-26b-a4b MoE "
+                "profile (~52 tok/s) is a better Spark fit for latency-sensitive work.",
             ],
             "image": "vllm/vllm-openai:gemma4-cu130",
             "model": "nvidia/Gemma-4-31B-IT-NVFP4",
@@ -376,6 +380,45 @@ DEFAULT_CONFIG = {
                 "gpu-memory-utilization": 0.85,
                 "max-model-len": 262144,
                 "max-num-seqs": 4,
+                "enable-chunked-prefill": True,
+                "async-scheduling": True,
+                "enable-prefix-caching": True,
+                "enable-auto-tool-choice": True,
+                "reasoning-parser": "gemma4",
+                "tool-call-parser": "gemma4",
+                "enable-log-requests": True,
+            },
+        },
+        "gemma4-26b-a4b": {
+            "notes": [
+                "Gemma 4 26B-A4B NVFP4 -- the MoE sibling of the dense 31B: 25.2B total / "
+                "3.8B active per token (8 of 128 experts + 1 shared, 1024-tok sliding window). "
+                "Multimodal (text+image), reasoning + tool-calling. 256K context.",
+                "The Spark's pick over the dense 31B: only 3.8B active params read per decode "
+                "step on the 273 GB/s bus -> ~52 tok/s vs the 31B's ~7 (ai-muninn DGX Spark "
+                "benchmark). ~16.5GB weights leave ~82GB for KV cache.",
+                "Needs the Gemma4-specific image (Gemma4ForConditionalGeneration); rolling "
+                "gemma4-cu130 tag. Do NOT pass --quantization (auto-detected; explicit -> "
+                "ValueError, vLLM #40291).",
+                "sm_121 has no native FP4 MoE kernels: VLLM_USE_FLASHINFER_MOE_FP4=0 forces the "
+                "working Marlin FP4 dequant path (the CUTLASS/FlashInfer path is not the GB10 "
+                "route). TP=1 only in vLLM for this model.",
+                "kv-cache fp8 intentionally OMITTED on Spark (predictability + sm121 FP8-kernel "
+                "risk; the light model leaves ample KV room). Card sampling: temp 1.0, top_p 0.95.",
+            ],
+            "image": "vllm/vllm-openai:gemma4-cu130",
+            "model": "nvidia/Gemma-4-26B-A4B-NVFP4",
+            "port": 8000,
+            "usecase": ["Reasoning", "Vision", "Agentic", "Coding", "General"],
+            "env": {
+                "VLLM_USE_FLASHINFER_MOE_FP4": "0",
+            },
+            "vllm_args": {
+                "served-model-name": "gemma4-26b-a4b",
+                "tensor-parallel-size": 1,
+                "gpu-memory-utilization": 0.85,
+                "max-model-len": 262144,
+                "max-num-seqs": 8,
                 "enable-chunked-prefill": True,
                 "async-scheduling": True,
                 "enable-prefix-caching": True,
@@ -463,6 +506,7 @@ def merge_model(cfg, key):
         "model": m.get("model"),
         "port": m.get("port"),
         "remote": m.get("remote", d.get("remote")),
+        "drop_caches": m.get("drop_caches", d.get("drop_caches", False)),
         "docker_flags": list(d.get("docker_flags", [])) + list(m.get("docker_flags", [])),
         "volumes": list(d.get("volumes", [])) + list(m.get("volumes", [])),
         "assets": list(d.get("assets", [])) + list(m.get("assets", [])),
@@ -1116,14 +1160,42 @@ def _launch_log_path(key):
     return f"~/.config/otools/launch-{key}.log"
 
 
-def _launch_bg_command(key, image, run_argv):
+# On UMA boxes (GB10 / DGX Spark) vLLM's cudaMemGetInfo can't see reclaimable page
+# cache, so a warm cache reads as "used" -> false OOM at load, or a system freeze
+# (vLLM #35313). Dropping the cache right before `docker run` restores a clean read.
+# Needs root, so it goes through sudo; kept best-effort (a sudo-password prompt or a
+# locked-down box must not abort the launch).
+DROP_CACHES_CMD = "sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'"
+
+
+def _drop_caches(target, dry=False):
+    """Free the OS page cache on the target (local or remote) before a launch."""
+    where = f" on {target}" if target else " locally"
+    if dry:
+        print(f"    (would drop page cache{where}: {DROP_CACHES_CMD})")
+        return
+    print(f"Dropping page cache{where} (sync + drop_caches; UMA guard) ...")
+    if target:
+        rc = run_remote(target, DROP_CACHES_CMD, batch=True).returncode
+    else:
+        rc = subprocess.run(["sh", "-c", DROP_CACHES_CMD]).returncode
+    if rc != 0:
+        print("  warning: drop-caches failed (needs passwordless sudo on the target?); "
+              "continuing without it.", file=sys.stderr)
+
+
+def _launch_bg_command(key, image, run_argv, drop_caches=False):
     """Shell command that pulls the image, starts the container detached, and writes
     a status marker to ~/.config/otools/launch-<key>.log, then backgrounds itself so
     the dispatcher returns at once. Runs on whichever host docker uses (local shell
-    or the remote over SSH)."""
+    or the remote over SSH). With drop_caches, frees the page cache after the pull and
+    right before `docker run` (best-effort; never aborts the launch)."""
     run_str = "docker " + " ".join(shlex.quote(a) for a in run_argv)
-    inner = ("docker pull %s && %s && echo OTOOLS_LAUNCH_OK || echo OTOOLS_LAUNCH_FAILED"
-             % (shlex.quote(image), run_str))
+    steps = ["docker pull %s" % shlex.quote(image)]
+    if drop_caches:
+        steps.append("{ %s || true; }" % DROP_CACHES_CMD)
+    steps.append(run_str)
+    inner = "%s && echo OTOOLS_LAUNCH_OK || echo OTOOLS_LAUNCH_FAILED" % " && ".join(steps)
     log = "$HOME/.config/otools/launch-%s.log" % key
     return ('mkdir -p "$HOME/.config/otools"; '
             "nohup sh -c %s > %s 2>&1 &" % (shlex.quote(inner), log))
@@ -1143,6 +1215,9 @@ def _launch_status(body):
 def cmd_launch(args):
     cfg = load_config()
     merged = merge_model(cfg, args.key)
+    # --drop-caches / --no-drop-caches override the config default (defaults.drop_caches).
+    drop_flag = getattr(args, "drop_caches", None)
+    do_drop = drop_flag if drop_flag is not None else merged.get("drop_caches", False)
     # Per-model remote target overrides the config default (but not an explicit --host).
     global REMOTE
     if not args.remote and merged.get("remote"):
@@ -1188,6 +1263,8 @@ def cmd_launch(args):
     where = f" on {REMOTE} (over SSH)" if REMOTE else " locally"
     if args.dry_run:
         print(f"--- DRY RUN: would launch '{args.key}'{where} ---")
+        if do_drop:
+            _drop_caches(REMOTE, dry=True)
         print(format_run(argv, REMOTE))
         return
     image = merged["image"]
@@ -1195,7 +1272,7 @@ def cmd_launch(args):
     if not cached and not args.wait and not args.foreground:
         # Non-blocking launch: an uncached image pull can take minutes and time out
         # an agent's tool call. Pull + run in the background and return immediately.
-        bg = _launch_bg_command(args.key, image, argv)
+        bg = _launch_bg_command(args.key, image, argv, drop_caches=do_drop)
         loc = f"on {REMOTE}" if REMOTE else "locally"
         print(f"Image '{image}' is not cached {loc}; pulling in the background and starting "
               f"'{args.key}' when it's ready (container '{name}', port {merged['port']}).")
@@ -1218,6 +1295,8 @@ def cmd_launch(args):
             print(f"ERROR: failed to pull '{image}'.", file=sys.stderr)
             sys.exit(1)
 
+    if do_drop:
+        _drop_caches(REMOTE)
     print(f"Launching '{args.key}' as container '{name}' on port {merged['port']}{where} ...")
     print(format_run(argv, REMOTE))
     res = docker(argv, tty=args.foreground)
@@ -1695,6 +1774,12 @@ def main():
                         "is uncached, pull + launch in the background and return immediately)")
     p.add_argument("--local", action="store_true",
                    help="launch on this machine even though hosts are registered (skips the guard)")
+    p.add_argument("--drop-caches", dest="drop_caches", action="store_true", default=None,
+                   help="drop the OS page cache on the target right before `docker run` "
+                        "(UMA false-OOM/freeze guard, vLLM #35313; needs passwordless sudo). "
+                        "Overrides defaults.drop_caches.")
+    p.add_argument("--no-drop-caches", dest="drop_caches", action="store_false",
+                   help="skip the page-cache drop even if defaults.drop_caches is on")
     p.set_defaults(func=cmd_launch)
 
     p = sub.add_parser("pull", help="pre-pull a profile's image so `launch` starts instantly",

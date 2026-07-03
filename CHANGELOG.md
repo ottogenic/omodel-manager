@@ -43,6 +43,20 @@ All notable changes to this project are documented here. The format follows
 - `utils/benchmark_concurrent.py` — sweep concurrency (1..N parallel requests) against a
   live endpoint to find the `max-num-seqs` throughput sweet spot (documented in
   `ADD_A_MODEL.md` §6).
+- **`launch --drop-caches` / `--no-drop-caches`** and **`defaults.drop_caches`** (off by
+  default): drop the target's OS page cache (`sync; echo 3 > /proc/sys/vm/drop_caches`)
+  right before `docker run`. On UMA boxes (GB10 / DGX Spark) vLLM's `cudaMemGetInfo`
+  can't see reclaimable cache, so a warm cache reads as a false OOM at load or freezes
+  the box (vLLM #35313); a clean cache restores the read. Runs on the resolved host
+  (local or over SSH), best-effort (needs passwordless sudo; a failure warns, never
+  aborts the launch), and is honored on both the inline and background launch paths.
+- **`gemma4-26b-a4b`** launch profile + `configs/gemma4-26b-a4b.toml`: the MoE sibling of
+  the dense 31B (`nvidia/Gemma-4-26B-A4B-NVFP4`, 25.2B total / 3.8B active), multimodal,
+  reasoning + tools, 256K context. Only 3.8B active params per decode step → **~52 tok/s
+  on DGX Spark vs the dense 31B's ~7** (ai-muninn benchmark). Uses the `gemma4-cu130`
+  image + `gemma4` parsers, omits `--quantization` (auto-detected, vLLM #40291) and
+  kv-cache fp8, and sets **`VLLM_USE_FLASHINFER_MOE_FP4=0`** to force the working Marlin
+  FP4 path on sm_121 (no native FP4 MoE kernels on GB10).
 
 ### Changed
 - **Config split into source-of-truth (code) + local sandbox (JSON).** `DEFAULT_CONFIG` in

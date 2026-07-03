@@ -80,6 +80,7 @@ resets it from the hardcoded defaults. **Promote** a vetted change by editing
   "defaults": {                     // merged UNDER every profile
     "image": "...", "host": "0.0.0.0", "gpus": "all",
     "remote": null,                 // "user@host" to default all commands remote
+    "drop_caches": false,           // drop the OS page cache before `docker run` (UMA guard)
     "hf_cache": "~/.cache/huggingface",
     "env": { "HF_TOKEN": null, "VLLM_LOGGING_COLOR": "1" },
     "docker_flags": ["--privileged", "--network", "host", ...],

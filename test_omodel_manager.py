@@ -150,7 +150,7 @@ class LaunchGuardTests(unittest.TestCase):
     def _launch(self, **kw):
         base = dict(key=self.key, remote=None, local=False, dry_run=True,
                     foreground=False, keep=False, force=False, no_fetch=True,
-                    refresh=False, wait=False)
+                    refresh=False, wait=False, drop_caches=None)
         base.update(kw)
         # Swallow the dry-run banner so the test suite stays quiet.
         with contextlib.redirect_stdout(io.StringIO()), \
@@ -168,6 +168,29 @@ class LaunchGuardTests(unittest.TestCase):
 
     def test_no_hosts_allows_local(self):
         self._launch()             # empty registry: local is fine
+
+
+class DropCachesTests(unittest.TestCase):
+    """Opt-in page-cache drop before launch (UMA guard, vLLM #35313)."""
+
+    def test_default_off(self):
+        merged = mm.merge_model(mm.load_config(), "glm-4.7-flash")
+        self.assertFalse(merged["drop_caches"])
+
+    def test_bg_command_injects_only_when_enabled(self):
+        argv = ["run", "--name", "x"]
+        on = mm._launch_bg_command("k", "img", argv, drop_caches=True)
+        off = mm._launch_bg_command("k", "img", argv, drop_caches=False)
+        self.assertIn("drop_caches", on)
+        self.assertNotIn("drop_caches", off)
+        # ordering: pull the image, then drop the cache, then run the container.
+        self.assertLess(on.index("pull"), on.index("drop_caches"))
+        self.assertLess(on.index("drop_caches"), on.index("--name"))
+
+    def test_bg_drop_is_non_fatal(self):
+        # the drop step is grouped with `|| true` so a sudo failure can't abort the launch.
+        on = mm._launch_bg_command("k", "img", ["run"], drop_caches=True)
+        self.assertIn("|| true", on)
 
 
 class ProfileTests(unittest.TestCase):
