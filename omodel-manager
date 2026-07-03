@@ -99,10 +99,6 @@ DEFAULT_CONFIG = {
         "gpus": "all",
         "remote": None,                     # e.g. "otto@192.168.50.101" to run on the DGX;
                                             #      null = local. Override per-model or with --remote.
-        "drop_caches": False,               # drop the OS page cache right before `docker run`
-                                            #      (UMA false-OOM/freeze guard, vLLM #35313). Needs
-                                            #      passwordless sudo on the target. Off by default;
-                                            #      per-launch: --drop-caches / --no-drop-caches.
         "hf_cache": "~/.cache/huggingface",
         "env": {
             "HF_TOKEN": None,               # None -> `-e HF_TOKEN` (inherit from shell)
@@ -506,7 +502,6 @@ def merge_model(cfg, key):
         "model": m.get("model"),
         "port": m.get("port"),
         "remote": m.get("remote", d.get("remote")),
-        "drop_caches": m.get("drop_caches", d.get("drop_caches", False)),
         "docker_flags": list(d.get("docker_flags", [])) + list(m.get("docker_flags", [])),
         "volumes": list(d.get("volumes", [])) + list(m.get("volumes", [])),
         "assets": list(d.get("assets", [])) + list(m.get("assets", [])),
@@ -1162,39 +1157,59 @@ def _launch_log_path(key):
 
 # On UMA boxes (GB10 / DGX Spark) vLLM's cudaMemGetInfo can't see reclaimable page
 # cache, so a warm cache reads as "used" -> false OOM at load, or a system freeze
-# (vLLM #35313). Dropping the cache right before `docker run` restores a clean read.
-# Needs root, so it goes through sudo; kept best-effort (a sudo-password prompt or a
-# locked-down box must not abort the launch).
-DROP_CACHES_CMD = "sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'"
+# (vLLM #35313). Every launch drops the cache right before `docker run` to restore a
+# clean read -- no flag, no config; it's just how launch works. `install` sets up a
+# scoped NOPASSWD sudoers rule so `sudo -n` runs it unattended. `sudo -n` never
+# prompts: if the rule is missing it fails fast and we warn (best-effort, never aborts
+# the launch) instead of hanging on a password prompt.
+DROP_CACHES_HELPER = "/usr/local/sbin/otools-drop-caches"
+DROP_CACHES_SUDOERS = "/etc/sudoers.d/otools-drop-caches"
+DROP_CACHES_CMD = "sudo -n " + DROP_CACHES_HELPER
+
+
+def _drop_caches_install_cmd():
+    """Remote shell (run once under interactive sudo by `install --fix`) that drops in
+    the scoped drop-caches helper script + a NOPASSWD sudoers rule for the connecting
+    user, then validates the rule with visudo. printf|tee avoids heredoc quoting."""
+    script = "printf '#!/bin/sh\\nsync\\necho 3 > /proc/sys/vm/drop_caches\\n'"
+    rule = ("printf '%s ALL=(root) NOPASSWD: " + DROP_CACHES_HELPER + "\\n' \"$(id -un)\"")
+    return (
+        f"{script} | sudo tee {DROP_CACHES_HELPER} >/dev/null "
+        f"&& sudo chmod 0755 {DROP_CACHES_HELPER} "
+        f"&& {rule} | sudo tee {DROP_CACHES_SUDOERS} >/dev/null "
+        f"&& sudo chmod 0440 {DROP_CACHES_SUDOERS} "
+        f"&& sudo visudo -cf {DROP_CACHES_SUDOERS}"
+    )
 
 
 def _drop_caches(target, dry=False):
-    """Free the OS page cache on the target (local or remote) before a launch."""
+    """Free the OS page cache on the target (local or remote) right before a launch."""
     where = f" on {target}" if target else " locally"
     if dry:
         print(f"    (would drop page cache{where}: {DROP_CACHES_CMD})")
         return
-    print(f"Dropping page cache{where} (sync + drop_caches; UMA guard) ...")
+    print(f"Dropping page cache{where} (UMA launch guard, vLLM #35313) ...")
     if target:
         rc = run_remote(target, DROP_CACHES_CMD, batch=True).returncode
     else:
         rc = subprocess.run(["sh", "-c", DROP_CACHES_CMD]).returncode
     if rc != 0:
-        print("  warning: drop-caches failed (needs passwordless sudo on the target?); "
-              "continuing without it.", file=sys.stderr)
+        print(f"  warning: drop-caches skipped (no NOPASSWD rule on {target or 'this host'}? "
+              f"run `install {target or ''} --fix`); continuing.", file=sys.stderr)
 
 
-def _launch_bg_command(key, image, run_argv, drop_caches=False):
-    """Shell command that pulls the image, starts the container detached, and writes
-    a status marker to ~/.config/otools/launch-<key>.log, then backgrounds itself so
-    the dispatcher returns at once. Runs on whichever host docker uses (local shell
-    or the remote over SSH). With drop_caches, frees the page cache after the pull and
-    right before `docker run` (best-effort; never aborts the launch)."""
+def _launch_bg_command(key, image, run_argv):
+    """Shell command that pulls the image, drops the page cache, starts the container
+    detached, and writes a status marker to ~/.config/otools/launch-<key>.log, then
+    backgrounds itself so the dispatcher returns at once. Runs on whichever host docker
+    uses (local shell or the remote over SSH). The cache drop happens after the pull and
+    right before `docker run`, grouped `|| true` so it can never fail the launch."""
     run_str = "docker " + " ".join(shlex.quote(a) for a in run_argv)
-    steps = ["docker pull %s" % shlex.quote(image)]
-    if drop_caches:
-        steps.append("{ %s || true; }" % DROP_CACHES_CMD)
-    steps.append(run_str)
+    steps = [
+        "docker pull %s" % shlex.quote(image),
+        "{ %s || true; }" % DROP_CACHES_CMD,
+        run_str,
+    ]
     inner = "%s && echo OTOOLS_LAUNCH_OK || echo OTOOLS_LAUNCH_FAILED" % " && ".join(steps)
     log = "$HOME/.config/otools/launch-%s.log" % key
     return ('mkdir -p "$HOME/.config/otools"; '
@@ -1215,9 +1230,6 @@ def _launch_status(body):
 def cmd_launch(args):
     cfg = load_config()
     merged = merge_model(cfg, args.key)
-    # --drop-caches / --no-drop-caches override the config default (defaults.drop_caches).
-    drop_flag = getattr(args, "drop_caches", None)
-    do_drop = drop_flag if drop_flag is not None else merged.get("drop_caches", False)
     # Per-model remote target overrides the config default (but not an explicit --host).
     global REMOTE
     if not args.remote and merged.get("remote"):
@@ -1263,8 +1275,7 @@ def cmd_launch(args):
     where = f" on {REMOTE} (over SSH)" if REMOTE else " locally"
     if args.dry_run:
         print(f"--- DRY RUN: would launch '{args.key}'{where} ---")
-        if do_drop:
-            _drop_caches(REMOTE, dry=True)
+        _drop_caches(REMOTE, dry=True)
         print(format_run(argv, REMOTE))
         return
     image = merged["image"]
@@ -1272,7 +1283,7 @@ def cmd_launch(args):
     if not cached and not args.wait and not args.foreground:
         # Non-blocking launch: an uncached image pull can take minutes and time out
         # an agent's tool call. Pull + run in the background and return immediately.
-        bg = _launch_bg_command(args.key, image, argv, drop_caches=do_drop)
+        bg = _launch_bg_command(args.key, image, argv)
         loc = f"on {REMOTE}" if REMOTE else "locally"
         print(f"Image '{image}' is not cached {loc}; pulling in the background and starting "
               f"'{args.key}' when it's ready (container '{name}', port {merged['port']}).")
@@ -1295,8 +1306,7 @@ def cmd_launch(args):
             print(f"ERROR: failed to pull '{image}'.", file=sys.stderr)
             sys.exit(1)
 
-    if do_drop:
-        _drop_caches(REMOTE)
+    _drop_caches(REMOTE)
     print(f"Launching '{args.key}' as container '{name}' on port {merged['port']}{where} ...")
     print(format_run(argv, REMOTE))
     res = docker(argv, tty=args.foreground)
@@ -1548,10 +1558,12 @@ def cmd_uninstall(args):
         rc = subprocess.run(ssh_argv(target) + [revoke]).returncode
         print("   done." if rc == 0 else f"   could not reach {target}; skipped key revoke.")
         if args.purge:
-            print(f"-> --purge: stopping otools containers and removing the docker group "
-                  f"membership on {target} (sudo; may prompt) ...")
+            print(f"-> --purge: stopping otools containers, removing the docker group "
+                  f"membership and the drop-caches sudo rule on {target} (sudo; may prompt) ...")
             purge = ("docker ps -aq --filter name=%s | xargs -r docker rm -f 2>/dev/null; "
-                     "sudo gpasswd -d $USER docker 2>/dev/null || true" % NAME_PREFIX)
+                     "sudo gpasswd -d $USER docker 2>/dev/null || true; "
+                     "sudo rm -f %s %s 2>/dev/null || true"
+                     % (NAME_PREFIX, DROP_CACHES_SUDOERS, DROP_CACHES_HELPER))
             run_remote(target, purge, tty=True, batch=False)
     else:
         print("WARNING: no `ssh` client on PATH -- skipping remote key revoke.")
@@ -1650,6 +1662,18 @@ def _setup_host(target, fix):
                         "ok" if nosudo else ("in group but session stale; re-login" if in_grp
                                              else "not in docker group; --fix to add")))
 
+    # 4.5) passwordless page-cache drop -- every launch runs it (UMA guard, vLLM #35313),
+    #      so install a scoped helper + NOPASSWD rule now (one sudo prompt) and it's silent
+    #      forever after. Checked with `sudo -n -l` so it doesn't actually drop caches here.
+    if fix:
+        print("-> installing the scoped drop-caches helper + NOPASSWD sudoers rule "
+              f"({DROP_CACHES_HELPER}; sudo, may prompt once) ...")
+        run_remote(target, _drop_caches_install_cmd(), tty=True, batch=False)
+    dc_ok, _ = _r_ok(target, "sudo -n -l %s >/dev/null 2>&1" % DROP_CACHES_HELPER)
+    results.append(("drop-caches sudo", dc_ok,
+                    "NOPASSWD rule active (launch drops page cache automatically)" if dc_ok
+                    else "no NOPASSWD rule; --fix to add (launches warn + skip the drop otherwise)"))
+
     # 5) GPU: driver + container runtime (check + advise; we don't auto-install the toolkit)
     drv = _r_ok(target, "nvidia-smi -L 2>/dev/null | head -1")[1] if (nosudo or dok) else ""
     results.append(("nvidia driver", bool(drv), drv or "nvidia-smi not found on host"))
@@ -1681,7 +1705,7 @@ def _setup_host(target, fix):
               f"    ssh {target} \"sed -i '/{OTOOLS_SSH_COMMENT}/d' ~/.ssh/authorized_keys\"\n"
               f"  and locally: rm {OTOOLS_SSH_KEY} {OTOOLS_SSH_PUB}")
     essentials = {"keyless SSH", "docker installed", "docker w/o sudo",
-                  "nvidia driver", "docker GPU runtime"}
+                  "nvidia driver", "docker GPU runtime", "drop-caches sudo"}
     ready = all(ok for name, ok, _ in results if name in essentials)
     print(f"\n{'READY: launch away.' if ready else 'NOT READY -- address the [FAIL] rows above'}"
           + ("" if fix else "  (re-run with --fix to remediate)"))
@@ -1774,12 +1798,6 @@ def main():
                         "is uncached, pull + launch in the background and return immediately)")
     p.add_argument("--local", action="store_true",
                    help="launch on this machine even though hosts are registered (skips the guard)")
-    p.add_argument("--drop-caches", dest="drop_caches", action="store_true", default=None,
-                   help="drop the OS page cache on the target right before `docker run` "
-                        "(UMA false-OOM/freeze guard, vLLM #35313; needs passwordless sudo). "
-                        "Overrides defaults.drop_caches.")
-    p.add_argument("--no-drop-caches", dest="drop_caches", action="store_false",
-                   help="skip the page-cache drop even if defaults.drop_caches is on")
     p.set_defaults(func=cmd_launch)
 
     p = sub.add_parser("pull", help="pre-pull a profile's image so `launch` starts instantly",

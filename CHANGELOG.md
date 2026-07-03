@@ -43,13 +43,19 @@ All notable changes to this project are documented here. The format follows
 - `utils/benchmark_concurrent.py` — sweep concurrency (1..N parallel requests) against a
   live endpoint to find the `max-num-seqs` throughput sweet spot (documented in
   `ADD_A_MODEL.md` §6).
-- **`launch --drop-caches` / `--no-drop-caches`** and **`defaults.drop_caches`** (off by
-  default): drop the target's OS page cache (`sync; echo 3 > /proc/sys/vm/drop_caches`)
-  right before `docker run`. On UMA boxes (GB10 / DGX Spark) vLLM's `cudaMemGetInfo`
-  can't see reclaimable cache, so a warm cache reads as a false OOM at load or freezes
-  the box (vLLM #35313); a clean cache restores the read. Runs on the resolved host
-  (local or over SSH), best-effort (needs passwordless sudo; a failure warns, never
-  aborts the launch), and is honored on both the inline and background launch paths.
+- **Automatic page-cache drop before every `launch`.** `launch` now runs
+  `sync; echo 3 > /proc/sys/vm/drop_caches` on the target right before `docker run` —
+  no flag, no config, it's just how launch works. On UMA boxes (GB10 / DGX Spark) vLLM's
+  `cudaMemGetInfo` can't see reclaimable cache, so a warm cache reads as a false OOM at
+  load or freezes the box (vLLM #35313); a clean cache restores the read. `install`
+  provisions a **scoped `NOPASSWD` sudoers rule** (`/usr/local/sbin/otools-drop-caches`)
+  and launch calls it via `sudo -n`, so it runs unattended and *never prompts* — a host
+  that wasn't installed just warns and skips (best-effort, never aborts). Honored on both
+  the inline and background launch paths (pull → drop → run, grouped `|| true`).
+  `install` checks/repairs the rule (`--fix`); `uninstall --purge` removes it.
+- **`utils/benchmark_concurrent.py --host`** — accepts an `omm install` **alias**
+  (resolved via `~/.config/otools/hosts`), a `user@ip`, or a bare ip, matching
+  `omm --host`. (`--remote` kept as a legacy alias.)
 - **`gemma4-26b-a4b`** launch profile + `configs/gemma4-26b-a4b.toml`: the MoE sibling of
   the dense 31B (`nvidia/Gemma-4-26B-A4B-NVFP4`, 25.2B total / 3.8B active), multimodal,
   reasoning + tools, 256K context. Only 3.8B active params per decode step → **~52 tok/s
@@ -57,6 +63,18 @@ All notable changes to this project are documented here. The format follows
   image + `gemma4` parsers, omits `--quantization` (auto-detected, vLLM #40291) and
   kv-cache fp8, and sets **`VLLM_USE_FLASHINFER_MOE_FP4=0`** to force the working Marlin
   FP4 path on sm_121 (no native FP4 MoE kernels on GB10).
+- **`SPARK_NOTES.md`** — DGX Spark (GB10/sm_121) hard-won notes: a traps-&-fixes table
+  (UMA #35313, FP8-MoE #37804/#43507, NVFP4 Marlin #43906, Gemma no-`--quantization`
+  #40291, model-specific fp8-KV #35577, …) and a **watch-list** of open threads to
+  revisit when upstream lands fixes (Marlin-vs-CUTLASS NVFP4-MoE A/B, MTP depth,
+  gpu-util headroom, unvalidated tuning). `ADD_A_MODEL.md` and model `notes` link to it
+  instead of re-listing the traps.
+- `ADD_A_MODEL.md` — a **Tools & roles** note (document tools for research/authoring +
+  `omm` for hardware; never raw `ssh`), **parallel-vs-serial** guidance (fan out §1
+  research; keep §4–§6 on-hardware strictly serial) with tagged checklist items, and
+  corrections from the DGX review (rolling `:nightly` over pins, validated env vars,
+  auto-detected `--quantization`, model-specific kv-cache, automatic page-cache drop,
+  benchmark `--host`).
 
 ### Changed
 - **Config split into source-of-truth (code) + local sandbox (JSON).** `DEFAULT_CONFIG` in

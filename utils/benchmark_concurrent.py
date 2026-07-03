@@ -22,6 +22,9 @@ Usage:
 
     # Custom prompt and token count
     python3 utils/benchmark_concurrent.py --max-tokens 512 --prompt "Your custom prompt here"
+
+    # Benchmark a remote box by its `omm install` alias (or user@ip / ip)
+    python3 utils/benchmark_concurrent.py --profiles gemma4-26b-a4b --model gemma4-26b-a4b --host dgx1
 """
 
 import argparse
@@ -60,6 +63,34 @@ def load_config(path):
         sys.exit(1)
     with open(path) as f:
         return json.load(f)
+
+
+HOSTS_FILE = os.path.expanduser("~/.config/otools/hosts")
+
+
+def resolve_host(name):
+    """Map a host ALIAS (from `omm install`) to its target, then return just the
+    hostname/IP the benchmark connects to -- same alias store and semantics as
+    `omm --host`. Accepts an alias (`dgx1`), a `user@ip`, or a bare ip; a `user@`
+    prefix is stripped. Unknown names pass through unchanged."""
+    if not name:
+        return None
+    target = name
+    try:
+        with open(HOSTS_FILE) as f:
+            for ln in f:
+                ln = ln.strip()
+                if not ln or ln.startswith("#"):
+                    continue
+                parts = ln.split(None, 1)          # alias<whitespace>user@host
+                alias = parts[0]
+                tgt = parts[1].strip() if len(parts) == 2 else parts[0]
+                if name == alias:
+                    target = tgt
+                    break
+    except OSError:
+        pass
+    return target.split("@")[-1] if "@" in target else target
 
 
 def merge_model(cfg, key):
@@ -285,8 +316,12 @@ def main():
                         help="skip warmup")
     parser.add_argument("--prompt", default=None,
                         help="custom prompt (default: standard reasoning prompt)")
+    parser.add_argument("--host", default=None,
+                        help="host to benchmark against: an alias from `omm install` (e.g. dgx1), "
+                             "a user@ip, or a bare ip. Resolves aliases via ~/.config/otools/hosts, "
+                             "same as `omm --host`.")
     parser.add_argument("--remote", default=None,
-                        help="remote host to benchmark against (e.g. 192.168.50.102)")
+                        help="legacy alias for --host (kept for back-compat)")
     parser.add_argument("--model", default=None,
                         help="served model name to use in API requests (overrides config)")
     args = parser.parse_args()
@@ -294,12 +329,17 @@ def main():
     global PROMPT
     PROMPT = args.prompt if args.prompt else DEFAULT_PROMPT
 
+    # --host is the preferred name; --remote is the legacy alias for the same thing.
+    host_arg = args.host or args.remote
+    resolved_host = resolve_host(host_arg)      # alias -> ip; strips any user@ prefix
+
     print(f"Benchmarking omodel-manager models")
     print(f"Config: {args.config}")
     print(f"Tokens: {args.max_tokens} | Temp: {args.temperature} | Top-p: {args.top_p}")
     print(f"Prompt: {PROMPT[:60]}...")
-    if args.remote:
-        print(f"Remote host: {args.remote}")
+    if host_arg:
+        shown = f"{host_arg} -> {resolved_host}" if resolved_host != host_arg else resolved_host
+        print(f"Host: {shown}")
 
     # Load config
     cfg = load_config(args.config)
@@ -324,10 +364,8 @@ def main():
         except SystemExit:
             continue
 
-        # Build base URL from config (host:port), override with --remote if given
-        # Strip user@ prefix from --remote (e.g. "otto@192.168.50.102" -> "192.168.50.102")
-        remote_host = args.remote.split("@")[-1] if args.remote and "@" in args.remote else args.remote
-        host = remote_host if remote_host else model_info.get("host", "0.0.0.0")
+        # Build base URL from config (host:port), override with --host/--remote if given.
+        host = resolved_host if resolved_host else model_info.get("host", "0.0.0.0")
         port = model_info.get("port", 8000)
         base_url = f"http://{host}:{port}/v1/chat/completions"
 

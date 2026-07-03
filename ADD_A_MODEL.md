@@ -28,6 +28,18 @@ consume. Nothing is committed until the model is proven on real hardware.
 the live tests (below) confirm them. If a step's evidence contradicts the card,
 trust the evidence and note it.
 
+> **Tools & roles — how you (the agent) work here.** Two tool families, nothing else:
+> - **Document tools** (`WebFetch`/`WebSearch`, `Read`, `Write`, `Edit`) for §1–§3:
+>   research the model and author the profile + config. This is the bulk of the job.
+> - **The `omm` CLI** (`omodel-manager …`) for anything on hardware — `ps`, `launch`,
+>   `logs`, `health`, `stop`. **You never run `ssh`, `scp`, or `docker` directly**;
+>   `omm --host <alias>` does the remote plumbing for you. If you're reaching for a raw
+>   `ssh`, stop — there's an `omm` subcommand for it.
+>
+> **Hardware context lives in [SPARK_NOTES.md](SPARK_NOTES.md)** — the DGX Spark
+> (GB10/sm_121) trap table + open watch-list. Read it before §1; it's why several
+> flags below are what they are, and it's where you log anything new you learn.
+
 ---
 
 > **Track it with a todo list.** This is a multi-step workflow. Before you start,
@@ -35,6 +47,16 @@ trust the evidence and note it.
 > `TaskCreate`/`TaskUpdate`) covering the steps below — §0 prep, §1 research, §2
 > profile, §3 config, §4 make-it-work, §5 validate params, §6 benchmark, §7 finalize
 > — and keep exactly one item in progress. Don't run this from memory.
+>
+> **Parallel vs serial — tag each todo.** If your harness can run sub-agents in
+> parallel, split the work by phase:
+> - **`[parallel-ok]` §1 research** — the web lookups are independent; fan them out
+>   (see §1) and synthesize. §2 and §3 drafting can also overlap once research is in.
+> - **`[serial]` §4–§6 on-hardware** — **must run sequentially.** One model per box,
+>   one shared container and log stream, and §5 fingerprints *one* `SamplingParams`
+>   line per request — parallel requests corrupt that. Never fan these out.
+>
+> Rule of thumb: **parallelize the reading, serialize the hardware.**
 
 ## 0. Pick and prepare a host
 
@@ -49,6 +71,13 @@ trust the evidence and note it.
    registered, `launch` refuses a host-less run (pass `--local` only to force local).
 
 ## 1. Research the model
+
+> **Parallelize this step.** These lookups are independent — if you can spawn
+> sub-agents, fan them out and have each return a short structured finding, then
+> synthesize. Good split: (1) fetch `config.json`, (2) fetch the model card, (3) vLLM/
+> SGLang GitHub issues for `<model> + <quant>`, (4) Blackwell/sm_121 reports,
+> (5) throughput/perf benchmarks, (6) quant-specific gotchas. Read
+> [SPARK_NOTES.md](SPARK_NOTES.md) first so you know the traps you're checking against.
 
 1. **Fetch `config.json`** (`<repo>/raw/main/config.json`). Extract: `model_type`,
    `architectures`, `max_position_embeddings`, `rope_theta`/`rope_scaling`,
@@ -66,11 +95,10 @@ trust the evidence and note it.
    - Search `"<model> vLLM"`, `"<model> blackwell"`, `"<model> fp8 throughput"`.
    - Note anything that changes launch flags or expectations (e.g. FP8-MoE decode
      is slow on Blackwell → NVFP4 may be the better serve).
-   - **Known Blackwell/sm_121 FP8-MoE trap:** DeepGEMM's E8M0 scale-factor path
-     crashes at load (`Unknown SF transformation`) and hurts accuracy for Qwen3.5/3.6
-     FP8 MoE (vLLM #37804/#43507). Fix: env `VLLM_USE_DEEP_GEMM=0` → MoE falls back to
-     TRITON (the working backend on sm_121). CUTLASS MoE is *unavailable* on sm_121 —
-     don't try to force it.
+   - **Check your findings against [SPARK_NOTES.md](SPARK_NOTES.md)'s trap table**
+     before drafting flags — most GB10/sm_121 surprises are already logged there
+     (FP8-MoE `VLLM_USE_DEEP_GEMM=0`, NVFP4 Marlin path, fp8-KV per-model, Gemma
+     no-`--quantization`, …). If you hit a *new* one, add it there in §7.
 
 Write down: capabilities (vision/reasoning/tool_call), thinking mechanism, native
 context, quant + the vLLM flags it implies, and any known-issue mitigations.
@@ -82,7 +110,10 @@ Add a profile to **`model_manager.json` only** (the local, git-ignored sandbox).
 should only be changed after the model is proven. Base it on the closest existing
 profile; change only what the quant/model needs:
 
-- `image`: the pinned vLLM image that supports this model/quant.
+- `image`: **default to the rolling `:nightly-aarch64`** (omit `image` to inherit the
+  config default) — this space moves weekly and pins go stale fast. **Pin only when a
+  build is genuinely required** and say why in `notes` (e.g. Gemma-4 needs
+  `gemma4-cu130`). Don't pin "to be safe."
 - `model` + `served-model-name` — put `served-model-name` **inside `vllm_args`**, set
    to the config key, so the served id matches the config's `match` (a top-level
    `served-model-name` is silently ignored and the model serves under its full HF id).
@@ -90,12 +121,17 @@ profile; change only what the quant/model needs:
    It is NOT the same as the config's top-level `model` field (the HF repo ID).
    Downstream tools that call the API must use the served name, not the HF ID.
 - `port` (default 8000 — one model per box at a time).
-- `env`: quant/runtime vars (e.g. `VLLM_NVFP4_GEMM_BACKEND`, `VLLM_ATTENTION_BACKEND`,
-  and on Blackwell FP8-MoE `VLLM_USE_DEEP_GEMM=0` — see §1).
-- `vllm_args`: `--quantization` (often auto-detected — omit unless required),
-  `--kv-cache-dtype`, `--max-model-len`, `--max-num-seqs` (respect Mamba-cache limits),
-  `--reasoning-parser`, `--tool-call-parser`, `--enable-auto-tool-choice`, spec-decode, etc.
-- `usecase` tags; `notes` capturing the research (pinned image reason, known issues).
+- `env`: quant/runtime vars. On DGX Spark the validated ones (see
+  [SPARK_NOTES.md](SPARK_NOTES.md)) are **`VLLM_USE_DEEP_GEMM=0`** (FP8-MoE),
+  **`VLLM_USE_FLASHINFER_MOE_FP4=0`** + **`VLLM_TEST_FORCE_FP8_MARLIN=1`** (NVFP4 Marlin
+  path). Don't invent env vars — confirm one exists before adding it.
+- `vllm_args`: `--quantization` (**auto-detected — omit it**; an explicit value can crash
+  startup, e.g. Gemma-4 `ValueError`, vLLM #40291), `--kv-cache-dtype` (**model-specific**
+  on Spark — helps Qwen, crashes GLM-MLA, hurts Gemma; see SPARK_NOTES), `--max-model-len`,
+  `--max-num-seqs` (respect Mamba-cache limits), `--reasoning-parser`, `--tool-call-parser`,
+  `--enable-auto-tool-choice`, spec-decode, and **`--gpu-memory-utilization 0.85`** (UMA
+  safety default). Leave the page-cache drop to `launch` — it's automatic (see §4).
+- `usecase` tags; `notes` capturing the research (why any image is pinned, known issues).
 - `assets` if the model needs side files (custom parser plugin, chat template).
 
 **Testing only — do these things:**
@@ -136,6 +172,11 @@ consume — keep it harness-agnostic. Fill from research; the live tests will co
     the image isn't cached yet, `launch` pulls it in the background and returns at once
     — poll `omodel-manager pull-status <key> --host <host>` until it says the container
     started. Then `omodel-manager logs <key> --host <host> -f`.
+    - **Page cache is dropped automatically** right before the container starts (the UMA
+      false-OOM/freeze guard, vLLM #35313 — see SPARK_NOTES). No flag: `install` set up a
+      scoped NOPASSWD sudo rule for it. If a launch prints `warning: drop-caches skipped`,
+      the host wasn't fully installed — run `omodel-manager install <host> --fix` and it
+      goes away. Don't work around it with raw `ssh`.
  3. **Review the logs** for: config/flag rejections, OOM / KV-cache / Mamba-cache
     warnings, quant/backend fallbacks, and `Application startup complete`.
  4. **Wait for readiness.** The model takes 1–3 minutes to start (weights + torch.compile
@@ -191,8 +232,11 @@ omodel-manager logs <container> --host <host> 2>&1 | grep -i sampling
 Before finalizing `max-num-seqs`, run the concurrency benchmark to find the throughput sweet spot:
 
 ```bash
-python3 utils/benchmark_concurrent.py --profiles <key> --model <served-model-name> --remote <host>
+python3 utils/benchmark_concurrent.py --profiles <key> --model <served-model-name> --host <host>
 ```
+
+`--host` takes the same alias as `omm --host` (resolved via `~/.config/otools/hosts`), or
+a `user@ip` / bare ip. (`--remote` still works as a legacy alias.)
 
 This script sends 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 concurrent requests (step=1 by default)
 to the live endpoint, measures wall time and per-request latency, and prints a summary
@@ -229,11 +273,14 @@ Only after the model runs clean and you know what's tunable:
 
 ## Checklist
 
-- [ ] `config.json` + card read; capabilities & flags noted
-- [ ] deep research done; known issues (esp. Blackwell) captured
+Tags: `[parallel-ok]` = fan out to sub-agents if you can; `[serial]` = one at a time on
+the box (see the parallel-vs-serial note up top).
+
+- [ ] `[parallel-ok]` `config.json` + card read; capabilities & flags noted
+- [ ] `[parallel-ok]` deep research done; findings checked against SPARK_NOTES.md
 - [ ] launch profile drafted in `model_manager.json` only (not committed, not in `DEFAULT_CONFIG`)
 - [ ] `configs/<key>.toml` drafted
-- [ ] launched on a free node; startup logs clean
-- [ ] functional + concurrency test pass; single/multi tok/s noted
-- [ ] thinking / vision / each sampling param verified in logs
+- [ ] `[serial]` launched on a free node; startup logs clean
+- [ ] `[serial]` functional + concurrency test pass; single/multi tok/s noted
+- [ ] `[serial]` thinking / vision / each sampling param verified in logs
 - [ ] config corrected to observed reality; both repos committed + tests green

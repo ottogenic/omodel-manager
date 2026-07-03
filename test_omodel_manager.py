@@ -150,7 +150,7 @@ class LaunchGuardTests(unittest.TestCase):
     def _launch(self, **kw):
         base = dict(key=self.key, remote=None, local=False, dry_run=True,
                     foreground=False, keep=False, force=False, no_fetch=True,
-                    refresh=False, wait=False, drop_caches=None)
+                    refresh=False, wait=False)
         base.update(kw)
         # Swallow the dry-run banner so the test suite stays quiet.
         with contextlib.redirect_stdout(io.StringIO()), \
@@ -171,26 +171,26 @@ class LaunchGuardTests(unittest.TestCase):
 
 
 class DropCachesTests(unittest.TestCase):
-    """Opt-in page-cache drop before launch (UMA guard, vLLM #35313)."""
+    """Automatic page-cache drop before every launch (UMA guard, vLLM #35313)."""
 
-    def test_default_off(self):
-        merged = mm.merge_model(mm.load_config(), "glm-4.7-flash")
-        self.assertFalse(merged["drop_caches"])
+    def test_cmd_is_non_interactive(self):
+        # `sudo -n` must never prompt: a missing NOPASSWD rule fails fast, not hangs.
+        self.assertTrue(mm.DROP_CACHES_CMD.startswith("sudo -n "))
+        self.assertIn(mm.DROP_CACHES_HELPER, mm.DROP_CACHES_CMD)
 
-    def test_bg_command_injects_only_when_enabled(self):
-        argv = ["run", "--name", "x"]
-        on = mm._launch_bg_command("k", "img", argv, drop_caches=True)
-        off = mm._launch_bg_command("k", "img", argv, drop_caches=False)
-        self.assertIn("drop_caches", on)
-        self.assertNotIn("drop_caches", off)
+    def test_bg_command_always_injects(self):
+        bg = mm._launch_bg_command("k", "img", ["run", "--name", "x"])
         # ordering: pull the image, then drop the cache, then run the container.
-        self.assertLess(on.index("pull"), on.index("drop_caches"))
-        self.assertLess(on.index("drop_caches"), on.index("--name"))
+        self.assertLess(bg.index("pull"), bg.index(mm.DROP_CACHES_HELPER))
+        self.assertLess(bg.index(mm.DROP_CACHES_HELPER), bg.index("--name"))
+        # grouped `|| true` so a sudo failure can't abort the launch.
+        self.assertIn("|| true", bg)
 
-    def test_bg_drop_is_non_fatal(self):
-        # the drop step is grouped with `|| true` so a sudo failure can't abort the launch.
-        on = mm._launch_bg_command("k", "img", ["run"], drop_caches=True)
-        self.assertIn("|| true", on)
+    def test_install_cmd_scopes_the_rule(self):
+        cmd = mm._drop_caches_install_cmd()
+        self.assertIn("NOPASSWD: %s" % mm.DROP_CACHES_HELPER, cmd)
+        self.assertIn(mm.DROP_CACHES_SUDOERS, cmd)
+        self.assertIn("visudo -cf", cmd)          # validates before it can break sudo
 
 
 class ProfileTests(unittest.TestCase):

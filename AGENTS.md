@@ -20,6 +20,11 @@ free of any harness-specific keys. See `configs/README.md` for the format.
 (research → draft profile + config → prove it on hardware → verify tunable params →
 commit). Start from a HuggingFace repo link.
 
+**Deploying on the DGX Spark?** Read **`SPARK_NOTES.md`** — the GB10/sm_121 traps-&-fixes
+table (why several profiles carry the env vars / flags they do) and the open watch-list.
+It's the single source of truth for hardware gotchas; model `notes` link to it rather
+than repeating them.
+
 **Constraints (do not violate):**
 - **Standard library only.** No third-party imports, ever. Runs with a bare `python3`.
 - **Single script + data files.** The tool is `omodel-manager`; `model_manager.json`

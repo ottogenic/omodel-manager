@@ -55,8 +55,8 @@ Optional: `python omodel-manager shell-init` adds an `omm` shell alias.
 | `ps [--all]` | Running containers **plus** every registered host, each `running`/`idle`/`unreachable` |
 | `stop <profile>` (alias `kill`) | Stop + remove a container (`-y` to skip confirm) |
 | `fetch <profile>` | Pre-download a profile's declared assets |
-| `install <user@ip> [alias] [--fix]` (alias `setup`) | Bootstrap a remote (SSH, docker, group, HF token) + register it under an alias |
-| `uninstall <alias\|host> [--purge]` | Unregister a host + revoke the otools key (`--purge` also drops docker-group/containers) |
+| `install <user@ip> [alias] [--fix]` (alias `setup`) | Bootstrap a remote (SSH, docker, group, HF token, drop-caches sudo rule) + register it under an alias |
+| `uninstall <alias\|host> [--purge]` | Unregister a host + revoke the otools key (`--purge` also drops docker-group/containers + drop-caches rule) |
 | `config [--path/--init/--edit]` | Show/init/edit the config file |
 | `shell-init` (alias `install-aliases`) | Add the `omm` shell alias |
 
@@ -65,6 +65,12 @@ an alias from `install` (e.g. `dgx1`) or a raw `user@ip`. (`--remote` is a legac
 alias for `--host`.) Set `defaults.remote` in the config to make it the default. If
 any host is registered, `launch` won't silently run local — pick a `--host`, or pass
 `--local` to force local.
+
+**Every `launch` drops the host's OS page cache right before `docker run`** — the DGX
+Spark / UMA false-OOM-&-freeze guard (vLLM #35313). There's no flag: `install` sets up a
+scoped `NOPASSWD` sudo rule (`/usr/local/sbin/otools-drop-caches`) so it runs unattended,
+and launch uses `sudo -n`, so a host that wasn't installed just warns and skips it rather
+than ever prompting. See [SPARK_NOTES.md](SPARK_NOTES.md) for the hardware background.
 
 ## The config
 
@@ -80,7 +86,6 @@ resets it from the hardcoded defaults. **Promote** a vetted change by editing
   "defaults": {                     // merged UNDER every profile
     "image": "...", "host": "0.0.0.0", "gpus": "all",
     "remote": null,                 // "user@host" to default all commands remote
-    "drop_caches": false,           // drop the OS page cache before `docker run` (UMA guard)
     "hf_cache": "~/.cache/huggingface",
     "env": { "HF_TOKEN": null, "VLLM_LOGGING_COLOR": "1" },
     "docker_flags": ["--privileged", "--network", "host", ...],
