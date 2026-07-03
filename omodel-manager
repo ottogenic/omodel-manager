@@ -81,10 +81,19 @@ LABEL_VALUE = "model_manager"
 LABEL_MODEL = "otools.model"
 LABEL_PORT = "otools.port"
 NAME_PREFIX = "otools-vllm-"
-# Pinned by DIGEST on purpose. The rolling `:nightly-aarch64` tag rolled in a build
-# (0.23.1rc1.dev601) that produced pure-garbage output (repeated single tokens) for
-# Qwen3.6-NVFP4 on GB10/sm_121 -- a moving nightly is not a safe default. This is the
-# last-known-good digest; bump it deliberately only after validating a newer build on-box.
+# Base image -- PINNED BY DIGEST (the hash below is one specific, immutable build). In
+# human terms this digest is:
+#
+#     vLLM 0.23.1rc1.dev552  (multi-arch amd64+arm64 nightly, commit g4559c43a9)
+#     last validated GOOD for Qwen3.6-NVFP4 on GB10/sm_121 -- 2026-07-03
+#
+# Why a digest and not a readable tag: rolling tags silently roll in broken builds --
+# `:nightly-aarch64` regressed this model to pure-garbage output (see SPARK_NOTES) -- and
+# vLLM ships no version tag for nightlies, so there is no readable tag to pin here yet.
+# When a vLLM RELEASE supports this model, switch to `:vX.Y.Z@sha256:<digest>` (readable
+# tag AND matching digest -- best of both). To bump now: pull the build, read its digest
+# with `docker buildx imagetools inspect`, validate GENERATION on-box, then update the
+# digest AND this version card together.
 DEFAULT_IMAGE = ("vllm/vllm-openai@sha256:"
                  "7feb2a09304e3b2d38e224a100316e84fe3205faa7605060609e2c02179cbca6")
 
