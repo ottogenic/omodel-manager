@@ -1018,8 +1018,10 @@ def save_ps_index(rows):
         pass
 
 
-def resolve_ps_id(idval):
-    """Look up a `ps` ID number in the saved index; returns the row entry or exits."""
+def resolve_ps_id(idval, need_container=True):
+    """Look up a `ps` ID number in the saved index; returns the row entry or exits.
+    With need_container=False (e.g. `launch <profile> <id>`) an idle host row is fine --
+    we only want its host to launch on."""
     try:
         with open(PS_INDEX_FILE) as f:
             rows = json.load(f).get("rows", [])
@@ -1029,7 +1031,7 @@ def resolve_ps_id(idval):
         sys.exit(1)
     for e in rows:
         if e.get("id") == idval:
-            if not e.get("container") and e.get("status") != "pulling":
+            if need_container and not e.get("container") and e.get("status") != "pulling":
                 print(f"ERROR: id {idval} is the {e.get('status', 'idle')} host "
                       f"'{e.get('alias')}' -- no container to act on.", file=sys.stderr)
                 sys.exit(1)
@@ -1126,9 +1128,10 @@ def cmd_ps(args):
             ("Stop a model", f"{p} stop 1"),
         ])
     else:
-        idle = [e["alias"] for e in index if e["status"] == "idle"]
+        idle = [e for e in index if e["status"] == "idle"]
+        tgt = str(idle[0]["id"]) if idle else "<id>"
         _suggest([
-            ("Launch on a free host", f"{p} launch <profile> --host {idle[0] if idle else '<alias>'}"),
+            ("Launch on a free host (by its ps ID)", f"{p} launch <profile> {tgt}"),
             ("List available models", f"{p} list"),
         ])
 
@@ -1888,6 +1891,9 @@ def main():
 
     p = sub.add_parser("launch", help="launch a model profile", parents=[remote_parent])
     p.add_argument("key", help="profile key from the config (see `models`)")
+    p.add_argument("host_or_id", nargs="?", metavar="HOST|ID",
+                   help="where to launch: a `ps` row ID (e.g. 3, an idle host) or a host "
+                        "alias/user@ip -- same as --host, just positional")
     p.add_argument("--dry-run", action="store_true", help="print the docker command, don't run")
     p.add_argument("--foreground", action="store_true", help="run with -it instead of detached -d")
     p.add_argument("--keep", action="store_true",
@@ -1997,6 +2003,15 @@ def main():
                 args.target = entry.get("container") or entry.get("model")
             elif hasattr(args, "key"):
                 args.key = entry.get("model")
+
+    # `launch <profile> <id|host>`: the positional targets a host to launch on. A numeric
+    # value is a `ps` row ID (idle host allowed); anything else is a host alias/user@ip.
+    hoi = getattr(args, "host_or_id", None)
+    if hoi:
+        if hoi.isdigit():
+            args.remote = resolve_ps_id(int(hoi), need_container=False).get("host")
+        else:
+            args.remote = hoi                         # alias/user@ip -> resolve_host below
     if getattr(args, "func", None) in (cmd_logs, cmd_stop) and not getattr(args, "target", None):
         print(f"ERROR: name a profile/container or a `ps` ID number (see `{_cli_name()} ps`).",
               file=sys.stderr)

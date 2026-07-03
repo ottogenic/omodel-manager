@@ -47,7 +47,7 @@ Optional: `python omodel-manager shell-init` adds an `omm` shell alias.
 | Command | What it does |
 |---|---|
 | `list` (alias `models`) | Table of profiles: context, concurrency, use-case |
-| `launch <profile>` | Start a profile (detached). `--dry-run`, `--foreground`, `--keep`, `--force`, `--wait`, `--local`. Uncached image → pulls in the background and returns immediately |
+| `launch <profile> [host\|id]` | Start a profile (detached) — optional positional targets a host by alias or `ps` **ID** (e.g. an idle row). `--dry-run`, `--foreground`, `--keep`, `--force`, `--wait`, `--local`. Uncached image → pulls in the background and returns immediately |
 | `pull <profile>` | Pre-pull a profile's image so `launch` starts instantly |
 | `pull-status <profile\|id>` | Progress of a backgrounded launch/pull |
 | `logs <profile\|id> [-f]` | Show/follow a container's logs (Ctrl-C detaches cleanly) |
@@ -68,7 +68,8 @@ any host is registered, `launch` won't silently run local — pick a `--host`, o
 
 **Reference a `ps` row by its ID** instead of typing a model name + `--host`. Run `ps`,
 then `logs 2` / `stop 2` / `health 2` (or `--id 2`) — the ID resolves to that row's host
-and container. Works on `logs`, `stop`/`kill`, `health`, and `pull-status`.
+and container. Works on `logs`, `stop`/`kill`, `health`, and `pull-status`. And
+`launch <profile> 3` launches onto the host at `ps` row 3 (e.g. an idle box).
 
 **Every `launch` drops the host's OS page cache right before `docker run`** — the DGX
 Spark / UMA false-OOM-&-freeze guard (vLLM #35313). There's no flag: `install` sets up a

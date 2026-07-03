@@ -57,7 +57,7 @@ than repeating them.
 
 - **Find a free host with `ps`, don't grep the config.** `ps` lists every registered host and marks each `running` / `idle` / `unreachable`. Read it to pick an idle box — do NOT open `model_manager.json` or the configs to hunt for a host address.
 
-- **Act on a running model by its `ps` ID.** `ps` numbers every row (**ID** column). `logs 2` / `stop 2` / `health 2` / `pull-status 2` (or `--id 2`) resolve that row's host **and** container from the saved index (`~/.config/otools/ps-index.json`) — no `--host` or model name needed. Run `ps` first to (re)build the index; IDs reflect the most recent `ps`.
+- **Act on a row by its `ps` ID.** `ps` numbers every row (**ID** column). `logs 2` / `stop 2` / `health 2` / `pull-status 2` (or `--id 2`) resolve that row's host **and** container from the saved index (`~/.config/otools/ps-index.json`) — no `--host` or model name needed. `launch <profile> 3` launches onto the host at row 3 (idle rows allowed). Run `ps` first to (re)build the index; IDs reflect the most recent `ps`.
 
 - **`launch` is non-blocking on a cold image.** If the image isn't cached, `launch` starts the pull+run in the background and returns immediately (so the tool call won't time out). Then poll `pull-status <key> --host <alias>` until it reports the container started, and `health` for readiness. Use `launch --wait` only when you deliberately want it to block; `pull <key> --host <alias>` pre-caches an image.
 

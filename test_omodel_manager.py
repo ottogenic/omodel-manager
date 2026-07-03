@@ -472,6 +472,11 @@ class PsIndexTests(unittest.TestCase):
         mm.save_ps_index(self.ROWS)
         self._refuses(2)          # idle host -> no container to act on
 
+    def test_launch_accepts_idle_host(self):
+        mm.save_ps_index(self.ROWS)
+        e = mm.resolve_ps_id(2, need_container=False)   # `launch <profile> 2` targets the host
+        self.assertEqual(e["host"], "otto@b")
+
     def test_missing_id_refused(self):
         mm.save_ps_index(self.ROWS)
         self._refuses(99)
