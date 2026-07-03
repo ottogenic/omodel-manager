@@ -441,6 +441,45 @@ class ResolveTargetTests(unittest.TestCase):
         self.assertEqual(mm.resolve_target("ghost"), "ghost")
 
 
+class PsIndexTests(unittest.TestCase):
+    """`ps` writes a numbered index; `-id N` resolves a row back to host+container."""
+
+    ROWS = [
+        {"id": 1, "host": "otto@a", "alias": "dgx-1", "container": "otools-vllm-m1",
+         "model": "m1", "port": "8000", "status": "running"},
+        {"id": 2, "host": "otto@b", "alias": "dgx-2", "container": None,
+         "model": None, "port": None, "status": "idle"},
+    ]
+
+    def setUp(self):
+        self._old = mm.PS_INDEX_FILE
+        mm.PS_INDEX_FILE = os.path.join(tempfile.mkdtemp(), "ps-index.json")
+
+    def tearDown(self):
+        mm.PS_INDEX_FILE = self._old
+
+    def _refuses(self, idval):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                mm.resolve_ps_id(idval)
+
+    def test_save_resolve_roundtrip(self):
+        mm.save_ps_index(self.ROWS)
+        e = mm.resolve_ps_id(1)
+        self.assertEqual((e["host"], e["container"]), ("otto@a", "otools-vllm-m1"))
+
+    def test_idle_row_refused(self):
+        mm.save_ps_index(self.ROWS)
+        self._refuses(2)          # idle host -> no container to act on
+
+    def test_missing_id_refused(self):
+        mm.save_ps_index(self.ROWS)
+        self._refuses(99)
+
+    def test_no_index_refused(self):
+        self._refuses(1)          # file doesn't exist yet
+
+
 class FmtTokensTests(unittest.TestCase):
     def test_units(self):
         self.assertEqual(mm._fmt_tokens(262144), "256K")

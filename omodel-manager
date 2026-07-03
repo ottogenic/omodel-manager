@@ -75,6 +75,7 @@ CONFIG_PATH = _default_config_path()
 # Secret store -- kept in ~/.config/otools (NOT next to the script / repo).
 HF_TOKEN_FILE = os.path.expanduser("~/.config/otools/hf_token")
 HOSTS_FILE = os.path.expanduser("~/.config/otools/hosts")  # remote hosts `ps` queries (managed by `install`)
+PS_INDEX_FILE = os.path.expanduser("~/.config/otools/ps-index.json")  # last `ps` rows, for `-id N`
 HF_TOKENS_URL = "https://huggingface.co/settings/tokens"
 LABEL_MANAGER = "otools.manager"
 LABEL_VALUE = "model_manager"
@@ -1006,6 +1007,39 @@ def _pulling_keys(target):
     return [ln.strip() for ln in res.stdout.splitlines() if ln.strip()]
 
 
+def save_ps_index(rows):
+    """Persist the numbered rows of the last `ps` so `logs 2` / `--id 2` can resolve
+    a row back to its host + container without retyping either."""
+    try:
+        os.makedirs(os.path.dirname(PS_INDEX_FILE), exist_ok=True)
+        with open(PS_INDEX_FILE, "w") as f:
+            json.dump({"rows": rows}, f)
+    except OSError:
+        pass
+
+
+def resolve_ps_id(idval):
+    """Look up a `ps` ID number in the saved index; returns the row entry or exits."""
+    try:
+        with open(PS_INDEX_FILE) as f:
+            rows = json.load(f).get("rows", [])
+    except (OSError, ValueError):
+        print(f"ERROR: no `ps` index yet -- run `{_cli_name()} ps` first, then use a row's ID.",
+              file=sys.stderr)
+        sys.exit(1)
+    for e in rows:
+        if e.get("id") == idval:
+            if not e.get("container") and e.get("status") != "pulling":
+                print(f"ERROR: id {idval} is the {e.get('status', 'idle')} host "
+                      f"'{e.get('alias')}' -- no container to act on.", file=sys.stderr)
+                sys.exit(1)
+            return e
+    ids = ", ".join(str(e.get("id")) for e in rows) or "none"
+    print(f"ERROR: id {idval} not in the last `ps` (ids: {ids}). Re-run `{_cli_name()} ps`.",
+          file=sys.stderr)
+    sys.exit(1)
+
+
 def cmd_ps(args):
     p = _cli_name()
     registered = load_hosts()                       # [(alias, target)]
@@ -1055,37 +1089,44 @@ def cmd_ps(args):
         ])
         return
 
-    print(f"{'HOST':<20} {'NAME':<28} {'MODEL':<30} {'PORT':<6} {'STATUS'}")
-    for r in all_rows:
+    print(f"{'ID':<3} {'HOST':<14} {'NAME':<26} {'MODEL':<26} {'PORT':<6} {'STATUS'}")
+    index, rid = [], 0
+    for r in all_rows:                               # running containers first (ids 1..N)
+        rid += 1
         labels = r.get("Labels", "")
-        model = _label(labels, LABEL_MODEL) or r.get("Image", "")[:30]
+        model = _label(labels, LABEL_MODEL) or r.get("Image", "")[:26]
         port = _label(labels, LABEL_PORT) or "?"
-        name = r.get("Names", "")
-        if name.startswith(NAME_PREFIX):             # show the short profile key, not otools-vllm-*
-            name = name[len(NAME_PREFIX):]
-        print(f"{hlabel(r.get('_host')):<20} {name:<28} {model:<30} {str(port):<6} {r.get('Status','')}")
-    # A box mid-pull isn't free -- surface it so we don't double-launch on it.
-    for t in targets:
+        cname = r.get("Names", "")
+        name = cname[len(NAME_PREFIX):] if cname.startswith(NAME_PREFIX) else cname
+        host = r.get("_host")
+        print(f"{rid:<3} {hlabel(host):<14} {name:<26} {model:<26} {str(port):<6} {r.get('Status','')}")
+        index.append({"id": rid, "host": host, "alias": hlabel(host), "container": cname,
+                      "model": model, "port": port, "status": "running"})
+    for t in targets:                                # a box mid-pull isn't free -- surface it
         for key in pulling.get(t, []):
-            print(f"{hlabel(t):<20} {key:<28} {'—':<30} {'—':<6} pulling image")
-    if show_idle:                                    # surface idle/unreachable hosts so agents can pick one
+            rid += 1
+            print(f"{rid:<3} {hlabel(t):<14} {key:<26} {'—':<26} {'—':<6} pulling image")
+            index.append({"id": rid, "host": t, "alias": hlabel(t), "container": None,
+                          "model": key, "port": None, "status": "pulling"})
+    if show_idle:                                    # idle/unreachable hosts so agents can pick one
         for t in targets:
-            if state.get(t) == "idle":
-                print(f"{hlabel(t):<20} {'—':<28} {'—':<30} {'—':<6} idle")
-            elif state.get(t) == "unreachable":
-                print(f"{hlabel(t):<20} {'—':<28} {'—':<30} {'—':<6} unreachable (ssh)")
+            st = state.get(t)
+            if st in ("idle", "unreachable"):
+                rid += 1
+                label = "idle" if st == "idle" else "unreachable (ssh)"
+                print(f"{rid:<3} {hlabel(t):<14} {'—':<26} {'—':<26} {'—':<6} {label}")
+                index.append({"id": rid, "host": t, "alias": hlabel(t), "container": None,
+                              "model": None, "port": None, "status": st})
+    save_ps_index(index)
 
-    if all_rows:
-        example = _label(all_rows[0].get("Labels", ""), LABEL_MODEL) or all_rows[0].get("Names", "<name>")
-        fh = all_rows[0].get("_host")
-        hsuf = f" --host {hlabel(fh)}" if fh else ""
+    if all_rows:                                     # id 1 is always the first running row
         _suggest([
-            ("View a model's logs (Ctrl-C to stop following)", f"{p} logs {example}{hsuf} -f"),
-            ("Check readiness", f"{p} health{hsuf}"),
-            ("Stop a model", f"{p} stop {example}{hsuf}"),
+            ("View a model's logs (by its ID; Ctrl-C to stop)", f"{p} logs 1 -f"),
+            ("Check readiness", f"{p} health 1"),
+            ("Stop a model", f"{p} stop 1"),
         ])
     else:
-        idle = [hlabel(t) for t in targets if state.get(t) == "idle"]
+        idle = [e["alias"] for e in index if e["status"] == "idle"]
         _suggest([
             ("Launch on a free host", f"{p} launch <profile> --host {idle[0] if idle else '<alias>'}"),
             ("List available models", f"{p} list"),
@@ -1868,7 +1909,8 @@ def main():
 
     p = sub.add_parser("pull-status", help="show progress of a backgrounded launch/pull",
                        parents=[remote_parent])
-    p.add_argument("key", help="profile key from the config")
+    p.add_argument("key", nargs="?", help="profile key, or a `ps` ID number")
+    p.add_argument("--id", type=int, default=None, help="reference a row from the last `ps`")
     p.set_defaults(func=cmd_pull_status)
 
     p = sub.add_parser("fetch", help="download a profile's declared assets (without launching)")
@@ -1879,19 +1921,23 @@ def main():
     for alias in ("stop", "kill"):
         p = sub.add_parser(alias, help="stop and remove a managed container",
                            parents=[remote_parent])
-        p.add_argument("target", help="profile key or container name/id")
+        p.add_argument("target", nargs="?", help="profile key, container name, or a `ps` ID number")
+        p.add_argument("--id", type=int, default=None, help="reference a row from the last `ps`")
         p.add_argument("--yes", "-y", action="store_true", help="skip confirmation")
         p.set_defaults(func=cmd_stop)
 
     p = sub.add_parser("logs", help="show/follow a container's logs", parents=[remote_parent])
-    p.add_argument("target", help="profile key or container name/id")
+    p.add_argument("target", nargs="?", help="profile key, container name, or a `ps` ID number")
+    p.add_argument("--id", type=int, default=None, help="reference a row from the last `ps`")
     p.add_argument("--follow", "-f", action="store_true", help="stream new logs")
     p.add_argument("--tail", type=int, default=200, help="lines from the end (default 200)")
     p.set_defaults(func=cmd_logs)
 
     p = sub.add_parser("health", help="GET /v1/models on running containers",
                        parents=[remote_parent])
-    p.add_argument("target", nargs="?", help="profile key or container name (default: all running)")
+    p.add_argument("target", nargs="?",
+                   help="profile key, container name, or a `ps` ID (default: all running)")
+    p.add_argument("--id", type=int, default=None, help="reference a row from the last `ps`")
     p.add_argument("--all", action="store_true", help="include unmanaged vllm containers")
     p.set_defaults(func=cmd_health)
 
@@ -1933,6 +1979,28 @@ def main():
     global CONFIG_PATH, REMOTE
     if args.config:
         CONFIG_PATH = os.path.expanduser(args.config)
+
+    # `-id N` (or a bare numeric target/key) references a row from the last `ps`:
+    # resolve it to a host + container so e.g. `logs 2` needs no --host or model name.
+    if hasattr(args, "id"):
+        idval = args.id
+        if idval is None:
+            tgt = getattr(args, "target", None)
+            if tgt is None:
+                tgt = getattr(args, "key", None)
+            if isinstance(tgt, str) and tgt.isdigit():
+                idval = int(tgt)
+        if idval is not None:
+            entry = resolve_ps_id(idval)
+            args.remote = entry.get("host")           # feeds the host resolution below
+            if hasattr(args, "target"):
+                args.target = entry.get("container") or entry.get("model")
+            elif hasattr(args, "key"):
+                args.key = entry.get("model")
+    if getattr(args, "func", None) in (cmd_logs, cmd_stop) and not getattr(args, "target", None):
+        print(f"ERROR: name a profile/container or a `ps` ID number (see `{_cli_name()} ps`).",
+              file=sys.stderr)
+        sys.exit(1)
 
     # Resolve the target host: explicit --host/--remote > config defaults.remote > local.
     # resolve_host() maps an alias to its user@host (a raw user@host passes through).

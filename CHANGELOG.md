@@ -16,6 +16,11 @@ All notable changes to this project are documented here. The format follows
   git-ignored local sandbox (source of truth is `DEFAULT_CONFIG`).
 
 ### Added
+- **`ps` ID column + `-id` shortcut.** `ps` now numbers every row and saves a small index
+  (`~/.config/otools/ps-index.json`). `logs`, `stop`/`kill`, `health`, and `pull-status`
+  accept a bare row number (`omm logs 2`) or `--id 2`, which resolves that row's host **and**
+  container from the index — no `--host` or model name needed. Idle/unreachable rows are
+  refused (nothing to act on). Cuts the args way down on a multi-host fleet.
 - **Remote UX overhaul.**
   - **`--host ALIAS|USER@HOST`** replaces `--remote` (kept as a hidden legacy alias) and
     resolves aliases from the hosts store.
