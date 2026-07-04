@@ -127,7 +127,7 @@ DEFAULT_CONFIG = {
         },
     },
     "models": {
-        "qwen3.6-35b-nvfp4": {
+        "qwen3.6-35b-a3b-nvfp4": {
             "image": "vllm/vllm-openai:nightly",
             "model": "nvidia/Qwen3.6-35B-A3B-NVFP4",
             "port": 8000,
@@ -194,7 +194,7 @@ DEFAULT_CONFIG = {
                 "enable-log-requests": True,
             },
         },
-        "qwen3.6-35b-bf16": {
+        "qwen3.6-35b-a3b-bf16": {
             "image": "vllm/vllm-openai:nightly",
             "notes": [
                 "Qwen/Qwen3.6-35B-A3B (BF16 base, qwen3_5_moe MoE: 35B total / ~3B active). "
@@ -225,7 +225,7 @@ DEFAULT_CONFIG = {
                 "enable-log-requests": True,
             },
         },
-        "nemotron-3-super-120b-nvfp4-256k": {
+        "nemotron-3-super-120b-a12b-nvfp4-256k": {
             "image": "vllm/vllm-openai:nightly",
             "notes": [
                 "Rolling nightly-aarch64 image (GB10/sm_121, CUDA 13); NVIDIA's Spark "
@@ -275,9 +275,9 @@ DEFAULT_CONFIG = {
             },
         },
         # Same model/box as -256k; inherits everything, overrides only context+concurrency.
-        "nemotron-3-super-120b-nvfp4-1m": {
+        "nemotron-3-super-120b-a12b-nvfp4-1m": {
             "image": "vllm/vllm-openai:nightly",
-            "extends": "nemotron-3-super-120b-nvfp4-256k",
+            "extends": "nemotron-3-super-120b-a12b-nvfp4-256k",
             "notes": [
                 "1M context, up to 2 concurrent users (max-num-seqs 2).",
                 "Card defaults config to 256k; VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 (inherited) + "
@@ -429,7 +429,7 @@ DEFAULT_CONFIG = {
                 "gpu-memory-utilization": 0.85,
             },
         },
-        "gemma4-31b-nvfp4": {
+        "gemma4-31b-it-nvfp4": {
             "notes": [
                 "Gemma 4 31B IT NVFP4 (4-bit MLP/embeddings via ModelOpt; attention stays "
                 "BF16 -> real footprint ~30GB). Multimodal (text+image), reasoning + tools.",
@@ -446,7 +446,7 @@ DEFAULT_CONFIG = {
             "port": 8000,
             "usecase": ["Reasoning", "Vision", "Agentic", "Coding", "General"],
             "vllm_args": {
-                "served-model-name": "gemma4-31b-nvfp4",
+                "served-model-name": "gemma4-31b-it-nvfp4",
                 "tensor-parallel-size": 1,
                 "gpu-memory-utilization": 0.85,
                 "max-model-len": 262144,
@@ -460,7 +460,7 @@ DEFAULT_CONFIG = {
                 "enable-log-requests": True,
             },
         },
-        "gemma4-26b-a4b": {
+        "gemma4-26b-a4b-nvfp4": {
             "notes": [
                 "Gemma 4 26B-A4B NVFP4 -- the MoE sibling of the dense 31B: 25.2B total / "
                 "3.8B active per token (8 of 128 experts + 1 shared, 1024-tok sliding window). "
@@ -485,7 +485,7 @@ DEFAULT_CONFIG = {
                 "VLLM_USE_FLASHINFER_MOE_FP4": "0",
             },
             "vllm_args": {
-                "served-model-name": "gemma4-26b-a4b",
+                "served-model-name": "gemma4-26b-a4b-nvfp4",
                 "tensor-parallel-size": 1,
                 "gpu-memory-utilization": 0.85,
                 "max-model-len": 262144,
@@ -1048,7 +1048,7 @@ def cmd_home(args):
     """First-run-friendly landing screen: status + suggested next steps. No docker calls."""
     cfg = load_config()
     models = cfg.get("models", {})
-    sample = next(iter(models), "<profile>")
+    sample = next(iter(sorted(models)), "<profile>")
     p, setup_done = _cli_name(), os.path.exists(OTOOLS_SSH_KEY)
     print("otools_model_manager -- manage vLLM Docker containers (local or over SSH)\n")
     print("Status:")
@@ -1301,7 +1301,7 @@ def cmd_models(args):
         return
 
     rows = []
-    for key in models:
+    for key in sorted(models):
         e = resolve_entry(cfg, key)               # apply `extends` so inherited fields show
         va = e.get("vllm_args", {})
         served = va.get("served-model-name") or e.get("model", "?")
@@ -1322,7 +1322,7 @@ def cmd_models(args):
     for r in rows:
         print("  " + "  ".join(str(r[i]).ljust(w[i]) for i in range(len(headers))))
 
-    p, sample, host = _cli_name(), next(iter(models)), (REMOTE or "user@host")
+    p, sample, host = _cli_name(), next(iter(sorted(models))), (REMOTE or "user@host")
     _suggest([
         ("Run a model", f"{p} launch {sample}{_rsuf()}"),
         ("Run a model on a specific host", f"{p} launch {sample} --host {host}"),

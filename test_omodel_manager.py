@@ -280,8 +280,8 @@ class ExtendsTests(unittest.TestCase):
         self.assertEqual(base["b"], {"x": 1, "y": 2})  # base not mutated
 
     def test_nemotron_1m_extends_256k(self):
-        m = mm.merge_model(self.cfg, "nemotron-3-super-120b-nvfp4-1m")
-        base = mm.merge_model(self.cfg, "nemotron-3-super-120b-nvfp4-256k")
+        m = mm.merge_model(self.cfg, "nemotron-3-super-120b-a12b-nvfp4-1m")
+        base = mm.merge_model(self.cfg, "nemotron-3-super-120b-a12b-nvfp4-256k")
         # inherited from base
         self.assertEqual(m["model"], base["model"])
         self.assertEqual(m["image"], base["image"])

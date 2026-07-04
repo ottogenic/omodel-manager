@@ -9,7 +9,7 @@
 # /no_think to the prompt). Anti-loop rule that matters:
 #   temperature 0.6 (NOT 0) + presence_penalty ~0.8.
 
-match  = ["qwen3.6-35b-nvfp4", "nvidia/Qwen3.6-35B-A3B-NVFP4", "Qwen3.6-35B-A3B", "Qwen3.6-35B"]
+match  = ["qwen3.6-35b-a3b-nvfp4", "nvidia/Qwen3.6-35B-A3B-NVFP4", "Qwen3.6-35B-A3B", "Qwen3.6-35B"]
 source = "https://huggingface.co/nvidia/Qwen3.6-35B-A3B-NVFP4"
 
 [capabilities]

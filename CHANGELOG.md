@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Profile names standardized to upstream + `list` sorted.** Six keys renamed to match the
+  published HF names (breaking — key = served-model-name = container name): `qwen3.6-35b-nvfp4`
+  → `qwen3.6-35b-a3b-nvfp4`, `qwen3.6-35b-bf16` → `qwen3.6-35b-a3b-bf16`, both
+  `nemotron-3-super-120b-nvfp4-*` → `…-120b-a12b-nvfp4-*`, `gemma4-31b-nvfp4` →
+  `gemma4-31b-it-nvfp4`, `gemma4-26b-a4b` → `gemma4-26b-a4b-nvfp4`. Their `configs/*.toml` were
+  renamed + `match` updated; `list`/`models` now sorts rows alphabetically so families group.
+  **Migration:** relaunch any of these under the new name (`omm launch <new-key> --host …`) and
+  re-run `omw --profiles` to re-sync agent providers.
+
 ### Added
 - **Qwen3.6-27B-FP8** (`qwen3.6-27b-fp8-256k` / `-512k`): Official Qwen-team dense 27B FP8 (e4m3), 256K/512K context variants. Reasoning model (thinking ON by default), multimodal (vision input), tool-calling. No MoE → no VLLM_USE_DEEP_GEMM needed.
 - **Qwen3-Coder-Next-FP8** (`qwen3-coder-next-fp8`): 80B/3B hybrid MoE (DeltaNet), FP8 quantized, 262K context, coding/agentic. No thinking mode. Requires `VLLM_USE_DEEP_GEMM=0` on GB10/sm_121.
