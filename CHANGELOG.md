@@ -14,6 +14,16 @@ All notable changes to this project are documented here. The format follows
   each model is. Populate it from the benchmark (`ADD_A_MODEL.md` §6, `--sessions 1 --grow-to
   100000`); unmeasured profiles show `—` (no guessed numbers).
 
+### Changed
+- **`benchmark_concurrent.py` now benchmarks a FIXED ~100k context, sweeping concurrency.**
+  Replaces the grow-to-100k walk (which never finished on slow models) with a single big
+  ~100k-token prompt fired at concurrency 1, then 2, 3 … up to `--sessions`, streaming TTFT/TPOT
+  and scraping `/metrics` per level. Each level is one fast round; a level that **fails twice in a
+  row stops the sweep** and the last completed level is the recommended `max-num-seqs`. The report
+  prints the two numbers directly: **`Tk/s (1 user @ ~100k)`** (record as the profile's `tok_s`)
+  and **recommended `max-num-seqs`**. New flags: `--context` (was `--grow-to`, still accepted),
+  `--req-timeout`; `--sessions` is now the max concurrency to sweep to. `--quick` unchanged.
+
 ## [0.2.0] - 2026-07-03
 
 ### Documentation

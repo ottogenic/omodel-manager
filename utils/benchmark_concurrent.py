@@ -1,31 +1,34 @@
 #!/usr/bin/env python3
-"""Benchmark ANY running vLLM/OpenAI endpoint under a realistic growing-context load.
+"""Benchmark ANY running vLLM/OpenAI endpoint at a FIXED large context.
 
 This is a generic throughput probe -- it does NOT read the omodel-manager config or
 care which profile is running. Point it at a host; it auto-discovers the served model
-via /v1/models and drives load. The default mode runs N concurrent "sessions", each a
-multi-turn conversation whose context GROWS turn over turn (unique code each turn, so
-prefix caching can't fold it) until it reaches a target size (default 100k tokens). It
-streams responses to measure TTFT (time to first token) and TPOT (time per output
-token), reports how they degrade as context grows, and scrapes the server's /metrics
-for KV-cache pressure and preemptions. This reproduces the real-world "two sessions
-doing real work slow to a crawl" behaviour that a short, identical-prompt sweep hides.
+via /v1/models. It sends a single big prompt (~100k tokens of unique code, so prefix
+caching can't fold it) at **concurrency 1**, then **2**, then **3** ... measuring TTFT
+(time to first token) and TPOT (time per output token) at each level, and scraping the
+server's /metrics for KV-cache pressure and preemptions. From that you get the two
+numbers that matter: single-user decode speed at a full context (the `tok_s` column),
+and how many concurrent users survive before it degrades (`max-num-seqs`).
+
+Each concurrency level is ONE round (not a long growing conversation), so results
+arrive fast and bounded -- if a level times out/fails twice in a row the sweep stops
+and recommends the last level that completed. This avoids the "never finishes on a slow
+model" problem of walking the context up turn by turn.
 
 Usage:
-    # Realistic: 2 sessions growing to 100k, model auto-discovered (the default)
+    # Default: 100k context, sweep concurrency 1..4, model auto-discovered
     python3 utils/benchmark_concurrent.py --host dgx1
 
-    # Push harder: 3 sessions, grow to 64k, agent-style turns
-    python3 utils/benchmark_concurrent.py --host 192.168.50.102 --sessions 3 \
-        --grow-to 64000 --scenario agent
+    # Lighter/heavier: smaller context, sweep to 6, agent-style prompt
+    python3 utils/benchmark_concurrent.py --host 192.168.50.102 --context 64000 \
+        --sessions 6 --scenario agent
 
     # Old fast smoke test (short identical prompts, concurrency sweep)
     python3 utils/benchmark_concurrent.py --host dgx1 --quick
 
 Notes:
     * --host takes an `omm install` alias (e.g. dgx1), a user@ip, or a bare ip.
-    * --model is optional -- it's auto-discovered from /v1/models; pass it only to
-      override or if discovery fails.
+    * --model is optional -- auto-discovered from /v1/models; pass it to override.
     * Thinking is ON by default (representative for reasoning models); --no-think off.
 """
 
@@ -41,9 +44,10 @@ import urllib.error
 import concurrent.futures
 
 # Defaults
-DEFAULT_GROW_TO = 100_000      # grow each session's context to ~this many prompt tokens
-DEFAULT_SESSIONS = 2           # concurrent growing conversations (the real-world case)
-DEFAULT_MAX_TOKENS = 1024      # per-turn output cap (a realistic coding/agent turn)
+DEFAULT_CONTEXT = 100_000      # fixed prompt size (~tokens) every request runs at
+DEFAULT_SESSIONS = 4           # sweep concurrency 1..this many parallel requests
+DEFAULT_MAX_TOKENS = 256       # output tokens per request (enough to measure TPOT; keeps it fast)
+DEFAULT_REQ_TIMEOUT = 300      # seconds per request before it's counted a failure
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_TOP_P = 0.95
 DEFAULT_PORT = 8000
@@ -204,15 +208,17 @@ def _code_blob(sid, turn, approx_tokens):
     return "".join(out)
 
 
-def turn_user(scenario, sid, turn, chunk_tokens):
-    blob = _code_blob(sid, turn, chunk_tokens)
+def build_prompt(scenario, sid, context_tokens):
+    """One big ~context_tokens prompt (unique code + an instruction) as a messages list."""
+    blob = _code_blob(sid, 0, context_tokens)
     if scenario == "agent":
-        return (f"Tool result read_file(module_{sid}_{turn}.py):\n```python\n{blob}```\n"
-                "Integrate this with the earlier modules; name the next tool call.")
-    lead = ("Here is the start of a large module I'm refactoring:" if turn == 0
-            else "Now consider this additional file that must interoperate:")
-    return (f"{lead}\n```python\n{blob}```\n"
-            "Give a one-paragraph review and name the riskiest function (by name).")
+        user = (f"Tool result read_file(module_{sid}.py):\n```python\n{blob}```\n"
+                "Summarize what this module does and name the next tool call.")
+    else:
+        user = (f"Here is a large module to review:\n```python\n{blob}```\n"
+                "Give a one-paragraph review and name the riskiest function (by name).")
+    return [{"role": "system", "content": _SYSTEM[scenario]},
+            {"role": "user", "content": user}]
 
 
 # ============================================================================
@@ -283,115 +289,100 @@ def stream_turn(base_url, model, messages, max_tokens, temperature, top_p, think
             "content": "".join(text)}
 
 
-def run_session(sid, base_url, model, args, chunk_tokens, think, max_turns=80):
-    """One growing conversation: add a unique code chunk each turn until the context
-    reaches --grow-to. Returns a list of per-turn records."""
-    messages = [{"role": "system", "content": _SYSTEM[args.scenario]},
-                {"role": "user", "content": turn_user(args.scenario, sid, 0, chunk_tokens)}]
-    turns = []
-    for t in range(max_turns):
-        est = sum(len(m.get("content", "")) for m in messages) // 4   # fallback if no usage
-        r = stream_turn(base_url, model, messages, args.max_tokens,
-                        args.temperature, args.top_p, think)
-        ctx = r["prompt_tokens"] or est
+def _run_level(n, base_url, model, ctx, args, think):
+    """Fire n parallel single-shot requests, each a fresh ~ctx prompt. Returns
+    (ok, record). A level fails if ANY request errors/times out -- that's the ceiling."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n) as pool:
+        futs = [pool.submit(stream_turn, base_url, model,
+                            build_prompt(args.scenario, sid, ctx), args.max_tokens,
+                            args.temperature, args.top_p, think, args.req_timeout)
+                for sid in range(n)]
+        results = [f.result() for f in concurrent.futures.as_completed(futs)]
+    good = [r for r in results if r["ok"] and r["ttft"] is not None]
+    for r in results:
         if not r["ok"]:
-            log(f"  [s{sid} t{t}] ctx~{ctx // 1000}k  FAILED: {r['err'][:80]}")
-            turns.append({"sid": sid, "turn": t, "ctx": ctx, "ok": False})
+            log(f"    request failed: {(r['err'] or 'unknown')[:70]}")
+    if len(good) < n:
+        return False, None
+    for r in good:
+        actual = (r["prompt_tokens"] or ctx) // 1000
+        log(f"    ctx {actual:>3}k  ttft {r['ttft']:5.1f}s  "
+            f"tpot {(r['tpot'] or 0) * 1000:5.0f}ms  out {r['out_tokens']}")
+    ttfts = [r["ttft"] for r in good]
+    tpots = [r["tpot"] for r in good if r["tpot"]]
+    return True, {"n": n, "ttft50": _pct(ttfts, 50), "ttft95": _pct(ttfts, 95),
+                  "tpot50": _pct(tpots, 50), "tpot95": _pct(tpots, 95),
+                  "decode": (1.0 / _pct(tpots, 50)) if tpots else 0.0, "status": "OK"}
+
+
+def sweep_fixed(model_id, base_url, host, port, args):
+    """Sweep concurrency 1..--sessions, each at a FIXED ~--context prompt. Stops after a
+    level fails twice in a row and recommends the last level that completed."""
+    ctx = args.context
+    think = not args.no_think
+    print(f"\n{'=' * 74}\nModel: {model_id}\n"
+          f"  Fixed ~{ctx // 1000}k context, sweeping concurrency 1..{args.sessions} "
+          f"(scenario={args.scenario}, thinking={'off' if args.no_think else 'on'}) ...\n{'=' * 74}")
+    sampler = MetricsSampler(host, port)
+    sampler.start()
+    t0 = time.time()
+    rows, recommended = [], 0
+    for n in range(1, args.sessions + 1):
+        log(f"-- concurrency {n} @ ~{ctx // 1000}k ...")
+        ok, rec = _run_level(n, base_url, model_id, ctx, args, think)
+        if not ok:
+            log(f"   concurrency {n} failed; retrying once ...")
+            ok, rec = _run_level(n, base_url, model_id, ctx, args, think)
+        if not ok:
+            log(f"   concurrency {n} failed twice -- stopping the sweep.")
+            rows.append({"n": n, "status": "FAILED x2"})
             break
-        turns.append({"sid": sid, "turn": t, "ctx": ctx, "ttft": r["ttft"],
-                      "tpot": r["tpot"], "out": r["out_tokens"], "ok": True})
-        tpot_ms = (r["tpot"] * 1000) if r["tpot"] else 0
-        log(f"  [s{sid} t{t}] ctx {ctx // 1000:>3}k  ttft {r['ttft'] or 0:4.1f}s  "
-            f"tpot {tpot_ms:5.1f}ms  out {r['out_tokens']}")
-        if ctx >= args.grow_to:
-            break
-        messages.append({"role": "assistant", "content": r["content"] or "ok"})
-        messages.append({"role": "user", "content": turn_user(args.scenario, sid, t + 1, chunk_tokens)})
-    return turns
+        rows.append(rec)
+        recommended = n
+    wall = time.time() - t0
+    sampler.stop()
+    sampler.join(timeout=3)
+    report_fixed(model_id, ctx, rows, recommended, sampler, wall, args)
+    return rows
 
 
-_BUCKETS = [(0, 8000, "<8k"), (8000, 16000, "8-16k"), (16000, 32000, "16-32k"),
-            (32000, 64000, "32-64k"), (64000, 100000, "64-100k"), (100000, 10 ** 9, ">=100k")]
-
-
-def report_growing(model_id, sessions, sampler, wall, args):
-    ok_turns = [t for s in sessions for t in s if t.get("ok")]
+def report_fixed(model_id, ctx, rows, recommended, sampler, wall, args):
     print(f"\n{'=' * 74}")
-    print(f"GROWING-SESSION RESULT: {model_id}")
-    print(f"  {args.sessions} concurrent session(s), scenario={args.scenario}, "
-          f"grow-to={args.grow_to // 1000}k, thinking={'off' if args.no_think else 'on'}, "
-          f"wall={wall:.0f}s")
+    print(f"FIXED-CONTEXT RESULT: {model_id}  (~{ctx // 1000}k context, wall={wall:.0f}s)")
     print(f"{'=' * 74}")
-    if not ok_turns:
-        print("  No successful turns -- check --model / host / that the server is up.")
+    ok_rows = [r for r in rows if r.get("status") == "OK"]
+    if not ok_rows:
+        print("  No concurrency level completed -- check --model / host / that the server is up, "
+              "or try a smaller --context.")
         return
-
-    print(f"  {'context':<10} {'TTFT p50/p95':>16} {'TPOT p50/p95 (ms)':>20} "
-          f"{'decode tok/s':>13} {'turns':>6}")
-    first_decode = last_decode = None
-    for lo, hi, label in _BUCKETS:
-        b = [t for t in ok_turns if lo <= t["ctx"] < hi]
-        if not b:
-            continue
-        ttfts = [t["ttft"] for t in b if t["ttft"] is not None]
-        tpots = [t["tpot"] for t in b if t["tpot"]]
-        dec = (1.0 / _pct(tpots, 50)) if tpots else 0.0
-        if first_decode is None and dec:
-            first_decode = dec
-        if dec:
-            last_decode = dec
-        print(f"  {label:<10} {_pct(ttfts, 50):5.1f}/{_pct(ttfts, 95):<9.1f}"
-              f"{_pct(tpots, 50) * 1000:8.1f}/{_pct(tpots, 95) * 1000:<11.1f}"
-              f"{dec:>13.1f} {len(b):>6}")
+    print(f"  {'users':<6} {'TTFT p50/p95':>16} {'TPOT p50/p95 (ms)':>20} "
+          f"{'decode tok/s':>13} {'status'}")
+    for r in rows:
+        if r.get("status", "").startswith("FAILED"):
+            print(f"  {r['n']:<6} {'—':>16} {'—':>20} {'—':>13} {r['status']}")
+        else:
+            print(f"  {r['n']:<6} {r['ttft50']:5.1f}/{r['ttft95']:<9.1f}"
+                  f"{r['tpot50'] * 1000:8.0f}/{r['tpot95'] * 1000:<11.0f}"
+                  f"{r['decode']:>13.1f} OK")
 
     print(f"\n  KV cache peak: "
           + (f"{sampler.peak_cache_pct():.0f}%" if sampler.peak_cache_pct() is not None else "n/a")
-          + "   max queue (waiting): "
-          + (f"{sampler.max_waiting()}" if sampler.max_waiting() is not None else "n/a")
           + "   preemptions during run: "
           + (f"{sampler.preemptions()}" if sampler.preemptions() is not None else "n/a"))
     if not sampler.available:
         print("  (/metrics not reachable -- run against the box's IP to see KV/preemption data)")
 
+    single = next((r for r in ok_rows if r["n"] == 1), None)
     print("\n  READING:")
-    if first_decode and last_decode and last_decode < first_decode:
-        print(f"    - decode fell from {first_decode:.0f} to {last_decode:.0f} tok/s as context grew "
-              f"({first_decode / last_decode:.1f}x slower) -- the bandwidth wall.")
-    pre = sampler.preemptions()
-    if pre:
-        print(f"    - {pre} preemption(s) occurred: KV cache overflowed and sequences were evicted/"
-              "recomputed. THIS is the crawl. Lower concurrent sessions, shrink max-model-len, or "
-              "raise gpu-memory-utilization.")
-    elif sampler.available:
-        print("    - no preemptions: the slowdown is pure bandwidth (KV grows), not eviction.")
-    print(f"    - at {args.sessions} concurrent sessions this model stayed usable up to the last "
-          "context bucket above with acceptable TPOT; pick your real session budget accordingly.")
-
-
-def run_growing(model_id, base_url, host, port, args):
-    think = not args.no_think
-    chunk = max(3000, args.grow_to // 16)          # ~16 turns to reach the target
-    print(f"\n{'=' * 74}\nModel: {model_id}\n"
-          f"  Growing {args.sessions} session(s) to ~{args.grow_to // 1000}k tokens "
-          f"(~{chunk // 1000}k/turn) ...\n{'=' * 74}")
-
-    sampler = MetricsSampler(host, port)
-    sampler.start()
-    t0 = time.time()
-    sessions = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.sessions) as pool:
-        futs = {pool.submit(run_session, sid, base_url, model_id, args, chunk, think): sid
-                for sid in range(args.sessions)}
-        for f in concurrent.futures.as_completed(futs):
-            try:
-                sessions.append(f.result())
-            except Exception as e:
-                log(f"  session {futs[f]} crashed: {e}")
-    wall = time.time() - t0
-    sampler.stop()
-    sampler.join(timeout=3)
-    report_growing(model_id, sessions, sampler, wall, args)
-    return sessions
+    if single:
+        print(f"    - Tk/s (1 user @ ~{ctx // 1000}k): {single['decode']:.0f}  "
+              "-> record as the profile's `tok_s` (the `list` Tk/s column).")
+    print(f"    - Recommended max-num-seqs: {recommended}  "
+          f"(highest concurrency that completed at ~{ctx // 1000}k).")
+    if any(r.get("status", "").startswith("FAILED") for r in rows):
+        print("    - the sweep stopped after a level failed twice (see the errors above -- a timeout"
+              "/preemption is a real ceiling; a dropped connection means the server restarted, so "
+              "re-run). Use the last completed level as `max-num-seqs`.")
 
 
 # ============================================================================
@@ -461,22 +452,24 @@ def quick_sweep(model_id, base_url, args):
 # ============================================================================
 def main():
     p = argparse.ArgumentParser(
-        description="Benchmark any running vLLM endpoint under a realistic growing-context load.")
+        description="Benchmark any running vLLM endpoint at a fixed large context, sweeping concurrency.")
     p.add_argument("--host", default=None,
                    help="alias from `omm install` (e.g. dgx1), a user@ip, or a bare ip")
     p.add_argument("--remote", default=None, help="legacy alias for --host")
     p.add_argument("--port", type=int, default=DEFAULT_PORT, help="server port (default: %(default)s)")
     p.add_argument("--model", default=None,
                    help="served model name (default: auto-discovered from /v1/models)")
-    # Growing-session (default) knobs -- kept intentionally few.
+    # Fixed-context sweep (default) knobs -- kept intentionally few.
     p.add_argument("--sessions", type=int, default=DEFAULT_SESSIONS,
-                   help="concurrent growing conversations (default: %(default)s)")
-    p.add_argument("--grow-to", type=int, default=DEFAULT_GROW_TO,
-                   help="grow each session's context to ~this many tokens (default: %(default)s)")
+                   help="sweep concurrency 1..this many parallel requests (default: %(default)s)")
+    p.add_argument("--context", "--grow-to", type=int, default=DEFAULT_CONTEXT, dest="context",
+                   help="fixed prompt context, ~tokens, for every request (default: %(default)s)")
+    p.add_argument("--req-timeout", type=int, default=DEFAULT_REQ_TIMEOUT, dest="req_timeout",
+                   help="seconds per request before it counts as a failure (default: %(default)s)")
     p.add_argument("--scenario", choices=["coding", "agent"], default="coding",
-                   help="turn shape (default: %(default)s)")
+                   help="prompt shape (default: %(default)s)")
     p.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS,
-                   help="output tokens per turn (default: %(default)s)")
+                   help="output tokens per request (default: %(default)s)")
     p.add_argument("--no-think", action="store_true",
                    help="disable thinking (default: on -- representative for reasoning models)")
     p.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE)
@@ -513,9 +506,9 @@ def main():
         print(f"Mode: quick sweep | tokens {args.max_tokens} | temp {args.temperature}")
         quick_sweep(model_id, base_url, args)
     else:
-        print(f"Mode: growing sessions | {args.sessions} session(s) -> {args.grow_to // 1000}k "
+        print(f"Mode: fixed context | ~{args.context // 1000}k | sweep 1..{args.sessions} users "
               f"| scenario {args.scenario} | thinking {'off' if args.no_think else 'on'}")
-        run_growing(model_id, base_url, host, port, args)
+        sweep_fixed(model_id, base_url, host, port, args)
 
 
 if __name__ == "__main__":
