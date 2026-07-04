@@ -1,0 +1,72 @@
+# qwen3-coder-next-nvfp4 — sampling & thinking reference
+#
+# RedHatAI / NVIDIA NVFP4 quant of Qwen3-Coder-Next (hybrid MoE, ~79.7B total /
+# ~3B active across 512 experts, 10 active + 1 shared). Pure text-to-text, tool
+# calling supported via the qwen3_coder parser (--enable-auto-tool-choice).
+# Apache 2.0 license. Values are STARTING POINTS to sweep from, not guarantees.
+#
+# No special thinking/reasoning mode — standard causal LM, no CoT mechanism.
+# Native context 262K, extendable to 1M via YaRN extrapolation.
+#
+# Base-card sampling defaults (https://huggingface.co/Qwen/Qwen3-Coder-Next):
+#   temperature 1.0, top_p 0.95, top_k 40  (General/Default)
+
+match  = ["qwen3-coder-next-nvfp4", "RedHatAI/Qwen3-Coder-Next-NVFP4", "Qwen3-Coder-Next", "Qwen3-Coder-Next-NVFP4"]
+source = "https://huggingface.co/RedHatAI/Qwen3-Coder-Next-NVFP4"
+
+[capabilities]
+vision           = false  # verified: pure text model, architectures = ["Qwen3NextForCausalLM"], no vision_config
+reasoning        = false  # no special CoT/reasoning mode (standard causal LM)
+tool_call        = true   # qwen3_coder parser, enabled via --enable-auto-tool-choice
+thinking_control = "none"  # no thinking mechanism; per-preset sampling knobs suffice
+
+[context]
+native       = 262144  # 262K native context window (base card)
+min_thinking = 0       # N/A — no thinking mode for this model
+
+# ── Task-mode presets ────────────────────────────────────────────────────────
+# Adapters (omodel-wire → OpenCode, …) map these onto agents/subagents.
+# Sampling knobs (vLLM default in parens):
+#   temperature (1.0)       0.6 = focus; 0.8–1.0 = variety.
+#   top_p       (1.0)       0.95 reasoning baseline; ~0.8 tightens.
+#   top_k       (-1 off)    40 base-card default.
+#   max_output              16k–32k for longer outputs.
+
+[presets.reason]              # research & planning (no thinking)
+thinking   = false
+max_output = 32768
+[presets.reason.sampling]
+temperature      = 1.0        # base card: General/Default sampling
+top_p            = 0.95       # base card: General/Default sampling
+top_k            = 40         # base card: General/Default sampling
+
+[presets.code]                # precise coding (lower temp for focused generation)
+thinking   = false
+max_output = 32768
+[presets.code.sampling]
+temperature      = 0.6        # card: precise coding uses 0.6 (lower = more focused)
+top_p            = 0.95       # base card: General/Default sampling
+top_k            = 40         # base card: General/Default sampling
+
+[presets.agent]               # unattended worker: coding sampling, no thinking
+thinking   = false
+max_output = 32768
+[presets.agent.sampling]
+temperature      = 0.6        # card: precise coding uses 0.6 (lower = more focused)
+top_p            = 0.95       # base card: General/Default sampling
+top_k            = 40         # base card: General/Default sampling
+
+[presets.instruct]            # fast, no thinking
+thinking   = false
+max_output = 32768
+[presets.instruct.sampling]
+temperature      = 0.7        # balanced for instruction-following
+top_p            = 0.80       # tighter for focused responses
+top_k            = 40         # base card: General/Default sampling
+
+# ── Ctrl+T thinking-depth variants ───────────────────────────────────────────
+# N/A — no thinking mechanism for this model
+[variants.think]
+# N/A — no thinking mode for this model
+[variants.no-think]
+# N/A — no thinking mode for this model

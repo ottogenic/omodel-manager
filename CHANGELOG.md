@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-03
+
 ### Documentation
 - **Naming conventions codified** in `CONTRIBUTING.md`: kebab-case for the CLI surface
   (executable, subcommands, flags), snake_case for imported Python files (modules/tests) —
@@ -16,6 +18,12 @@ All notable changes to this project are documented here. The format follows
   git-ignored local sandbox (source of truth is `DEFAULT_CONFIG`).
 
 ### Added
+- **New model: `qwen3-coder-next-nvfp4`.** RedHatAI NVFP4 quant of Qwen3-Coder-Next
+  (hybrid DeltaNet MoE, ~79.7B total / ~3B active, 262K native context, pure text,
+  `qwen3_coder` tool-call parser). Promoted into `DEFAULT_CONFIG` and shipped with a
+  generic `configs/qwen3-coder-next-nvfp4.toml`. Validated on DGX Spark (GB10/sm_121):
+  Marlin NVFP4 path, fp8 KV cache, clean growing-context benchmarks at 1-4 concurrent
+  sessions (0 preemptions, KV peak 9% at 4 sessions).
 - **Address a running model by its host.** `logs`, `stop`/`kill`, `health`, and `pull-status`
   accept a hostname (`omm logs dgx-2`) — an `install` alias, a `user@ip`, or a bare IP — and
   resolve the single container on that box (one model per host), so no `--host` or model name

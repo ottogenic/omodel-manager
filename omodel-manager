@@ -57,7 +57,7 @@ import sys
 import urllib.error
 import urllib.request
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 
 def _default_config_path():
@@ -442,6 +442,48 @@ DEFAULT_CONFIG = {
                 "reasoning-parser": "gemma4",
                 "tool-call-parser": "gemma4",
                 "enable-log-requests": True,
+            },
+        },
+        "qwen3-coder-next-nvfp4": {
+            "notes": [
+                "Qwen3-Coder-Next hybrid MoE from Red Hat: ~79.7B total / ~3B active per "
+                "token (512 experts, 10 active + 1 shared, DeltaNet architecture). NVFP4 "
+                "quantized (compressed-tensors). Pure text (no vision). 262K native "
+                "context, extendable to 1M via YaRN.",
+                "Pinned nightly-aarch64 image: sm_121 support required (merged in vLLM "
+                "PR #31740, needs vLLM >= 0.15.0). GB10/Blackwell ARM64 only.",
+                "DeltaNet: only 12 full-attention layers (25%) maintain KV cache -> "
+                "dramatically less KV memory vs pure-attention 80B. KV cache @ 262K "
+                "context (FP8): ~61.7GB on GB10.",
+                "GB10/sm_121 Marlin backend gives ~34-62 tok/s depending on config. "
+                "gpu-memory-utilization 0.90 (0.93 is risky with this context size).",
+                "No special thinking/reasoning mode -- standard causal LM. "
+                "tool-call-parser qwen3_coder.",
+            ],
+            "image": "vllm/vllm-openai:nightly-aarch64",
+            "model": "RedHatAI/Qwen3-Coder-Next-NVFP4",
+            "port": 8000,
+            "usecase": ["Coding", "Agentic", "General"],
+            "env": {
+                "VLLM_NVFP4_GEMM_BACKEND": "marlin",
+                "VLLM_TEST_FORCE_FP8_MARLIN": "1",
+                "VLLM_USE_FLASHINFER_MOE_FP4": "0",
+                "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
+            },
+            "vllm_args": {
+                "served-model-name": "qwen3-coder-next-nvfp4",
+                "tensor-parallel-size": 1,
+                "kv-cache-dtype": "fp8",
+                "moe-backend": "marlin",
+                "gpu-memory-utilization": 0.9,
+                "max-model-len": 262144,
+                "max-num-seqs": 4,
+                "enable-chunked-prefill": True,
+                "enable-prefix-caching": True,
+                "enable-log-requests": True,
+                "enable-auto-tool-choice": True,
+                "tool-call-parser": "qwen3_coder",
+                "reasoning-parser": "qwen3",
             },
         },
     },
