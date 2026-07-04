@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 - **Qwen3-Coder-Next-FP8** (`qwen3-coder-next-fp8`): 80B/3B hybrid MoE (DeltaNet), FP8 quantized, 262K context, coding/agentic. No thinking mode. Requires `VLLM_USE_DEEP_GEMM=0` on GB10/sm_121.
+- **`Tk/s` column in `list`/`models`.** Each profile can carry an optional `tok_s` — recorded
+  decode speed at a **single user @ ~100k context** — so `omm models` shows at a glance how fast
+  each model is. Populate it from the benchmark (`ADD_A_MODEL.md` §6, `--sessions 1 --grow-to
+  100000`); unmeasured profiles show `—` (no guessed numbers).
 
 ## [0.2.0] - 2026-07-03
 

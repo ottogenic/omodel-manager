@@ -260,6 +260,30 @@ context size*, and scrapes the server's `/metrics` for KV-cache pressure and **p
   safe number of concurrent full-length (≈your real context) sessions before TPOT/preemptions
   degrade. Restart the container and re-`health` after any change.
 
+**Record the `Tk/s` figure for the `list` table.** So `omm models` can show how fast each model
+is, capture its decode speed at **a single user with ~100k of context** — a consistent
+apples-to-apples "how fast is this model" number:
+
+```bash
+python3 utils/benchmark_concurrent.py --host <host> --sessions 1 --grow-to 100000
+```
+
+From the result table, take the **decode tok/s** of the largest context bucket reached
+(`64-100k`, or `>=100k` if it got there) — that's steady-state speed at a full working context,
+not the flattering small-context number. Put it in the profile as a top-level integer:
+
+```python
+"qwen3.6-27b-nvfp4-256k": {
+    "tok_s": 38,                     # decode tok/s, 1 user @ ~100k ctx (benchmarked YYYY-MM-DD)
+    "image": "...",
+    ...
+}
+```
+
+`omm models` renders it in the **Tk/s** column (profiles without `tok_s` show `—`). Re-measure
+and update it whenever the profile's quant, KV dtype, or `max-model-len` changes — it's a
+recorded observation, so keep it honest (leave it unset rather than guess).
+
 **Prerequisite:** the model must be READY (see §4 step 4) — the script doesn't wait for startup.
 
 The model is auto-discovered from `/v1/models`; pass `--model <id>` only to override or if

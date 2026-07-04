@@ -102,6 +102,7 @@ resets it from the hardcoded defaults. **Promote** a vetted change by editing
       "image": "vllm/vllm-openai:v0.20.0",   // per-profile override
       "model": "org/Model", "served-model-name": "...", "port": 8000,
       "usecase": ["Coding", "Agentic"],
+      "tok_s": 38,                            // decode tok/s, 1 user @ ~100k ctx (from benchmark)
       "env": { "VLLM_X": "1" },
       "volumes": ["${PWD}/file:/app/file"],
       "assets": [{ "url": "https://.../parser.py", "container": "/app/parser.py" }],
@@ -122,6 +123,9 @@ resets it from the hardcoded defaults. **Promote** a vetted change by editing
 - **`assets`**: files auto-downloaded before launch (cached in `assets/<key>/`)
   and mounted; for remote launches they're `scp`'d to the box.
 - **`env`**: `null`/`"inherit"` inherits from your shell; a value is passed explicitly.
+- **`tok_s`** (optional): recorded decode speed — **single user @ ~100k context** — shown in the
+  `Tk/s` column of `list`/`models` so you can compare how fast each model is. Populate it from
+  the benchmark (`ADD_A_MODEL.md` §6); unmeasured profiles show `—`.
 
 ## Remote, install & uninstall
 

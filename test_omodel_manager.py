@@ -491,6 +491,12 @@ class FmtTokensTests(unittest.TestCase):
         self.assertEqual(mm._fmt_tokens(None), "?")
         self.assertEqual(mm._fmt_tokens(1000), "1000")
 
+    def test_tokps(self):
+        self.assertEqual(mm._fmt_tokps(42), "42")
+        self.assertEqual(mm._fmt_tokps(41.6), "42")     # rounds
+        self.assertEqual(mm._fmt_tokps(None), "—")      # unmeasured
+        self.assertEqual(mm._fmt_tokps("nope"), "—")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
