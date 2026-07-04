@@ -270,7 +270,10 @@ class ProfileTests(unittest.TestCase):
 
 class ExtendsTests(unittest.TestCase):
     def setUp(self):
-        self.cfg = mm.load_config()
+        # Test against the committed source of truth (DEFAULT_CONFIG), NOT load_config()
+        # — the latter reads the git-ignored model_manager.json sandbox, which can be
+        # stale (e.g. predating a profile rename), making this test machine-dependent.
+        self.cfg = json.loads(json.dumps(mm.DEFAULT_CONFIG))
 
     def test_deep_merge(self):
         base = {"a": 1, "b": {"x": 1, "y": 2}, "lst": [1]}
