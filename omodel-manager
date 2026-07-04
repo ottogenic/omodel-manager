@@ -486,6 +486,45 @@ DEFAULT_CONFIG = {
                 "reasoning-parser": "qwen3",
             },
         },
+        "qwen3-coder-next-fp8": {
+            "image": "vllm/vllm-openai:nightly",
+            "notes": [
+                "Qwen3-Coder-Next FP8: hybrid GDN/DeltaNet MoE (~80B total / ~3B active, "
+                "512 experts, 10 active + 1 shared). FP8 block-quantized (fine-grained, block size 128, "
+                "dynamic activation scheme). Pure text (no vision). 262K native context.",
+                "Blackwell / DGX Spark (sm_121): VLLM_USE_DEEP_GEMM=0 is REQUIRED -- DeepGEMM E8M0 FP8 "
+                "weight processing crashes at load. Disabled, FP8 falls back to TRITON, the working backend "
+                "on sm_121.",
+                "FP8 quant loaded via compressed-tensors auto-detection -- DO NOT pass --quantization flag "
+                "(crashes on qwen3_next gated DeltaNet due to cutlass_scaled_mm error with fused Q/K/V/Z "
+                "projection layout, vLLM #40934).",
+                "DeltaNet: only 12 full-attention layers (25%) maintain KV cache -> dramatically less KV "
+                "memory vs pure-attention 80B. ~64GB weights on GB10.",
+                "No thinking/reasoning mode -- standard causal LM. tool-call-parser qwen3_coder.",
+                "First launch with --keep so a startup crash's logs survive.",
+            ],
+            "model": "Qwen/Qwen3-Coder-Next-FP8",
+            "port": 8000,
+            "usecase": ["Coding", "Agentic", "General"],
+            "env": {
+                "VLLM_USE_DEEP_GEMM": "0",
+            },
+            "vllm_args": {
+                "served-model-name": "qwen3-coder-next-fp8",
+                "tensor-parallel-size": 1,
+                "kv-cache-dtype": "fp8",
+                "attention-backend": "flashinfer",
+                "gpu-memory-utilization": 0.85,
+                "max-model-len": 262144,
+                "max-num-seqs": 4,
+                "enable-chunked-prefill": True,
+                "enable-prefix-caching": True,
+                "load-format": "fastsafetensors",
+                "enable-log-requests": True,
+                "enable-auto-tool-choice": True,
+                "tool-call-parser": "qwen3_coder",
+            },
+        },
     },
 }
 
