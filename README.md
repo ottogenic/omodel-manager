@@ -47,13 +47,13 @@ Optional: `python omodel-manager shell-init` adds an `omm` shell alias.
 | Command | What it does |
 |---|---|
 | `list` (alias `models`) | Table of profiles: context, concurrency, use-case |
-| `launch <profile> [host\|id]` | Start a profile (detached) — optional positional targets a host by alias or `ps` **ID** (e.g. an idle row). `--dry-run`, `--foreground`, `--keep`, `--force`, `--wait`, `--local`. Uncached image → pulls in the background and returns immediately |
+| `launch <profile> [host]` | Start a profile (detached) — optional positional host (alias/user@ip) to launch on. `--dry-run`, `--foreground`, `--keep`, `--force`, `--wait`, `--local`. Uncached image → pulls in the background and returns immediately |
 | `pull <profile>` | Pre-pull a profile's image so `launch` starts instantly |
-| `pull-status <profile\|id>` | Progress of a backgrounded launch/pull |
-| `logs <profile\|id> [-f]` | Show/follow a container's logs (Ctrl-C detaches cleanly) |
-| `health [<profile\|id>]` | `GET /v1/models` on running containers |
-| `ps [--all]` | Numbered (**ID**) rows: running containers **plus** every registered host, each `running`/`idle`/`pulling`/`unreachable` |
-| `stop <profile\|id>` (alias `kill`) | Stop + remove a container (`-y` to skip confirm) |
+| `pull-status <profile\|host>` | Progress of a backgrounded launch/pull |
+| `logs <profile\|host> [-f]` | Show/follow a container's logs (Ctrl-C detaches cleanly) |
+| `health [<profile\|host>]` | `GET /v1/models` on running containers |
+| `ps [--all]` | Running containers **plus** every registered host, each `running`/`idle`/`pulling`/`unreachable` |
+| `stop <profile\|host>` (alias `kill`) | Stop + remove a container (`-y` to skip confirm) |
 | `fetch <profile>` | Pre-download a profile's declared assets |
 | `install <user@ip> [alias] [--fix]` (alias `setup`) | Bootstrap a remote (SSH, docker, group, HF token, drop-caches sudo rule) + register it under an alias |
 | `uninstall <alias\|host> [--purge]` | Unregister a host + revoke the otools key (`--purge` also drops docker-group/containers + drop-caches rule) |
@@ -66,10 +66,11 @@ alias for `--host`.) Set `defaults.remote` in the config to make it the default.
 any host is registered, `launch` won't silently run local — pick a `--host`, or pass
 `--local` to force local.
 
-**Reference a `ps` row by its ID** instead of typing a model name + `--host`. Run `ps`,
-then `logs 2` / `stop 2` / `health 2` (or `--id 2`) — the ID resolves to that row's host
-and container. Works on `logs`, `stop`/`kill`, `health`, and `pull-status`. And
-`launch <profile> 3` launches onto the host at `ps` row 3 (e.g. an idle box).
+**Address a running model by its host** instead of typing a model name + `--host` — with
+one model per box, the hostname is unambiguous (and stable). Run `ps`, then `logs dgx-2` /
+`stop dgx-2` / `health dgx-2` — the host (an `install` alias, a `user@ip`, or a bare IP)
+resolves to the single container on it. Works on `logs`, `stop`/`kill`, `health`, and
+`pull-status`. And `launch <profile> dgx-1` launches onto that host.
 
 **Every `launch` drops the host's OS page cache right before `docker run`** — the DGX
 Spark / UMA false-OOM-&-freeze guard (vLLM #35313). There's no flag: `install` sets up a

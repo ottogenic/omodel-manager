@@ -441,48 +441,45 @@ class ResolveTargetTests(unittest.TestCase):
         self.assertEqual(mm.resolve_target("ghost"), "ghost")
 
 
-class PsIndexTests(unittest.TestCase):
-    """`ps` writes a numbered index; `-id N` resolves a row back to host+container."""
-
-    ROWS = [
-        {"id": 1, "host": "otto@a", "alias": "dgx-1", "container": "otools-vllm-m1",
-         "model": "m1", "port": "8000", "status": "running"},
-        {"id": 2, "host": "otto@b", "alias": "dgx-2", "container": None,
-         "model": None, "port": None, "status": "idle"},
-    ]
+class HostAddressingTests(unittest.TestCase):
+    """A bare hostname addresses the model on that box: `logs dgx-2` needs no model name."""
 
     def setUp(self):
-        self._old = mm.PS_INDEX_FILE
-        mm.PS_INDEX_FILE = os.path.join(tempfile.mkdtemp(), "ps-index.json")
+        self._hosts, self._lm = mm.HOSTS_FILE, mm.list_managed
+        mm.HOSTS_FILE = os.path.join(tempfile.mkdtemp(), "hosts")
+        with open(mm.HOSTS_FILE, "w") as f:
+            f.write("dgx-2\totto@192.168.50.102\n")
 
     def tearDown(self):
-        mm.PS_INDEX_FILE = self._old
+        mm.HOSTS_FILE, mm.list_managed = self._hosts, self._lm
 
-    def _refuses(self, idval):
+    def test_host_of_recognizes_alias_ip_userhost(self):
+        self.assertEqual(mm.host_of("dgx-2"), "dgx-2")               # registered alias
+        self.assertEqual(mm.host_of("otto@1.2.3.4"), "otto@1.2.3.4")  # user@host
+        self.assertEqual(mm.host_of("192.168.50.103"), "192.168.50.103")  # bare IP
+
+    def test_host_of_rejects_model_and_container_names(self):
+        self.assertIsNone(mm.host_of("qwen3.6-35b-nvfp4"))
+        self.assertIsNone(mm.host_of("otools-vllm-glm-4.7-flash"))
+        self.assertIsNone(mm.host_of("dgx-9"))       # not a registered alias
+        self.assertIsNone(mm.host_of(""))
+        self.assertIsNone(mm.host_of(None))
+
+    def test_managed_on_single(self):
+        mm.list_managed = lambda **k: [{"Names": "otools-vllm-m1", "Labels": "otools.model=m1"}]
+        self.assertEqual(mm._managed_on("otto@a"), ("otools-vllm-m1", "m1"))
+
+    def test_managed_on_none_errors(self):
+        mm.list_managed = lambda **k: []
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
-                mm.resolve_ps_id(idval)
+                mm._managed_on("otto@a")
 
-    def test_save_resolve_roundtrip(self):
-        mm.save_ps_index(self.ROWS)
-        e = mm.resolve_ps_id(1)
-        self.assertEqual((e["host"], e["container"]), ("otto@a", "otools-vllm-m1"))
-
-    def test_idle_row_refused(self):
-        mm.save_ps_index(self.ROWS)
-        self._refuses(2)          # idle host -> no container to act on
-
-    def test_launch_accepts_idle_host(self):
-        mm.save_ps_index(self.ROWS)
-        e = mm.resolve_ps_id(2, need_container=False)   # `launch <profile> 2` targets the host
-        self.assertEqual(e["host"], "otto@b")
-
-    def test_missing_id_refused(self):
-        mm.save_ps_index(self.ROWS)
-        self._refuses(99)
-
-    def test_no_index_refused(self):
-        self._refuses(1)          # file doesn't exist yet
+    def test_managed_on_ambiguous_errors(self):
+        mm.list_managed = lambda **k: [{"Names": "a"}, {"Names": "b"}]
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                mm._managed_on("otto@a")
 
 
 class FmtTokensTests(unittest.TestCase):
