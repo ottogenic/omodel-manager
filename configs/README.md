@@ -31,6 +31,7 @@ permissions, colors). Those belong in the adapter.
 | `[capabilities]` `vision` | `false`, or a table `{ input = ["text","image"], output = ["text"] }`. **Replaces live vision probing.** |
 | `[capabilities]` `reasoning` | `true`/`false` — does the model emit chain-of-thought. **Replaces reasoning probing.** |
 | `[capabilities]` `tool_call` | `true`/`false`. |
+| `[capabilities]` `concurrency` | Optional int mirroring the launch profile's `max-num-seqs` (parallel sequence slots). Adapters use it as the default cap on parallel workers (e.g. omodel-wire's team work-budget). Omit if unknown. |
 | `[capabilities]` `thinking_control` | `"enable_thinking"` (Qwen `chat_template_kwargs`), `"reasoning_effort"` (vLLM low/med/high), `"soft_switch"` (`/think` `/no_think`), or `"none"` (template default; per-preset `options` carry knobs). |
 | `[context]` `native` / `min_thinking` | Context facts (docs + sanity). |
 | `[presets.<mode>]` | Harness-agnostic **task modes**: `reason`, `code`, `agent`, `instruct`. Each has `thinking` (bool), optional `max_output`, a `[presets.<mode>.sampling]` table, and optional `options` (e.g. `options.chat_template_kwargs`). Adapters map these modes onto their own agents/subagents. |

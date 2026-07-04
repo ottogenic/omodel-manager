@@ -17,6 +17,8 @@ vision           = { input = ["text", "image"], output = ["text"] }  # verified 
 reasoning        = true
 tool_call        = true
 thinking_control = "enable_thinking"  # enable_thinking | reasoning_effort | soft_switch | none
+concurrency      = 4                  # mirrors the launch profile's max-num-seqs; adapters use it
+                                      # as the default team work-budget (parallel worker cap)
 
 [context]
 native       = 262144
