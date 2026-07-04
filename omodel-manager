@@ -351,6 +351,61 @@ DEFAULT_CONFIG = {
                 "enable-log-requests": True,
             },
         },
+        "qwen3.6-27b-fp8-256k": {
+            "image": "vllm/vllm-openai:nightly",
+            "notes": ["Official Qwen Qwen3.6-27B FP8 (e4m3) -- dense 27B parameter model, 256K native context. "
+                      "No MoE, so no VLLM_USE_DEEP_GEMM needed. Reasoning model (thinking ON by default), tool-calling. "
+                      "~18GB weights on disk, ~20-30GB runtime memory, very comfortable on GB10."],
+            "model": "Qwen/Qwen3.6-27B-FP8",
+            "port": 8000,
+            "usecase": ["Coding", "Agentic", "Reasoning"],
+            "env": {
+                "VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1",
+            },
+            "vllm_args": {
+                "served-model-name": "qwen3.6-27b-fp8",
+                "tensor-parallel-size": 1,
+                "dtype": "bfloat16",
+                "kv-cache-dtype": "fp8",
+                "gpu-memory-utilization": 0.9,
+                "max-model-len": 262144,
+                "max-num-seqs": 1,
+                "enable-chunked-prefill": True,
+                "enable-auto-tool-choice": True,
+                "tool-call-parser": "qwen3_coder",
+                "reasoning-parser": "qwen3",
+                "enable-log-requests": True,
+            },
+        },
+        "qwen3.6-27b-fp8-512k": {
+            "image": "vllm/vllm-openai:nightly",
+            "notes": ["Official Qwen Qwen3.6-27B FP8 (e4m3) -- 512K context via YaRN rope scaling "
+                      "(--hf-overrides), single user (max-num-seqs 1). YARN extrapolation from 256K trained window."],
+            "model": "Qwen/Qwen3.6-27B-FP8",
+            "port": 8000,
+            "usecase": ["Long-context", "Coding", "Reasoning"],
+            "env": {
+                "VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1",
+            },
+            "vllm_args": {
+                "served-model-name": "qwen3.6-27b-fp8",
+                "tensor-parallel-size": 1,
+                "dtype": "bfloat16",
+                "kv-cache-dtype": "fp8",
+                "gpu-memory-utilization": 0.9,
+                "max-model-len": 524288,
+                "max-num-seqs": 1,
+                "enable-chunked-prefill": True,
+                "hf-overrides": ('{"text_config": {"rope_parameters": {"mrope_interleaved": true, '
+                    '"mrope_section": [11, 11, 10], "rope_type": "yarn", '
+                    '"rope_theta": 10000000, "partial_rotary_factor": 0.25, '
+                    '"factor": 2.0, "original_max_position_embeddings": 262144}}}' ),
+                "enable-auto-tool-choice": True,
+                "tool-call-parser": "qwen3_coder",
+                "reasoning-parser": "qwen3",
+                "enable-log-requests": True,
+            },
+        },
         "glm-4.7-flash": {
             "notes": ["zai-org/GLM-4.7-Flash on the nightly aarch64 image (DGX Spark = ARM); "
                       "MLA attention (VLLM_ATTENTION_BACKEND=TRITON_MLA); high concurrency "
