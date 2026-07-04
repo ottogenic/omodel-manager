@@ -50,7 +50,7 @@ when the referenced fix lands or when you next have the box.
    the KV cache past physical memory. **0.7 is the validated value** (~21 GiB real headroom).
    Drop-caches doesn't help here — it's anonymous graph memory, not reclaimable page cache.
 4. **Unvalidated-on-hardware values.** These shipped from research + roofline, marked for
-   live validation: `gemma4-26b-a4b` `max-num-seqs 8`; the 26B/31B Gemma tuning generally;
+   live validation: `gemma4-26b-a4b-nvfp4` `max-num-seqs 8`; the 26B/31B Gemma tuning generally;
    the 35B MTP configs. Run §5–§6 of ADD_A_MODEL against each before trusting them.
 5. **fp8 KV per new model.** It's not a global default (see the trap table). Each new model
    needs its own decision — don't copy a sibling's `kv-cache-dtype` blindly.

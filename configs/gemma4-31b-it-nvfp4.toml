@@ -1,27 +1,22 @@
-# gemma4-26b-a4b — sampling & thinking reference
+# gemma4-31b-nvfp4 — sampling & thinking reference
 #
-# Gemma 4 26B-A4B NVFP4: the Mixture-of-Experts sibling of the dense 31B.
-# 25.2B total / 3.8B active per token (8 of 128 experts + 1 shared), 1024-token
-# sliding window. Text + image inputs, text output. Structured thinking via
-# <|channel>thought delimiters; same custom tool-call protocol as the 31B.
+# Gemma 4 31B IT NVFP4: 4-bit quantized (ModelOpt) multimodal model from Google DeepMind.
+# Text + image inputs, text output. Structured thinking via <|channel>thought delimiters.
+# Custom tool-call protocol with dedicated special tokens.
 #
-# NVFP4: MLP/expert + embedding weights are 4-bit (ModelOpt); attention stays BF16.
-# ~16.5GB weights leave ~82GB for KV cache on a 128GB Spark. Only 3.8B active params
-# are read per decode step, so on the 273 GB/s GB10 bus it runs ~52 tok/s vs the
-# dense 31B's ~7 (ai-muninn DGX Spark benchmark) -- the Spark's pick for latency.
-#
-# sm_121 (GB10) has no native FP4 MoE kernels: serve with VLLM_USE_FLASHINFER_MOE_FP4=0
-# to force the working Marlin FP4 dequant path (see the omodel-manager profile env).
-# TP=1 only in vLLM for this model.
+# Attention layers stay BF16 (modelopt defaults exclude self-attention from quantization);
+# only MLP and token embeddings are NVFP4. Actual VRAM ~30GB despite "4-bit" label.
+# Requires Blackwell (B200/B300/sm_121+) for NVFP4 tensor cores.
 #
 # Thinking is controlled via chat_template_kwargs.enable_thinking (per-request) or
-# --default-chat-template-kwargs (server-wide), same as the 31B.
+# --default-chat-template-kwargs (server-wide). The model uses <|channel>thought\n...
+# <|channel|> delimiters for structured reasoning traces.
 #
-# Verified: nvidia/Gemma-4-26B-A4B-NVFP4 card (serve flags + temp 1.0/top_p 0.95),
-# ai-muninn DGX Spark benchmark. Live validation TBD on Blackwell hardware.
+# Verified: model card benchmarks (GPQA Diamond 85.35%, AIME 2025 87.60%), vLLM recipe
+# at recipes.vllm.ai/Google/gemma-4-31B-it. Live validation TBD on Blackwell hardware.
 
-match  = ["gemma4-26b-a4b", "nvidia/Gemma-4-26B-A4B-NVFP4", "Gemma-4-26B-A4B"]
-source = "https://huggingface.co/nvidia/Gemma-4-26B-A4B-NVFP4"
+match  = ["gemma4-31b-it-nvfp4", "nvidia/Gemma-4-31B-IT-NVFP4"]
+source = "https://huggingface.co/nvidia/Gemma-4-31B-IT-NVFP4"
 
 [capabilities]
 vision           = { input = ["text", "image"], output = ["text"] }  # supports images; video via frame extraction
@@ -34,7 +29,7 @@ native       = 262144
 min_thinking = 131072
 
 # ── Task-mode presets ────────────────────────────────────────────────────────
-# Model card eval uses temperature=1.0, top_p=0.95, max_new_tokens=131072.
+# Model card benchmarks use temperature=1.0, top_p=0.95, max_new_tokens=131072.
 #   temperature (1.0)       1.0 = card baseline for reasoning; 0.6 for precise coding
 #   top_p       (0.95)      card baseline; tighten to ~0.8 for focused tasks
 #   top_k       (-1 off)    20 tightens cheaply

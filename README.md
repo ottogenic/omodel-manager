@@ -28,13 +28,13 @@ Built for a DGX Spark setup but works against any host with Docker + NVIDIA GPUs
 python omodel-manager list
 
 # Run one locally
-python omodel-manager launch qwen3.6-35b-nvfp4
+python omodel-manager launch qwen3.6-35b-a3b-nvfp4
 
 # ...or on a remote box: bootstrap + name it once, then use the alias
 python omodel-manager install otto@192.168.50.102 dgx1 --fix
-python omodel-manager launch qwen3.6-35b-nvfp4 --host dgx1
-python omodel-manager logs   qwen3.6-35b-nvfp4 --host dgx1 -f
-python omodel-manager health qwen3.6-35b-nvfp4 --host dgx1
+python omodel-manager launch qwen3.6-35b-a3b-nvfp4 --host dgx1
+python omodel-manager logs   qwen3.6-35b-a3b-nvfp4 --host dgx1 -f
+python omodel-manager health qwen3.6-35b-a3b-nvfp4 --host dgx1
 ```
 
 Run with no arguments for a status/home screen with suggested next steps. Every
