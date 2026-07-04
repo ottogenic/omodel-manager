@@ -3,7 +3,7 @@
 **Harness-agnostic** model configs: what a model can do (capabilities) and how to
 sample it per task (presets). One **TOML** file per model, keyed to a launch
 profile in `model_manager.json`. TOML so the files `cat`/`vi` cleanly and the
-tuning guidance lives inline as `#` comments (see `qwen3.6-35b-nvfp4.toml`).
+tuning guidance lives inline as `#` comments (see `qwen3.6-35b-a3b-nvfp4.toml`).
 
 **omodel-manager owns and stores these.** It only holds + validates them
 (`test_configs.py`, needs Python 3.11+ for `tomllib`). Downstream **adapters
@@ -18,7 +18,7 @@ permissions, colors). Those belong in the adapter.
 ## One file per model
 
 - `configs/<key>.toml`, named to match a `model_manager.json` profile/model key
-  (`qwen3.6-35b-nvfp4.toml` ↔ the `qwen3.6-35b-nvfp4` launch profile).
+  (`qwen3.6-35b-a3b-nvfp4.toml` ↔ the `qwen3.6-35b-a3b-nvfp4` launch profile).
 - Adapters `tomllib.load` each file and match a discovered served-model-id against
   its `match` list. Non-`.toml` files (this README) are ignored.
 

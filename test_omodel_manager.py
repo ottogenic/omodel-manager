@@ -270,7 +270,10 @@ class ProfileTests(unittest.TestCase):
 
 class ExtendsTests(unittest.TestCase):
     def setUp(self):
-        self.cfg = mm.load_config()
+        # Test against the committed source of truth (DEFAULT_CONFIG), NOT load_config()
+        # — the latter reads the git-ignored model_manager.json sandbox, which can be
+        # stale (e.g. predating a profile rename), making this test machine-dependent.
+        self.cfg = json.loads(json.dumps(mm.DEFAULT_CONFIG))
 
     def test_deep_merge(self):
         base = {"a": 1, "b": {"x": 1, "y": 2}, "lst": [1]}
@@ -280,8 +283,8 @@ class ExtendsTests(unittest.TestCase):
         self.assertEqual(base["b"], {"x": 1, "y": 2})  # base not mutated
 
     def test_nemotron_1m_extends_256k(self):
-        m = mm.merge_model(self.cfg, "nemotron-3-super-120b-nvfp4-1m")
-        base = mm.merge_model(self.cfg, "nemotron-3-super-120b-nvfp4-256k")
+        m = mm.merge_model(self.cfg, "nemotron-3-super-120b-a12b-nvfp4-1m")
+        base = mm.merge_model(self.cfg, "nemotron-3-super-120b-a12b-nvfp4-256k")
         # inherited from base
         self.assertEqual(m["model"], base["model"])
         self.assertEqual(m["image"], base["image"])

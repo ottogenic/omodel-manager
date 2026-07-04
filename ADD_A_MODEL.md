@@ -15,7 +15,7 @@ consume. Nothing is committed until the model is proven on real hardware.
   (params guessed, capabilities unverified, or drifted from the model card). Run the
   **same** research + live-test steps against the existing profile, then reconcile
   each field to what you observe and to the card — don't assume the existing values
-  are correct. Example from this repo: `qwen3.6-35b-nvfp4` shipped with
+  are correct. Example from this repo: `qwen3.6-35b-a3b-nvfp4` shipped with
   `tool-call-parser qwen3_xml` and `vision = false`, but the card + live tests show
   `qwen3_coder` and multimodal. An update pass is exactly what catches that.
 
