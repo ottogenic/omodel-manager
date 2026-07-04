@@ -215,3 +215,33 @@ python3 omodel-manager launch <profile> --dry-run   # exact docker command, mask
 
 Prefer `--dry-run` while iterating. Tests must not launch containers, hit the network, or
 write to `$HOME` dotfiles (`shell-init`/`save_hf_token` write real files).
+
+## Contributing changes (for AI agents / local models)
+
+If you are an AI agent (e.g. a local model via OpenCode) opening a pull request against this
+repo, follow these rules. PRs that ignore them get sent back.
+
+**Scope & hygiene**
+- One concern per PR. Small, focused diffs — no unrelated reformatting or churn.
+- Branch `feat/<slug>` | `fix/<slug>` | `chore/<slug>`; Conventional-Commit messages.
+- Never touch `LICENSE`, `__version__` / release tags, `.github/` CI, or the `otools.*`
+  runtime identifiers unless explicitly asked.
+
+**Before you push (required)**
+- `python -m py_compile omodel-manager` — must pass.
+- `python -m unittest` — the full offline suite must pass (no containers, no network). Add or
+  adjust tests for your change.
+- Update `CHANGELOG.md` under `[Unreleased]` for anything user-facing.
+- Paste the py_compile + unittest output into the PR body (the template asks for it).
+
+**Respect the invariants above:** stdlib-only, single-script, offline tests, LF endings,
+kebab/snake naming; `model_manager.json` is a sandbox (don't commit it — curate `DEFAULT_CONFIG`);
+`configs/*.toml` stay harness-agnostic; Docker only via `docker()`. New models follow `ADD_A_MODEL.md`.
+
+**Open the PR** with `gh pr create` and fill in the template.
+
+### For the reviewer (Claude)
+
+If the user asks to **review / approve / merge open PRs**, read **`REVIEW.md`** and execute it
+against every open PR: run the checks, make critical fixes, squash-merge the ones that pass the
+bar, and leave anything risky open with a change-request review.
