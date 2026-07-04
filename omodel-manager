@@ -1228,6 +1228,16 @@ def _fmt_tokens(n):
     return str(n)
 
 
+def _fmt_tokps(v):
+    """Recorded decode speed (single user @ ~100k context) for the `list` table.
+    A profile's `tok_s` is filled in from the benchmark (see ADD_A_MODEL.md §6);
+    unmeasured profiles show '—'."""
+    try:
+        return str(int(round(float(v))))
+    except (TypeError, ValueError):
+        return "—"
+
+
 def cmd_models(args):
     cfg = load_config()
     models = cfg.get("models", {})
@@ -1245,10 +1255,11 @@ def cmd_models(args):
             served,
             _fmt_tokens(va.get("max-model-len") or e.get("limit", {}).get("context")),
             str(va.get("max-num-seqs", 1)),
+            _fmt_tokps(e.get("tok_s")),          # decode tok/s, 1 user @ ~100k (from benchmark)
             ", ".join(e.get("usecase", [])) or "-",
         ))
 
-    headers = ("PROFILE", "MODEL", "CONTEXT", "USERS", "USE-CASE")
+    headers = ("PROFILE", "MODEL", "CONTEXT", "USERS", "Tk/s", "USE-CASE")
     w = [max(len(str(c)) for c in col) for col in zip(headers, *rows)]
     print(f"Models defined in {CONFIG_PATH}:\n")
     print("  " + "  ".join(h.ljust(w[i]) for i, h in enumerate(headers)))
