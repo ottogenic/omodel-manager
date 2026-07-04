@@ -227,38 +227,40 @@ Confirm the merged truth from logs:
 omodel-manager logs <container> --host <host> 2>&1 | grep -i sampling
 ```
 
-### 6. Benchmark under a realistic growing-context load
+### 6. Benchmark at a fixed 100k context (sweep concurrency)
 
-A short identical-prompt sweep flatters every model (prefix caching + tiny KV). Real
-coding/agent work is a **few concurrent sessions whose context grows toward 100k** — that's
-what makes a memory-bandwidth-bound box (DGX Spark) crawl. Benchmark that:
+A short identical-prompt sweep flatters every model (prefix caching + tiny KV). What matters
+on a memory-bandwidth-bound box (DGX Spark) is speed at a **full working context** and how
+many concurrent users it survives there. Benchmark that:
 
 ```bash
 python3 utils/benchmark_concurrent.py --host <host>
 ```
 
-It's a **generic** throughput probe — it doesn't read the config; it auto-discovers the
-served model from `/v1/models` and benchmarks whatever is running on that host. Default =
-**2 concurrent sessions, each a multi-turn conversation growing to ~100k tokens**
-(unique code per turn, so prefix caching can't hide the prefill cost), thinking **on**. It
-streams responses and reports **TTFT** and **TPOT** (time per output token) *bucketed by
-context size*, and scrapes the server's `/metrics` for KV-cache pressure and **preemptions**.
+It's a **generic** throughput probe — it doesn't read the config; it auto-discovers the served
+model from `/v1/models`. It sends one big **~100k-token prompt** (unique code, so prefix caching
+can't fold it) at **concurrency 1**, then **2**, then **3** … up to `--sessions`, streaming each
+to measure **TTFT** and **TPOT** (time per output token), and scraping `/metrics` for KV pressure
+and **preemptions**. Each level is one fast round — **not** a slow growing conversation — so on a
+slow model results still arrive; if a level **fails twice in a row** (timeout/preemption, or the
+server drops) the sweep **stops** and recommends the last level that completed.
 
 - `--host` takes the same alias as `omm --host` (or `user@ip` / bare ip; `--remote` is legacy).
-- Tune the load with `--sessions N` and `--grow-to TOKENS`; `--scenario agent` shapes turns as
-  tool results. `--no-think` disables thinking. `--quick` runs the old short-prompt sweep.
-- **Run it against the box's IP** (not through an SSH alias that only proxies docker) so the
-  `/metrics` endpoint is reachable — otherwise KV/preemption data shows `n/a`.
+- `--context N` sets the fixed prompt size (default 100000); `--sessions N` the max concurrency to
+  sweep to; `--req-timeout S` the per-request patience; `--scenario agent` shapes the prompt;
+  `--no-think` disables thinking; `--quick` runs the old short-prompt smoke test.
+- **Run it against the box's IP** (not an SSH alias that only proxies docker) so the `/metrics`
+  endpoint is reachable — otherwise KV/preemption data shows `n/a`.
 
-**Read the result, not just peak tok/s:**
-- **Decode tok/s falling** as the context bucket grows is expected (the bandwidth wall). Note
-  *how far* it falls and at what context it becomes unusable for your work.
-- **`preemptions during run` > 0** is the crawl: KV overflowed and sequences were evicted/
-  recomputed. Fix by lowering the concurrent-session budget, shrinking `--max-model-len`, or
-  raising `gpu-memory-utilization` — not by bumping `max-num-seqs`.
-- **Record two numbers** for the config's tuning notes: a sensible `max-num-seqs`, **and** the
-  safe number of concurrent full-length (≈your real context) sessions before TPOT/preemptions
-  degrade. Restart the container and re-`health` after any change.
+**The report hands you the two numbers to record:**
+- **`Tk/s (1 user @ ~100k)`** — the concurrency-1 decode tok/s. Put it in the profile as
+  **`tok_s`** (the `omm models` **Tk/s** column). It's a recorded observation — leave it unset
+  rather than guess.
+- **`Recommended max-num-seqs`** — the highest concurrency that completed at ~100k. If a level
+  failed twice, that's the ceiling; use the last completed level. Set `max-num-seqs` to it,
+  restart the container, and re-`health`.
+- **`preemptions during run` > 0** means KV overflowed (eviction/recompute) — lower the session
+  budget, shrink `--max-model-len`, or raise `gpu-memory-utilization`; don't bump `max-num-seqs`.
 
 **Record the `Tk/s` figure for the `list` table.** So `omm models` can show how fast each model
 is, capture its decode speed at **a single user with ~100k of context** — a consistent
@@ -285,9 +287,7 @@ and update it whenever the profile's quant, KV dtype, or `max-model-len` changes
 recorded observation, so keep it honest (leave it unset rather than guess).
 
 **Prerequisite:** the model must be READY (see §4 step 4) — the script doesn't wait for startup.
-
-The model is auto-discovered from `/v1/models`; pass `--model <id>` only to override or if
-discovery fails.
+The model is auto-discovered from `/v1/models`; pass `--model <id>` only to override.
 
 ### 7. Finalize
 
