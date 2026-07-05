@@ -14,6 +14,8 @@ assets/
 *.bak
 .env
 hf_token
+hosts
+wire.json
 model_manager.json
 
 # Agent-harness scaffolding — keep the repo tool-agnostic (AGENTS.md is the
@@ -34,6 +36,8 @@ Thumbs.db
 .vscode/
 *.swp
 
-# NOTE: model_manager.json IS committed on purpose — curated launch profiles,
-# no secrets. The HF token lives in ~/.config/otools/hf_token and the SSH key
-# in ~/.ssh/otools_model_manager_ed25519, neither of which is in the repo.
+# NOTE: model_manager.json is a LOCAL, git-ignored sandbox (regenerate with
+# `config --init`). The committed source of truth for curated profiles is
+# DEFAULT_CONFIG in the omodel-manager script. Secrets live outside the repo:
+# the HF token in ~/.config/otools/hf_token and the SSH key in
+# ~/.ssh/otools_model_manager_ed25519 — neither is in the repo.
