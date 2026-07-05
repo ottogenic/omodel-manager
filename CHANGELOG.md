@@ -27,6 +27,15 @@ All notable changes to this project are documented here. The format follows
   the misleading "nothing is pulling".
 
 ### Changed
+- **`benchmark_concurrent.py` rewritten simple: `benchmark <endpoint> [N]`.** Replaces the
+  growing-sessions / fixed-sweep / `--scenario` / `--quick` / `/metrics` machinery with one job:
+  send **N unique ~50k-token prompts at once** (a generated story to summarize; unique so prefix
+  caching can't skip the prefill) and report per request **TTFT** (input-processing time),
+  **prefill tok/s**, and **decode tok/s**. `<endpoint>` is an alias / `user@ip` / `ip` / `host:port`;
+  `N` (positional, default 1) is the number of simultaneous prompts. `--context` default **50000**
+  (≈everyday coding; `--context 100000` for a big-repo stress). A small warm-up fires first so the
+  numbers aren't a cold-start outlier and runs are comparable. Run `<host> 1` for single-user speed
+  (→ `tok_s`), then `<host> 2`/`4` for the parallel slowdown.
 - **Profile names standardized to upstream + `list` sorted.** Six keys renamed to match the
   published HF names (breaking — key = served-model-name = container name): `qwen3.6-35b-nvfp4`
   → `qwen3.6-35b-a3b-nvfp4`, `qwen3.6-35b-bf16` → `qwen3.6-35b-a3b-bf16`, both
