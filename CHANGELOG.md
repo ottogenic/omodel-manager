@@ -14,6 +14,11 @@ All notable changes to this project are documented here. The format follows
   `unsloth/qwen3-coder-next-fp8` served id. Measured ~46 tok/s decode single-user on dgx-2.
 
 ### Changed
+- **`git-new-worktree --delete` now also cleans up orphaned worktree folders.** If a folder is a
+  sibling of the repo but git no longer tracks it as a worktree (its registration was pruned — e.g.
+  by a cross-OS `git worktree prune`), or it's just a stray sibling directory, `--delete` offers to
+  remove the folder after a clear "deletion is PERMANENT / can't verify unsaved work" warning.
+  Restricted to siblings; refuses `.`/`..`.
 - **New `git-sync-main` helper + renamed `new-worktree` → `git-new-worktree`.** `./git-sync-main`
   brings the current clone's `main` up to date with origin (fetch --prune → switch to main →
   fast-forward) — "make sure this is up to date." It **refuses inside a linked worktree and on a
