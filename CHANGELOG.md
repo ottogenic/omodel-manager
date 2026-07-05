@@ -27,6 +27,15 @@ All notable changes to this project are documented here. The format follows
   the misleading "nothing is pulling".
 
 ### Changed
+- **`benchmark_concurrent.py` rewritten simple: `benchmark <endpoint> [N]`.** Replaces the
+  growing-sessions / fixed-sweep / `--scenario` / `--quick` / `/metrics` machinery with one job:
+  send **N unique ~50k-token prompts at once** (a generated story to summarize; unique so prefix
+  caching can't skip the prefill) and report per request **TTFT** (input-processing time),
+  **prefill tok/s**, and **decode tok/s**. `<endpoint>` is an alias / `user@ip` / `ip` / `host:port`;
+  `N` (positional, default 1) is the number of simultaneous prompts. `--context` default **50000**
+  (≈everyday coding; `--context 100000` for a big-repo stress). A small warm-up fires first so the
+  numbers aren't a cold-start outlier and runs are comparable. Run `<host> 1` for single-user speed
+  (→ `tok_s`), then `<host> 2`/`4` for the parallel slowdown.
 - **Profile names standardized to upstream + `list` sorted.** Six keys renamed to match the
   published HF names (breaking — key = served-model-name = container name): `qwen3.6-35b-nvfp4`
   → `qwen3.6-35b-a3b-nvfp4`, `qwen3.6-35b-bf16` → `qwen3.6-35b-a3b-bf16`, both
@@ -41,18 +50,8 @@ All notable changes to this project are documented here. The format follows
 - **Qwen3-Coder-Next-FP8** (`qwen3-coder-next-fp8`): 80B/3B hybrid MoE (DeltaNet), FP8 quantized, 262K context, coding/agentic. No thinking mode. Requires `VLLM_USE_DEEP_GEMM=0` on GB10/sm_121.
 - **`Tk/s` column in `list`/`models`.** Each profile can carry an optional `tok_s` — recorded
   decode speed at a **single user @ ~100k context** — so `omm models` shows at a glance how fast
-  each model is. Populate it from the benchmark (`ADD_A_MODEL.md` §6, `--sessions 1 --grow-to
-  100000`); unmeasured profiles show `—` (no guessed numbers).
-
-### Changed
-- **`benchmark_concurrent.py` now benchmarks a FIXED ~100k context, sweeping concurrency.**
-  Replaces the grow-to-100k walk (which never finished on slow models) with a single big
-  ~100k-token prompt fired at concurrency 1, then 2, 3 … up to `--sessions`, streaming TTFT/TPOT
-  and scraping `/metrics` per level. Each level is one fast round; a level that **fails twice in a
-  row stops the sweep** and the last completed level is the recommended `max-num-seqs`. The report
-  prints the two numbers directly: **`Tk/s (1 user @ ~100k)`** (record as the profile's `tok_s`)
-  and **recommended `max-num-seqs`**. New flags: `--context` (was `--grow-to`, still accepted),
-  `--req-timeout`; `--sessions` is now the max concurrency to sweep to. `--quick` unchanged.
+  each model is. Populate it from the benchmark (`ADD_A_MODEL.md` §6 — `benchmark <host> 1`);
+  unmeasured profiles show `—` (no guessed numbers).
 
 ## [0.2.0] - 2026-07-03
 
