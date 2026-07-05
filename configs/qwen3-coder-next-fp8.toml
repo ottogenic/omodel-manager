@@ -2,12 +2,13 @@
 #
 # NVIDIA FP8 quant of Qwen3-Coder-Next (hybrid DeltaNet MoE: 80B total / ~3B active).
 # Standard causal LM — no thinking/reasoning mode. Tool-calling. Launch via the
-# omodel-manager `qwen3-coder-next-fp8` profile.
+# omodel-manager `qwen3-coder-next-fp8` (official) or `unsloth-qwen3-coder-next-fp8` profile —
+# both share this config.
 # Values are STARTING POINTS to sweep from, not guarantees.
 #
 # Card sampling recommendation: temperature=1.0, top_p=0.95, top_k=40.
 
-match  = ["qwen3-coder-next-fp8", "Qwen/Qwen3-Coder-Next-FP8"]
+match  = ["qwen3-coder-next-fp8", "Qwen/Qwen3-Coder-Next-FP8", "unsloth/qwen3-coder-next-fp8", "unsloth/Qwen3-Coder-Next-FP8"]
 source = "https://huggingface.co/Qwen/Qwen3-Coder-Next-FP8"
 
 [capabilities]
