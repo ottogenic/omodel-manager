@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **`gemma4-26b-fp8` launch profile** — RedHatAI's FP8 quantized Gemma 4 26B-A4B MoE variant.
+  26B total / ~3.8B active per token, multimodal (text+image), reasoning + tool-calling.
+  Measured ~37 tok/s decode single-user on dgx-1 (GB10, sm_121). At N=4 concurrency,
+  decode speed drops to ~1.7-22 tok/s due to memory-bandwidth limitations.
+  Uses `vllm/vllm-openai:nightly` (gemma4-cu130 lacks compressed-tensors MoE fixes).
 - **`unsloth-qwen3-coder-next-fp8` launch profile** — the unsloth FP8 build of Qwen3-Coder-Next
   (hybrid GDN/DeltaNet MoE, ~80B total / ~3B active, 262K context) tuned for GB10/sm_121
   (`VLLM_USE_DEEP_GEMM=0` → TRITON FP8 MoE, FlashInfer attention, no `--quantization`). It shares

@@ -29,7 +29,7 @@ Design:
     access is self-contained and easy to revoke later.
 
 Stdlib only. Commands:
-  omodel-manager install user@192.0.2.101 dgx1 --fix   # bootstrap + name a host
+  omodel-manager install otto@192.168.50.101 dgx1 --fix   # bootstrap + name a host
   omodel-manager --... launch <key> --host dgx1
   omodel-manager ps                 # running managed containers (default)
   omodel-manager ps --all           # also list other vllm/* containers
@@ -107,7 +107,7 @@ DEFAULT_CONFIG = {
         "image": DEFAULT_IMAGE,
         "host": "0.0.0.0",
         "gpus": "all",
-        "remote": None,                     # e.g. "user@192.0.2.101" to run on the DGX;
+        "remote": None,                     # e.g. "otto@192.168.50.101" to run on the DGX;
                                             #      null = local. Override per-model or with --remote.
         "hf_cache": "~/.cache/huggingface",
         "env": {
@@ -500,6 +500,9 @@ DEFAULT_CONFIG = {
                 "VLLM_USE_FLASHINFER_MOE_FP4=0 env form of the same pin.) TP=1 only in vLLM here.",
                 "kv-cache fp8 intentionally OMITTED on Spark (predictability + sm121 FP8-kernel "
                 "risk; the light model leaves ample KV room). Card sampling: temp 1.0, top_p 0.95.",
+                "⚠️  LAUNCH ISSUE: Current gemma4-cu130 nightly lacks fix for per-expert NVFP4 scale "
+                "keys (vLLM PR #41683, open as of 2026-07-05). Error: KeyError: 'layers.0.experts.0.down_proj.input_scale'. "
+                "Wait for PR merge + new image release before attempting launch. See also gemma4-26b-fp8 which works.",
             ],
             "image": "vllm/vllm-openai:gemma4-cu130",
             "model": "nvidia/Gemma-4-26B-A4B-NVFP4",
@@ -518,6 +521,46 @@ DEFAULT_CONFIG = {
                 "enable-auto-tool-choice": True,
                 "reasoning-parser": "gemma4",
                 "tool-call-parser": "gemma4",
+                "enable-log-requests": True,
+            },
+        },
+        "gemma4-26b-fp8": {
+            "tok_s": 37,
+            "notes": [
+                "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic -- FP8 quantized MoE variant. "
+                "26B total / ~3.8B active per token. Multimodal (text+image), reasoning + tools.",
+                "Better than NVFP4 on GB10: native FP8 hardware support vs Marlin fallback. "
+                "Measured ~37 tok/s decode on GB10 at N=1, ~1.7-22 tok/s at N=4 (parallel slowdown).",
+                "Uses compressed-tensors FP8-Dynamic format. Requires vLLM >= 0.19.1 for "
+                "compressed-tensors MoE weight loading fixes (PRs #40708, #41683).",
+                "sm_121 (GB10) requires --attention-backend TRITON_ATTN (FlashInfer has "
+                "accuracy bugs on Blackwell FP8) and --moe-backend marlin (FP4 MoE unavailable).",
+                "kv-cache fp8 recommended to save ~50% KV memory for longer contexts.",
+            ],
+            "image": "vllm/vllm-openai:nightly",
+            "model": "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic",
+            "port": 8001,
+            "usecase": ["Reasoning", "Vision", "Agentic", "Coding", "General"],
+            "env": {
+                "VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1",
+            },
+            "vllm_args": {
+                "served-model-name": "gemma4-26b-fp8",
+                "tensor-parallel-size": 1,
+                "dtype": "auto",
+                "attention-backend": "triton_attn",
+                "moe-backend": "marlin",
+                "kv-cache-dtype": "fp8",
+                "gpu-memory-utilization": 0.85,
+                "max-model-len": 262144,
+                "max-num-seqs": 8,
+                "max-num-batched-tokens": 8192,
+                "enable-chunked-prefill": True,
+                "async-scheduling": True,
+                "enable-prefix-caching": True,
+                "reasoning-parser": "gemma4",
+                "tool-call-parser": "gemma4",
+                "enable-auto-tool-choice": True,
                 "enable-log-requests": True,
             },
         },
@@ -1851,7 +1894,7 @@ def cmd_install(args):
     `ps` and `--host` can find it. Merges into the registry -- other hosts stay."""
     raw = args.target or REMOTE
     if not raw:
-        print("ERROR: install needs a target, e.g. `install user@192.0.2.101 dgx1` "
+        print("ERROR: install needs a target, e.g. `install otto@192.168.50.101 dgx1` "
               "(user@ip and an optional alias; comma-separate several hosts if you skip the alias).",
               file=sys.stderr)
         sys.exit(1)
