@@ -136,18 +136,17 @@ DEFAULT_CONFIG = {
             "notes": [
                 "Qwen3.6-35B-A3B-NVFP4 (nvidia/ModelOpt): hybrid GDN/Mamba MoE, mixed "
                 "NVFP4 (MLP) + FP8 (attention).",
-                "GB10/sm_121 has NO native FP4 -> force every GEMM onto the working Marlin path "
-                "(VLLM_NVFP4_GEMM_BACKEND=marlin, VLLM_USE_FLASHINFER_MOE_FP4=0, "
-                "VLLM_TEST_FORCE_FP8_MARLIN=1) and kill the broken E8M0 FP8 path "
-                "(VLLM_USE_DEEP_GEMM=0). Matches the 27b-nvfp4 / a3b-fp8 siblings. The model card "
-                "omits these (it targets datacenter Blackwell with native FP4); without them this "
-                "profile ran the FlashInfer/DeepGEMM FP8 kernels and produced degenerate '!!!!' "
-                "output on the Spark under load.",
+                "GB10/sm_121 NVFP4: pin the MoE to the working Marlin dequant path (--moe-backend "
+                "marlin) -- the CUTLASS/FlashInfer FP4 MoE path yields degenerate '!!!!' output on "
+                "the Spark. Leave the NVFP4 *linear* GEMM on auto (FlashInfer CUTLASS, the correct "
+                "sm_121 path). FP8 attention -> Marlin (VLLM_TEST_FORCE_FP8_MARLIN=1); kill the "
+                "broken E8M0 FP8-MoE path (VLLM_USE_DEEP_GEMM=0). (VLLM_NVFP4_GEMM_BACKEND / "
+                "VLLM_USE_FLASHINFER_MOE_FP4 were the pre-deprecation env form of the MoE pin; "
+                "current nightlies use the --moe-backend flag.) The model card omits these (it "
+                "targets datacenter Blackwell with native FP4).",
                 "tool-call-parser = qwen3_xml (per the card); qwen3_coder breaks tool calls here.",
             ],
             "env": {
-                "VLLM_NVFP4_GEMM_BACKEND": "marlin",
-                "VLLM_USE_FLASHINFER_MOE_FP4": "0",
                 "VLLM_TEST_FORCE_FP8_MARLIN": "1",
                 "VLLM_USE_DEEP_GEMM": "0",
             },
@@ -258,10 +257,8 @@ DEFAULT_CONFIG = {
             "port": 8000,
             "usecase": ["Reasoning", "Agentic", "Long-context"],
             "env": {
-                "VLLM_NVFP4_GEMM_BACKEND": "marlin",
                 "VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1",
                 "VLLM_FLASHINFER_ALLREDUCE_BACKEND": "trtllm",
-                "VLLM_USE_FLASHINFER_MOE_FP4": "0",
             },
             "assets": [
                 {
@@ -317,8 +314,6 @@ DEFAULT_CONFIG = {
             "port": 8000,
             "usecase": ["Coding", "Agentic", "Reasoning"],
             "env": {
-                "VLLM_NVFP4_GEMM_BACKEND": "marlin",
-                "VLLM_USE_FLASHINFER_MOE_FP4": "0",
                 "VLLM_TEST_FORCE_FP8_MARLIN": "1",
                 "VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1",
             },
@@ -346,8 +341,6 @@ DEFAULT_CONFIG = {
             "port": 8000,
             "usecase": ["Long-context", "Coding", "Reasoning"],
             "env": {
-                "VLLM_NVFP4_GEMM_BACKEND": "marlin",
-                "VLLM_USE_FLASHINFER_MOE_FP4": "0",
                 "VLLM_TEST_FORCE_FP8_MARLIN": "1",
                 "VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1",
             },
@@ -490,9 +483,10 @@ DEFAULT_CONFIG = {
                 "Needs the Gemma4-specific image (Gemma4ForConditionalGeneration); rolling "
                 "gemma4-cu130 tag. Do NOT pass --quantization (auto-detected; explicit -> "
                 "ValueError, vLLM #40291).",
-                "sm_121 has no native FP4 MoE kernels: VLLM_USE_FLASHINFER_MOE_FP4=0 forces the "
-                "working Marlin FP4 dequant path (the CUTLASS/FlashInfer path is not the GB10 "
-                "route). TP=1 only in vLLM for this model.",
+                "sm_121 has no native FP4 MoE kernels: --moe-backend marlin forces the working "
+                "Marlin FP4 dequant path (the CUTLASS/FlashInfer FP4 MoE path yields '!!!!' garbage "
+                "on GB10). Leave the linear GEMM on auto (FlashInfer CUTLASS). (Was the deprecated "
+                "VLLM_USE_FLASHINFER_MOE_FP4=0 env form of the same pin.) TP=1 only in vLLM here.",
                 "kv-cache fp8 intentionally OMITTED on Spark (predictability + sm121 FP8-kernel "
                 "risk; the light model leaves ample KV room). Card sampling: temp 1.0, top_p 0.95.",
             ],
@@ -500,12 +494,10 @@ DEFAULT_CONFIG = {
             "model": "nvidia/Gemma-4-26B-A4B-NVFP4",
             "port": 8000,
             "usecase": ["Reasoning", "Vision", "Agentic", "Coding", "General"],
-            "env": {
-                "VLLM_USE_FLASHINFER_MOE_FP4": "0",
-            },
             "vllm_args": {
                 "served-model-name": "gemma4-26b-a4b-nvfp4",
                 "tensor-parallel-size": 1,
+                "moe-backend": "marlin",
                 "gpu-memory-utilization": 0.85,
                 "max-model-len": 262144,
                 "max-num-seqs": 8,
@@ -539,9 +531,7 @@ DEFAULT_CONFIG = {
             "port": 8000,
             "usecase": ["Coding", "Agentic", "General"],
             "env": {
-                "VLLM_NVFP4_GEMM_BACKEND": "marlin",
                 "VLLM_TEST_FORCE_FP8_MARLIN": "1",
-                "VLLM_USE_FLASHINFER_MOE_FP4": "0",
                 "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
             },
             "vllm_args": {
