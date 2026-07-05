@@ -54,6 +54,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -1574,11 +1575,23 @@ def cmd_launch(args):
         sys.exit(res.returncode)
     if not args.foreground:
         p = _cli_name()
-        print(f"\nStarted '{args.key}' (container {name}).")
+        # Settle: a cached image launches in <1s -- faster than docker registers the
+        # container -- so an immediate health/ps check can race and read a wrong state
+        # (this is what makes agents loop). Pause a few seconds so the next check is
+        # consistent, and catch a container that crashed instantly on startup.
+        time.sleep(5)
+        running = docker(["ps", "--format", "{{.Names}}"], capture=True)
+        if running.returncode == 0 and name not in running.stdout.split():
+            print(f"\nWARNING: '{name}' is NOT running ~5s after launch -- it likely crashed on "
+                  f"startup. Read the log:\n  {p} logs {args.key}{_rsuf()}", file=sys.stderr)
+            return
+        print(f"\nStarted '{args.key}' (container '{name}'). The vLLM server inside is now "
+              f"INITIALIZING -- weights + torch.compile + warmup take a few minutes.")
+        print("Until it finishes, `health` reports STARTING and the port refuses connections --"
+              " that is NORMAL, not an error. Poll `health` until it says READY:")
         _suggest([
-            ("Watch startup logs (Ctrl-C to stop following)", f"{p} logs {args.key}{_rsuf()} -f"),
-            ("Check readiness", f"{p} health {args.key}{_rsuf()}"),
-            ("List running models", f"{p} ps{_rsuf()}"),
+            ("Poll readiness (~every 15s until READY)", f"{p} health {args.key}{_rsuf()}"),
+            ("Watch startup logs (Ctrl-C to stop)", f"{p} logs {args.key}{_rsuf()} -f"),
             ("Stop this model", f"{p} stop {args.key}{_rsuf()}"),
         ])
 
@@ -1635,8 +1648,17 @@ def cmd_pull_status(args):
     p = _cli_name()
     status = _launch_status(body)
     if status == "none":
-        print(f"No background-launch log for '{args.key}'{where} ({log}).")
-        print(f"  Nothing is pulling -- start one with `{p} launch {args.key}{_rsuf()}`.")
+        # No bg-pull log. If the container is already running, it was a direct (cached-image)
+        # launch -- say so plainly instead of "nothing is pulling", which reads like a failure
+        # and sends agents into a poll loop.
+        running = any(r.get("Names") == container_name(args.key) for r in list_managed(remote=REMOTE))
+        if running:
+            print(f"'{args.key}': launched directly (image was cached); the container is "
+                  f"running{where}. There's no pull to track -- poll `{p} health "
+                  f"{args.key}{_rsuf()}` until READY.")
+        else:
+            print(f"No background launch in progress for '{args.key}'{where}. "
+                  f"Start one with `{p} launch {args.key}{_rsuf()}`.")
         return
     lines = body.strip().splitlines()
     if status == "ok":
@@ -1715,43 +1737,54 @@ def cmd_health(args):
     need_docker()
     cfg = load_config(create=False) if os.path.exists(CONFIG_PATH) else {"models": {}}
     hostaddr = remote_host() or "127.0.0.1"
-    targets = []   # (label, host, port)
+    targets = []   # (label, host, port, running)
     if args.target:
         merged = merge_model(cfg, args.target) if args.target in cfg.get("models", {}) else None
         rows = list_managed(include_all=True)
         for r in rows:
             if r.get("Names") in (args.target, container_name(args.target)):
                 targets.append((r.get("Names"), hostaddr,
-                                _label(r.get("Labels", ""), LABEL_PORT)))
+                                _label(r.get("Labels", ""), LABEL_PORT), True))
         if not targets and merged:
-            targets.append((args.target, hostaddr, merged["port"]))
+            targets.append((args.target, hostaddr, merged["port"], False))
     else:
         for r in list_managed(include_all=args.all):
             targets.append((r.get("Names"), hostaddr,
-                            _label(r.get("Labels", ""), LABEL_PORT)))
+                            _label(r.get("Labels", ""), LABEL_PORT), True))
     if not targets:
         print("No running containers to health-check.")
         return
-    for label, host, port in targets:
+    for label, host, port, running in targets:
         if not port:
             print(f"  {label}: unknown port"); continue
-        ok, detail = http_models(host, int(port))
-        status = "READY" if ok else "not ready"
-        print(f"  {label:<28} :{port}  {status}  {detail}")
+        phase, detail = http_models(host, int(port))
+        if phase == "ready":
+            print(f"  {label:<28} :{port}  READY  {detail}")
+        elif phase == "starting" and running:
+            print(f"  {label:<28} :{port}  STARTING  vLLM still loading (weights+compile+warmup) "
+                  "-- normal for a few min after launch; keep polling, this is NOT an error")
+        elif phase == "starting":
+            print(f"  {label:<28} :{port}  DOWN  nothing listening and no running container "
+                  "(launch it, or it crashed -- check `logs`)")
+        else:
+            print(f"  {label:<28} :{port}  not ready  {detail}")
 
 
 def http_models(host, port, timeout=3.0):
+    """(phase, detail): 'ready' (models listed), 'starting' (nothing listening yet --
+    connection refused/timeout, i.e. the server is still coming up), or 'error' (it
+    answered but not with a model list)."""
     url = f"http://{host}:{port}/v1/models"
     try:
         req = urllib.request.Request(url, headers={"Authorization": "Bearer x"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8", "ignore"))
         ids = [m.get("id") for m in data.get("data", []) if m.get("id")]
-        return True, ", ".join(ids) if ids else "(no model ids)"
+        return "ready", ", ".join(ids) if ids else "(no model ids)"
     except urllib.error.HTTPError as e:
-        return False, f"HTTP {e.code}"
-    except (urllib.error.URLError, OSError) as e:
-        return False, f"{e}"
+        return "error", f"HTTP {e.code}"
+    except (urllib.error.URLError, OSError):
+        return "starting", "server not listening yet"
 
 
 def _print_results(results):

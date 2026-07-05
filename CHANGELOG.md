@@ -15,6 +15,16 @@ All notable changes to this project are documented here. The format follows
   `VLLM_USE_DEEP_GEMM=0`). Also corrected `tool-call-parser` `qwen3_coder` → `qwen3_xml` (per the
   model card; `qwen3_coder` broke tool calls). The card omits these env vars because it targets
   datacenter Blackwell with native FP4 — they're required on the Spark.
+- **`launch`/`health`/`pull-status`: clear startup state so a cached launch doesn't loop agents.**
+  A fast (cached-image) `launch` returned before docker fully registered the container, and
+  `health` then printed `not ready  Connection refused` — which reads like an *error* while the
+  vLLM server is merely still loading — so agents polled/thrashed for 10+ minutes. Now: `launch`
+  **settles ~5s** and verifies the container is running (catching an instant crash) before
+  reporting success, and says plainly that the server is initializing and to poll `health`;
+  **`health` distinguishes `STARTING`** (container up, server still loading — "NOT an error, keep
+  polling") from a genuine error or a `DOWN` container; and **`pull-status`** on a directly
+  (cached) launched model says "launched directly; container running — poll health" instead of
+  the misleading "nothing is pulling".
 
 ### Changed
 - **Profile names standardized to upstream + `list` sorted.** Six keys renamed to match the
