@@ -25,6 +25,7 @@ GEMINI.md
 .cursorrules
 .windsurf/
 .aider*
+.opencode/
 
 # OS / editor cruft
 .DS_Store

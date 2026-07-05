@@ -1,4 +1,9 @@
-# Onboarding a model — add or update (AI guide)
+---
+name: add-a-model
+description: Onboard or update a model in omodel-manager — research a HuggingFace repo, draft a launch profile + a configs/*.toml, prove it on real hardware, verify tunable params, and promote it into DEFAULT_CONFIG. Use when adding, onboarding, or updating any model. Benchmarking is part of it (load the benchmark-model skill for that step).
+---
+
+# Onboarding a model — add or update
 
 A repeatable, AI-runnable workflow to **add a new model** to the otools stack — or
 to **update an existing one** that was added quickly and never fully vetted. Each
@@ -36,7 +41,7 @@ trust the evidence and note it.
 >   `omm --host <alias>` does the remote plumbing for you. If you're reaching for a raw
 >   `ssh`, stop — there's an `omm` subcommand for it.
 >
-> **Hardware context lives in [SPARK_NOTES.md](SPARK_NOTES.md)** — the DGX Spark
+> **Hardware context lives in SPARK_NOTES.md** — the DGX Spark
 > (GB10/sm_121) trap table + open watch-list. Read it before §1; it's why several
 > flags below are what they are, and it's where you log anything new you learn.
 
@@ -77,7 +82,7 @@ trust the evidence and note it.
 > synthesize. Good split: (1) fetch `config.json`, (2) fetch the model card, (3) vLLM/
 > SGLang GitHub issues for `<model> + <quant>`, (4) Blackwell/sm_121 reports,
 > (5) throughput/perf benchmarks, (6) quant-specific gotchas. Read
-> [SPARK_NOTES.md](SPARK_NOTES.md) first so you know the traps you're checking against.
+> SPARK_NOTES.md first so you know the traps you're checking against.
 
 1. **Fetch `config.json`** (`<repo>/raw/main/config.json`). Extract: `model_type`,
    `architectures`, `max_position_embeddings`, `rope_theta`/`rope_scaling`,
@@ -95,7 +100,7 @@ trust the evidence and note it.
    - Search `"<model> vLLM"`, `"<model> blackwell"`, `"<model> fp8 throughput"`.
    - Note anything that changes launch flags or expectations (e.g. FP8-MoE decode
      is slow on Blackwell → NVFP4 may be the better serve).
-   - **Check your findings against [SPARK_NOTES.md](SPARK_NOTES.md)'s trap table**
+   - **Check your findings against SPARK_NOTES.md's trap table**
      before drafting flags — most GB10/sm_121 surprises are already logged there
      (FP8-MoE `VLLM_USE_DEEP_GEMM=0`, NVFP4 Marlin path, fp8-KV per-model, Gemma
      no-`--quantization`, …). If you hit a *new* one, add it there in §7.
@@ -122,7 +127,7 @@ profile; change only what the quant/model needs:
    Downstream tools that call the API must use the served name, not the HF ID.
 - `port` (default 8000 — one model per box at a time).
 - `env`: quant/runtime vars. On DGX Spark the validated ones (see
-  [SPARK_NOTES.md](SPARK_NOTES.md)) are **`VLLM_USE_DEEP_GEMM=0`** (FP8-MoE) and
+  SPARK_NOTES.md) are **`VLLM_USE_DEEP_GEMM=0`** (FP8-MoE) and
   **`VLLM_TEST_FORCE_FP8_MARLIN=1`** (FP8 attention → Marlin). Pin the NVFP4 MoE to Marlin with
   the **`--moe-backend marlin`** *flag* (in `vllm_args`), **not** the old
   `VLLM_USE_FLASHINFER_MOE_FP4` / `VLLM_NVFP4_GEMM_BACKEND` env vars — those are deprecated
@@ -231,6 +236,7 @@ omodel-manager logs <container> --host <host> 2>&1 | grep -i sampling
 
 ### 6. Benchmark: single-user speed + parallel slowdown
 
+Benchmark it (load the **benchmark-model** skill). In brief:
 `utils/benchmark_concurrent.py` sends **N unique ~50k-token prompts at once** and asks each to
 summarize a (generated) story, streaming the reply. The text is unique per request so prefix
 caching can't skip the prefill. Per request it measures **TTFT** (how long to *process* the
@@ -282,9 +288,10 @@ Only after the model runs clean and you know what's tunable:
   from the updated defaults (this resets it; re-add any local tweaks if needed).
 - Commit `DEFAULT_CONFIG` and `configs/<key>.toml` together. Do **not** commit
   `model_manager.json` — it's your local, git-ignored sandbox. Run
-  `python3 -m unittest` in both repos.
+  `python3 -m unittest` in both repos. To commit + open the PR, load the **open-a-pr** skill.
 - Optionally `omodel-wire --verify --remote <host>` to diff declared vs live.
 - Add a `CHANGELOG.md` entry in each repo.
+- If you hit a *new* GB10/sm_121 trap during testing, log it in SPARK_NOTES.md (see §1).
 
 ---
 

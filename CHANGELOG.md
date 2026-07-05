@@ -13,6 +13,17 @@ All notable changes to this project are documented here. The format follows
   the `qwen3-coder-next-fp8` config — that config's `match` now also covers the
   `unsloth/qwen3-coder-next-fp8` served id. Measured ~46 tok/s decode single-user on dgx-2.
 
+### Changed
+- **`AGENTS.md` slimmed to invariants + a skill index; task detail moved to lazy-loaded
+  skills.** The full `AGENTS.md` was injected into every model request (~5k tokens) even for
+  trivial turns. It's now a lean always-on core (invariants + working agreement + a skill
+  index); the workflows and reference material moved into OpenCode **skills** under
+  `.agents/skills/` (the vendor-neutral discovery path): `add-a-model`, `benchmark-model`,
+  `launch-and-operate`, `edit-launch-profiles`, `code-changes`, `open-a-pr`. Only each skill's
+  name + description is advertised up front; the body loads on demand via the `skill` tool.
+  `ADD_A_MODEL.md` moved into the `add-a-model` skill. Cuts per-request prompt overhead by
+  ~4k tokens with no loss of guidance.
+
 ### Fixed
 - **NVFP4 configs no longer cross-match their FP8 siblings in `omw models`.** The nvfp4
   configs carried quant-agnostic `match` patterns (`Qwen3.6-35B`, `Qwen3.6-27B`,

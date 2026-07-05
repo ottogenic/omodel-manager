@@ -125,7 +125,8 @@ resets it from the hardcoded defaults. **Promote** a vetted change by editing
 - **`env`**: `null`/`"inherit"` inherits from your shell; a value is passed explicitly.
 - **`tok_s`** (optional): recorded decode speed — **single user at the benchmark's default
   context (~50k)** — shown in the `Tk/s` column of `list`/`models` so you can compare how fast
-  each model is. Populate it from the benchmark (`ADD_A_MODEL.md` §6); unmeasured profiles show `—`.
+  each model is. Populate it from the benchmark (the `add-a-model` / `benchmark-model` skills);
+  unmeasured profiles show `—`.
 
 ## Remote, install & uninstall
 
