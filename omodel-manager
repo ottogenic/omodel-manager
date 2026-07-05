@@ -29,7 +29,7 @@ Design:
     access is self-contained and easy to revoke later.
 
 Stdlib only. Commands:
-  omodel-manager install otto@192.168.50.101 dgx1 --fix   # bootstrap + name a host
+  omodel-manager install user@192.0.2.101 dgx1 --fix   # bootstrap + name a host
   omodel-manager --... launch <key> --host dgx1
   omodel-manager ps                 # running managed containers (default)
   omodel-manager ps --all           # also list other vllm/* containers
@@ -107,7 +107,7 @@ DEFAULT_CONFIG = {
         "image": DEFAULT_IMAGE,
         "host": "0.0.0.0",
         "gpus": "all",
-        "remote": None,                     # e.g. "otto@192.168.50.101" to run on the DGX;
+        "remote": None,                     # e.g. "user@192.0.2.101" to run on the DGX;
                                             #      null = local. Override per-model or with --remote.
         "hf_cache": "~/.cache/huggingface",
         "env": {
@@ -1851,7 +1851,7 @@ def cmd_install(args):
     `ps` and `--host` can find it. Merges into the registry -- other hosts stay."""
     raw = args.target or REMOTE
     if not raw:
-        print("ERROR: install needs a target, e.g. `install otto@192.168.50.101 dgx1` "
+        print("ERROR: install needs a target, e.g. `install user@192.0.2.101 dgx1` "
               "(user@ip and an optional alias; comma-separate several hosts if you skip the alias).",
               file=sys.stderr)
         sys.exit(1)
