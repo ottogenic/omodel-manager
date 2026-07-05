@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **NVFP4 configs no longer cross-match their FP8 siblings in `omw models`.** The nvfp4
+  configs carried quant-agnostic `match` patterns (`Qwen3.6-35B`, `Qwen3.6-27B`,
+  `Qwen3-Coder-Next`, `Gemma-4-26B-A4B`) which — via omw's substring-based LIVE detection —
+  matched the *fp8* siblings' served ids, so an nvfp4 model showed LIVE when only its fp8
+  sibling was actually running. Tightened the four nvfp4 configs to precise, quant-specific
+  patterns; added a `test_configs` guard that no config's pattern is a substring of another's.
 - **`qwen3.6-35b-a3b-nvfp4`: force the sm_121 Marlin path + fix tool parser.** This profile was
   the only NVFP4/FP8 one with an empty `env` — it ran the FlashInfer/DeepGEMM FP8 kernels
   (`DeepGEMM E8M0 enabled`) that GB10/sm_121 mishandles (no native FP4), producing degenerate

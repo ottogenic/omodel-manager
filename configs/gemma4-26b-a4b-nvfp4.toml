@@ -20,7 +20,7 @@
 # Verified: nvidia/Gemma-4-26B-A4B-NVFP4 card (serve flags + temp 1.0/top_p 0.95),
 # ai-muninn DGX Spark benchmark. Live validation TBD on Blackwell hardware.
 
-match  = ["gemma4-26b-a4b-nvfp4", "nvidia/Gemma-4-26B-A4B-NVFP4", "Gemma-4-26B-A4B"]
+match  = ["gemma4-26b-a4b-nvfp4", "nvidia/Gemma-4-26B-A4B-NVFP4"]
 source = "https://huggingface.co/nvidia/Gemma-4-26B-A4B-NVFP4"
 
 [capabilities]

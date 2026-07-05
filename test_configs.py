@@ -62,6 +62,26 @@ class ConfigValidityTests(unittest.TestCase):
                     unknown = set(s) - KNOWN_SAMPLING
                     self.assertFalse(unknown, f"{pk}: unknown sampling keys {unknown}")
 
+    def test_match_patterns_dont_cross_match(self):
+        # A config's match patterns must uniquely identify ITS model. Downstream
+        # (omw) does LIVE detection by SUBSTRING (pattern in served_id), so if one
+        # config's pattern is a substring of another's, the wrong config lights up
+        # when a SIBLING quant is running -- e.g. an nvfp4 config showing LIVE
+        # because the fp8 sibling's served id contains a bare "Qwen3.6-35B". Guard it.
+        configs = {}
+        for p in _config_files():
+            m = _load(p).get("match") or []
+            configs[p.stem] = [str(x).lower() for x in (m if isinstance(m, list) else [m])]
+        for a, apats in configs.items():
+            for b, bpats in configs.items():
+                if a == b:
+                    continue
+                for ap in apats:
+                    for bp in bpats:
+                        self.assertNotIn(ap, bp,
+                            f"'{a}' pattern '{ap}' is a substring of '{b}' pattern "
+                            f"'{bp}' -> they'll cross-match in omw's LIVE detection")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
