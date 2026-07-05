@@ -67,22 +67,22 @@ class HostsStoreTests(unittest.TestCase):
 
     def test_bare_roundtrip_and_dedup(self):
         # Bare user@host entries store as (target, target) pairs; dupes dropped, order kept.
-        mm.save_hosts(["otto@a", "otto@b", "otto@a"])
-        self.assertEqual(mm.load_hosts(), [("otto@a", "otto@a"), ("otto@b", "otto@b")])
-        self.assertEqual(mm.host_targets(), ["otto@a", "otto@b"])
+        mm.save_hosts(["user@a", "user@b", "user@a"])
+        self.assertEqual(mm.load_hosts(), [("user@a", "user@a"), ("user@b", "user@b")])
+        self.assertEqual(mm.host_targets(), ["user@a", "user@b"])
 
     def test_alias_roundtrip(self):
-        mm.save_hosts([("dgx1", "otto@a"), ("dgx2", "otto@b")])
-        self.assertEqual(mm.load_hosts(), [("dgx1", "otto@a"), ("dgx2", "otto@b")])
+        mm.save_hosts([("dgx1", "user@a"), ("dgx2", "user@b")])
+        self.assertEqual(mm.load_hosts(), [("dgx1", "user@a"), ("dgx2", "user@b")])
 
     def test_dedup_by_target_keeps_first_alias(self):
-        mm.save_hosts([("dgx1", "otto@a"), ("other", "otto@a")])  # same target twice
-        self.assertEqual(mm.load_hosts(), [("dgx1", "otto@a")])
+        mm.save_hosts([("dgx1", "user@a"), ("other", "user@a")])  # same target twice
+        self.assertEqual(mm.load_hosts(), [("dgx1", "user@a")])
 
     def test_resolve_host_alias_and_passthrough(self):
-        mm.save_hosts([("dgx1", "otto@a")])
-        self.assertEqual(mm.resolve_host("dgx1"), "otto@a")     # alias -> target
-        self.assertEqual(mm.resolve_host("otto@b"), "otto@b")   # unknown/raw passes through
+        mm.save_hosts([("dgx1", "user@a")])
+        self.assertEqual(mm.resolve_host("dgx1"), "user@a")     # alias -> target
+        self.assertEqual(mm.resolve_host("user@b"), "user@b")   # unknown/raw passes through
         self.assertEqual(mm.resolve_host(""), "")               # empty passes through
         self.assertIsNone(mm.resolve_host(None))
 
@@ -92,9 +92,9 @@ class HostsStoreTests(unittest.TestCase):
 
     def test_host_label_prefers_alias(self):
         # suggested commands should echo the alias, not the raw user@ip
-        mm.save_hosts([("dgx1", "otto@192.168.50.101")])
-        self.assertEqual(mm._host_label("otto@192.168.50.101"), "dgx1")
-        self.assertEqual(mm._host_label("otto@unknown"), "otto@unknown")  # no alias -> raw
+        mm.save_hosts([("dgx1", "user@192.0.2.101")])
+        self.assertEqual(mm._host_label("user@192.0.2.101"), "dgx1")
+        self.assertEqual(mm._host_label("user@unknown"), "user@unknown")  # no alias -> raw
         self.assertIsNone(mm._host_label(None))
 
 
@@ -203,12 +203,12 @@ class LaunchGuardTests(unittest.TestCase):
             mm.cmd_launch(SimpleNamespace(**base))
 
     def test_guard_blocks_local_when_hosts_registered(self):
-        mm.save_hosts([("dgx1", "otto@a")])
+        mm.save_hosts([("dgx1", "user@a")])
         with self.assertRaises(SystemExit):
             self._launch()
 
     def test_local_flag_bypasses_guard(self):
-        mm.save_hosts([("dgx1", "otto@a")])
+        mm.save_hosts([("dgx1", "user@a")])
         self._launch(local=True)   # --local + --dry-run: must not raise
 
     def test_no_hosts_allows_local(self):
@@ -393,9 +393,9 @@ class PathTests(unittest.TestCase):
         self.assertNotIn("${PWD}", mm.host_path("${PWD}/y"))
 
     def test_remote_uses_remote_home(self):
-        mm._remote_home_cache["u@h"] = "/home/otto"
-        self.assertEqual(mm.host_path("~/x", target="u@h"), "/home/otto/x")
-        self.assertEqual(mm.host_path("~/.cache/hf", target="u@h"), "/home/otto/.cache/hf")
+        mm._remote_home_cache["u@h"] = "/home/user"
+        self.assertEqual(mm.host_path("~/x", target="u@h"), "/home/user/x")
+        self.assertEqual(mm.host_path("~/.cache/hf", target="u@h"), "/home/user/.cache/hf")
 
 
 class SshOptsTests(unittest.TestCase):
@@ -452,15 +452,15 @@ class HostAddressingTests(unittest.TestCase):
         self._hosts, self._lm = mm.HOSTS_FILE, mm.list_managed
         mm.HOSTS_FILE = os.path.join(tempfile.mkdtemp(), "hosts")
         with open(mm.HOSTS_FILE, "w") as f:
-            f.write("dgx-2\totto@192.168.50.102\n")
+            f.write("dgx-2\tuser@192.0.2.102\n")
 
     def tearDown(self):
         mm.HOSTS_FILE, mm.list_managed = self._hosts, self._lm
 
     def test_host_of_recognizes_alias_ip_userhost(self):
         self.assertEqual(mm.host_of("dgx-2"), "dgx-2")               # registered alias
-        self.assertEqual(mm.host_of("otto@1.2.3.4"), "otto@1.2.3.4")  # user@host
-        self.assertEqual(mm.host_of("192.168.50.103"), "192.168.50.103")  # bare IP
+        self.assertEqual(mm.host_of("user@1.2.3.4"), "user@1.2.3.4")  # user@host
+        self.assertEqual(mm.host_of("192.0.2.103"), "192.0.2.103")  # bare IP
 
     def test_host_of_rejects_model_and_container_names(self):
         self.assertIsNone(mm.host_of("qwen3.6-35b-nvfp4"))
@@ -471,19 +471,19 @@ class HostAddressingTests(unittest.TestCase):
 
     def test_managed_on_single(self):
         mm.list_managed = lambda **k: [{"Names": "otools-vllm-m1", "Labels": "otools.model=m1"}]
-        self.assertEqual(mm._managed_on("otto@a"), ("otools-vllm-m1", "m1"))
+        self.assertEqual(mm._managed_on("user@a"), ("otools-vllm-m1", "m1"))
 
     def test_managed_on_none_errors(self):
         mm.list_managed = lambda **k: []
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
-                mm._managed_on("otto@a")
+                mm._managed_on("user@a")
 
     def test_managed_on_ambiguous_errors(self):
         mm.list_managed = lambda **k: [{"Names": "a"}, {"Names": "b"}]
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
-                mm._managed_on("otto@a")
+                mm._managed_on("user@a")
 
 
 class FmtTokensTests(unittest.TestCase):

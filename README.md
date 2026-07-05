@@ -31,7 +31,7 @@ python omodel-manager list
 python omodel-manager launch qwen3.6-35b-a3b-nvfp4
 
 # ...or on a remote box: bootstrap + name it once, then use the alias
-python omodel-manager install otto@192.168.50.102 dgx1 --fix
+python omodel-manager install user@192.0.2.102 dgx1 --fix
 python omodel-manager launch qwen3.6-35b-a3b-nvfp4 --host dgx1
 python omodel-manager logs   qwen3.6-35b-a3b-nvfp4 --host dgx1 -f
 python omodel-manager health qwen3.6-35b-a3b-nvfp4 --host dgx1

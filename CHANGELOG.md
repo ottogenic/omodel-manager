@@ -14,6 +14,11 @@ All notable changes to this project are documented here. The format follows
   `unsloth/qwen3-coder-next-fp8` served id. Measured ~46 tok/s decode single-user on dgx-2.
 
 ### Changed
+- **Genericized example host addresses/usernames** in help text, README, comments, and tests to
+  the RFC 5737 documentation range (`192.0.2.0/24`) + a `user@` placeholder — no specific private
+  LAN in the shipped code. Also ignore `hosts`/`wire.json` defensively and corrected a stale
+  `.gitignore` note (`model_manager.json` is the git-ignored sandbox; `DEFAULT_CONFIG` is the
+  committed source of truth).
 - **Recorded `tok_s` (single-user decode speed) on every benchmarked launch profile** — from
   the overnight GB10 benchmarking run, committed to `DEFAULT_CONFIG` so they persist across
   `config --init` (previously they lived only in the local sandbox and were lost on a reset).
