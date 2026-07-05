@@ -6,7 +6,7 @@
 # Thinking off per request: chat_template_kwargs = { enable_thinking = false }.
 # Anti-loop: temperature 0.6 (NOT 0) + presence_penalty on instruct.
 
-match  = ["qwen3.6-27b-nvfp4", "unsloth/qwen3.6-27b", "Qwen3.6-27B-NVFP4", "Qwen3.6-27B"]
+match  = ["qwen3.6-27b-nvfp4", "unsloth/qwen3.6-27b", "Qwen3.6-27B-NVFP4"]
 source = "https://huggingface.co/unsloth/Qwen3.6-27B-NVFP4"
 
 [capabilities]

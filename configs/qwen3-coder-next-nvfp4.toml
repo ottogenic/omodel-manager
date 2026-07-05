@@ -11,7 +11,7 @@
 # Base-card sampling defaults (https://huggingface.co/Qwen/Qwen3-Coder-Next):
 #   temperature 1.0, top_p 0.95, top_k 40  (General/Default)
 
-match  = ["qwen3-coder-next-nvfp4", "RedHatAI/Qwen3-Coder-Next-NVFP4", "Qwen3-Coder-Next", "Qwen3-Coder-Next-NVFP4"]
+match  = ["qwen3-coder-next-nvfp4", "RedHatAI/Qwen3-Coder-Next-NVFP4", "Qwen3-Coder-Next-NVFP4"]
 source = "https://huggingface.co/RedHatAI/Qwen3-Coder-Next-NVFP4"
 
 [capabilities]
