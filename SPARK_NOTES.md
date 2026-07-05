@@ -4,7 +4,7 @@ Hardware-specific traps and open threads for serving on the **MSI EdgeExpert DGX
 Spark**: NVIDIA GB10 Grace-Blackwell, compute capability **sm_121** (not sm_120),
 **128 GB LPDDR5X *unified* memory** (CPU+GPU share it), ~**273 GB/s** bandwidth,
 aarch64. This is the single source of truth for the gotchas that keep biting us —
-model `notes` and [ADD_A_MODEL.md](ADD_A_MODEL.md) link here instead of re-listing them.
+model `notes` and the `add-a-model` skill link here instead of re-listing them.
 
 **The one mental model that explains most of this:** decode on GB10 is
 **memory-bandwidth-bound**, not compute-bound. tok/s ≈ 273 GB/s ÷ (bytes read per

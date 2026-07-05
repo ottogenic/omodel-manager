@@ -22,7 +22,7 @@ python -m unittest            # test_omodel_manager.py + test_configs.py — off
 - `model_manager.json` is a **git-ignored sandbox**; curated profiles live in `DEFAULT_CONFIG`
   in the script (the source of truth). A PR must not commit `model_manager.json`.
 - `configs/*.toml` stay **harness-agnostic** — no OpenCode/harness-specific keys (see
-  `configs/README.md`). New models follow **`ADD_A_MODEL.md`**.
+  `configs/README.md`). New models follow the **`add-a-model`** skill.
 - All Docker access goes through `docker()` — argv lists, never `shell=True`.
 - Runtime identifiers (`otools.*` labels, the SSH key + token paths) are load-bearing — a PR
   must not rename them.
