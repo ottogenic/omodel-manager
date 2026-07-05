@@ -122,9 +122,11 @@ profile; change only what the quant/model needs:
    Downstream tools that call the API must use the served name, not the HF ID.
 - `port` (default 8000 — one model per box at a time).
 - `env`: quant/runtime vars. On DGX Spark the validated ones (see
-  [SPARK_NOTES.md](SPARK_NOTES.md)) are **`VLLM_USE_DEEP_GEMM=0`** (FP8-MoE),
-  **`VLLM_USE_FLASHINFER_MOE_FP4=0`** + **`VLLM_TEST_FORCE_FP8_MARLIN=1`** (NVFP4 Marlin
-  path). Don't invent env vars — confirm one exists before adding it.
+  [SPARK_NOTES.md](SPARK_NOTES.md)) are **`VLLM_USE_DEEP_GEMM=0`** (FP8-MoE) and
+  **`VLLM_TEST_FORCE_FP8_MARLIN=1`** (FP8 attention → Marlin). Pin the NVFP4 MoE to Marlin with
+  the **`--moe-backend marlin`** *flag* (in `vllm_args`), **not** the old
+  `VLLM_USE_FLASHINFER_MOE_FP4` / `VLLM_NVFP4_GEMM_BACKEND` env vars — those are deprecated
+  (current nightlies ignore them). Don't invent env vars — confirm one exists before adding it.
 - `vllm_args`: `--quantization` (**auto-detected — omit it**; an explicit value can crash
   startup, e.g. Gemma-4 `ValueError`, vLLM #40291), `--kv-cache-dtype` (**model-specific**
   on Spark — helps Qwen, crashes GLM-MLA, hurts Gemma; see SPARK_NOTES), `--max-model-len`,

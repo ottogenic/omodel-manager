@@ -10,9 +10,9 @@ All notable changes to this project are documented here. The format follows
 - **`qwen3.6-35b-a3b-nvfp4`: force the sm_121 Marlin path + fix tool parser.** This profile was
   the only NVFP4/FP8 one with an empty `env` — it ran the FlashInfer/DeepGEMM FP8 kernels
   (`DeepGEMM E8M0 enabled`) that GB10/sm_121 mishandles (no native FP4), producing degenerate
-  `!!!!` output under load. Added the env block its siblings already carry
-  (`VLLM_NVFP4_GEMM_BACKEND=marlin`, `VLLM_USE_FLASHINFER_MOE_FP4=0`, `VLLM_TEST_FORCE_FP8_MARLIN=1`,
-  `VLLM_USE_DEEP_GEMM=0`). Also corrected `tool-call-parser` `qwen3_coder` → `qwen3_xml` (per the
+  `!!!!` output under load. Added the FP8/DeepGEMM env its siblings carry
+  (`VLLM_TEST_FORCE_FP8_MARLIN=1`, `VLLM_USE_DEEP_GEMM=0`) and pinned the MoE to Marlin via
+  `--moe-backend marlin`. Also corrected `tool-call-parser` `qwen3_coder` → `qwen3_xml` (per the
   model card; `qwen3_coder` broke tool calls). The card omits these env vars because it targets
   datacenter Blackwell with native FP4 — they're required on the Spark.
 - **`launch`/`health`/`pull-status`: clear startup state so a cached launch doesn't loop agents.**
@@ -27,6 +27,21 @@ All notable changes to this project are documented here. The format follows
   the misleading "nothing is pulling".
 
 ### Changed
+- **NVFP4 profiles: drop the deprecated `VLLM_NVFP4_GEMM_BACKEND` / `VLLM_USE_FLASHINFER_MOE_FP4`
+  env vars; pin the MoE via the `--moe-backend marlin` flag instead.** Current vLLM nightlies
+  (dev748+) log `Unknown vLLM environment variable` for both — they're superseded by the
+  `--moe-backend` / `--linear-backend` CLI flags (vLLM DGX Spark blog). On GB10/sm_121 the correct
+  split is **Marlin MoE + FlashInfer-CUTLASS linear (`auto`)**; forcing the *linear* GEMM to Marlin
+  is wrong (empty/garbage output, per the ai-muninn Gemma writeup). Profiles touched:
+  `qwen3.6-35b-a3b-nvfp4`, `nemotron-3-super-120b-a12b-nvfp4-256k` (+ `-1m`),
+  `qwen3.6-27b-nvfp4-256k`, `qwen3.6-27b-nvfp4-512k`, `gemma4-26b-a4b-nvfp4`,
+  `qwen3-coder-next-nvfp4`. The MoE profiles that already set `--moe-backend marlin` (35b,
+  nemotron, coder-next) just shed the dead env vars — **no runtime change** on nightly;
+  `gemma4-26b-a4b` **gains** `--moe-backend marlin` (its only backend pin had been the deprecated
+  env var); the two **dense** `qwen3.6-27b-nvfp4-*` get no MoE flag (dense → the MoE var was
+  always a no-op). Other env vars (`VLLM_TEST_FORCE_FP8_MARLIN`, `VLLM_USE_DEEP_GEMM`,
+  `VLLM_ALLOW_LONG_MAX_MODEL_LEN`, `VLLM_FLASHINFER_ALLREDUCE_BACKEND`, `VLLM_MARLIN_USE_ATOMIC_ADD`)
+  are untouched.
 - **`benchmark_concurrent.py` rewritten simple: `benchmark <endpoint> [N]`.** Replaces the
   growing-sessions / fixed-sweep / `--scenario` / `--quick` / `/metrics` machinery with one job:
   send **N unique ~50k-token prompts at once** (a generated story to summarize; unique so prefix

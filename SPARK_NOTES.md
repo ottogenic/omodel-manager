@@ -21,7 +21,7 @@ speculative decoding (MTP) is a real multiplier. Quality, though, moves the othe
 |------|---------|------------------|--------|
 | **UMA memory mis-detection** | vLLM's `cudaMemGetInfo` can't see reclaimable page cache → false OOM at model load, or a full system freeze | **Every `launch` drops the page cache** (`sync; echo 3 > drop_caches`) right before `docker run` — automatic, set up by `install` (scoped NOPASSWD sudo). Also keep `gpu-memory-utilization` ≈ **0.85**. | vLLM #35313 |
 | **FP8-MoE (Qwen3.5/3.6)** | Crash at load `Unknown SF transformation`; ~4% accuracy drop | env **`VLLM_USE_DEEP_GEMM=0`** → MoE falls back to **TRITON** (the working backend on sm_121). CUTLASS MoE is *unavailable* on sm_121 — don't force it. | vLLM #37804, #43507 |
-| **NVFP4 MoE** | No **native FP4 MoE kernels** on GB10 | Force the working **Marlin** dequant path: env **`VLLM_USE_FLASHINFER_MOE_FP4=0`** (+ `VLLM_TEST_FORCE_FP8_MARLIN=1` where applicable). Marlin is the *fastest working* path here, not a fallback. | vLLM #43906, NVIDIA dev-forum "Marlin fix" |
+| **NVFP4 MoE** | CUTLASS/FlashInfer FP4 MoE path gives `!!!!` garbage on GB10 (no native FP4 MoE kernels) | Pin the MoE to the working **Marlin** dequant path via the **`--moe-backend marlin`** flag (+ `VLLM_TEST_FORCE_FP8_MARLIN=1` for FP8 attention where applicable). Marlin is the *fastest working* MoE path here, not a fallback. Leave the NVFP4 **linear** GEMM on `auto` (→ FlashInfer CUTLASS, the correct sm_121 path — forcing Marlin there is a scale-bug/garbage risk). The old `VLLM_NVFP4_GEMM_BACKEND` / `VLLM_USE_FLASHINFER_MOE_FP4` env vars are **deprecated** — use `--moe-backend` / `--linear-backend`. | vLLM #43906, vLLM DGX Spark blog |
 | **Gemma-4 NVFP4** | Explicit `--quantization` → `ValueError` at startup | **Omit `--quantization`** — vLLM auto-detects it. Also needs the Gemma4 image (`gemma4-cu130`). | vLLM #40291 |
 | **fp8 KV cache** | Model-specific: helps Qwen, **crashes GLM-MLA** (`NotImplementedError`), hurts Gemma quality | Decide per model. Qwen: keep `kv-cache-dtype fp8`. GLM (MLA) and Gemma: **omit it**. | vLLM #35577 |
 | **MLA attention (GLM)** | Other MLA backends error on sm_121 | Use **`TRITON_MLA`** — the only working MLA backend here. | (on-box) |
@@ -37,9 +37,9 @@ speculative decoding (MTP) is a real multiplier. Quality, though, moves the othe
 Loose ends where the *current* config is a deliberate hold, not a final answer. Re-check
 when the referenced fix lands or when you next have the box.
 
-1. **Marlin vs auto/CUTLASS for NVFP4-MoE.** We force Marlin (`VLLM_USE_FLASHINFER_MOE_FP4=0`)
+1. **Marlin vs auto/CUTLASS for NVFP4-MoE.** We force Marlin (`--moe-backend marlin`)
    because GB10 has no native FP4 MoE kernels (#43906). **When a nightly lands native
-   FP4 / CUTLASS MoE for sm_121, A/B it on-box vs Marlin; if it wins, drop the env var.**
+   FP4 / CUTLASS MoE for sm_121, A/B it on-box vs Marlin; if it wins, drop the flag.**
    This is the on-box A/B deferred in the DGX tuning commit — not yet run.
 2. **MTP speculative-decode depth — resolved: use 2.** On-box (35B-NVFP4, GB10) per-position
    acceptance is ~89% / ~72% at depth 1/2 → `num_speculative_tokens=2` gives ~143 tok/s
