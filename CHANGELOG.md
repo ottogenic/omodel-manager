@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **`unsloth-qwen3-coder-next-fp8` launch profile** — the unsloth FP8 build of Qwen3-Coder-Next
+  (hybrid GDN/DeltaNet MoE, ~80B total / ~3B active, 262K context) tuned for GB10/sm_121
+  (`VLLM_USE_DEEP_GEMM=0` → TRITON FP8 MoE, FlashInfer attention, no `--quantization`). It shares
+  the `qwen3-coder-next-fp8` config — that config's `match` now also covers the
+  `unsloth/qwen3-coder-next-fp8` served id. Measured ~46 tok/s decode single-user on dgx-2.
+
 ### Fixed
 - **NVFP4 configs no longer cross-match their FP8 siblings in `omw models`.** The nvfp4
   configs carried quant-agnostic `match` patterns (`Qwen3.6-35B`, `Qwen3.6-27B`,
