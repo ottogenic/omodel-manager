@@ -181,14 +181,14 @@ authoritative over this file). Paste a line to an AI tool or fetch it yourself:
   memory is cheap but verify output quality at very long contexts.
 - **`install` does NOT auto-install nvidia-container-toolkit** — it checks and advises with
   the install link (distro-specific; left to the operator).
-- **Benchmark the real workload, not a toy one.** Decode on this box is memory-bandwidth-bound,
-  so throughput collapses as **KV cache grows with context**, not with request count. A short
-  identical-prompt sweep hits prefix cache and tiny KV → looks great, then two real long-context
-  sessions crawl. `utils/benchmark_concurrent.py` defaults to **growing multi-turn sessions to
-  ~100k** with streaming TTFT/TPOT and `/metrics` preemption scraping; `--quick` is the old
-  best-case smoke test. A non-zero `preemptions during run` = KV overflow (the crawl), fixed by
-  fewer concurrent sessions / smaller `max-model-len` / higher `gpu-memory-utilization`, not by
-  raising `max-num-seqs`.
+- **Benchmark speed at a real context, and check the parallel cost.** Decode on this box is
+  memory-bandwidth-bound, so what matters is tok/s at a working context and how much it drops
+  under concurrency. `utils/benchmark_concurrent.py <host> N` sends **N unique ~50k-token
+  prompts at once** (a generated story to summarize; unique so prefix caching can't skip the
+  prefill), streams them, and reports per request **TTFT** (input-processing time) and **decode
+  tok/s** (output speed). Run `<host> 1` for single-user speed (record it as the profile's
+  `tok_s`), then `<host> 2` / `4` to see the slowdown. `--context 100000` for a big-repo stress
+  test. A warm-up fires first so runs are comparable.
 
 ## How to extend
 

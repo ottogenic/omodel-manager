@@ -227,57 +227,48 @@ Confirm the merged truth from logs:
 omodel-manager logs <container> --host <host> 2>&1 | grep -i sampling
 ```
 
-### 6. Benchmark at a fixed 100k context (sweep concurrency)
+### 6. Benchmark: single-user speed + parallel slowdown
 
-A short identical-prompt sweep flatters every model (prefix caching + tiny KV). What matters
-on a memory-bandwidth-bound box (DGX Spark) is speed at a **full working context** and how
-many concurrent users it survives there. Benchmark that:
+`utils/benchmark_concurrent.py` sends **N unique ~50k-token prompts at once** and asks each to
+summarize a (generated) story, streaming the reply. The text is unique per request so prefix
+caching can't skip the prefill. Per request it measures **TTFT** (how long to *process* the
+input) and **decode tok/s** (how fast tokens come out at that context — "how fast it types").
 
 ```bash
-python3 utils/benchmark_concurrent.py --host <host>
+python3 utils/benchmark_concurrent.py <host> 1      # one ~50k prompt (single-user speed)
+python3 utils/benchmark_concurrent.py <host> 2      # two at once
+python3 utils/benchmark_concurrent.py <host> 4      # four at once
 ```
 
-It's a **generic** throughput probe — it doesn't read the config; it auto-discovers the served
-model from `/v1/models`. It sends one big **~100k-token prompt** (unique code, so prefix caching
-can't fold it) at **concurrency 1**, then **2**, then **3** … up to `--sessions`, streaming each
-to measure **TTFT** and **TPOT** (time per output token), and scraping `/metrics` for KV pressure
-and **preemptions**. Each level is one fast round — **not** a slow growing conversation — so on a
-slow model results still arrive; if a level **fails twice in a row** (timeout/preemption, or the
-server drops) the sweep **stops** and recommends the last level that completed.
+- `<host>` is an `omm install` alias (`dgx-3`), a `user@ip`, an `ip`, or `host:port`.
+- `--context N` sets the prompt size (default **50000** ≈ everyday coding; use `--context 100000`
+  for a big-repo stress test). The model is auto-discovered from `/v1/models` (`--model` to override).
+- A tiny warm-up request fires first so the numbers aren't a cold-start outlier and runs stay
+  comparable. Point it at the box's alias/IP (not one that only proxies docker).
 
-- `--host` takes the same alias as `omm --host` (or `user@ip` / bare ip; `--remote` is legacy).
-- `--context N` sets the fixed prompt size (default 100000); `--sessions N` the max concurrency to
-  sweep to; `--req-timeout S` the per-request patience; `--scenario agent` shapes the prompt;
-  `--no-think` disables thinking; `--quick` runs the old short-prompt smoke test.
-- **Run it against the box's IP** (not an SSH alias that only proxies docker) so the `/metrics`
-  endpoint is reachable — otherwise KV/preemption data shows `n/a`.
+**What to learn from it:**
+- **Single-user speed** — run `<host> 1`. Its `decode tok/s` is the everyday coding speed at that
+  context; **record it as the profile's `tok_s`** (the `omm models` **Tk/s** column). TTFT is the
+  wait before it starts replying to a big paste.
+- **Parallel slowdown** — run `<host> 2` and `<host> 4`; compare `decode tok/s` and TTFT to the
+  N=1 numbers. That's what each extra concurrent user costs. Pick a `max-num-seqs` where the
+  per-request speed is still acceptable, restart the container, and re-`health`.
 
-**The report hands you the two numbers to record:**
-- **`Tk/s (1 user @ ~100k)`** — the concurrency-1 decode tok/s. Put it in the profile as
-  **`tok_s`** (the `omm models` **Tk/s** column). It's a recorded observation — leave it unset
-  rather than guess.
-- **`Recommended max-num-seqs`** — the highest concurrency that completed at ~100k. If a level
-  failed twice, that's the ceiling; use the last completed level. Set `max-num-seqs` to it,
-  restart the container, and re-`health`.
-- **`preemptions during run` > 0** means KV overflowed (eviction/recompute) — lower the session
-  budget, shrink `--max-model-len`, or raise `gpu-memory-utilization`; don't bump `max-num-seqs`.
-
-Put that **`Tk/s (1 user @ ~100k)`** number in the profile as a top-level `tok_s` integer:
+Put the N=1 `decode tok/s` in the profile as a top-level `tok_s` integer:
 
 ```python
 "qwen3.6-27b-nvfp4-256k": {
-    "tok_s": 38,                     # decode tok/s, 1 user @ ~100k ctx (benchmarked YYYY-MM-DD)
+    "tok_s": 38,                     # decode tok/s, 1 user @ ~50k ctx (benchmarked YYYY-MM-DD)
     "image": "...",
     ...
 }
 ```
 
 `omm models` renders it in the **Tk/s** column (profiles without `tok_s` show `—`). Re-measure
-and update it whenever the profile's quant, KV dtype, or `max-model-len` changes — it's a
-recorded observation, so keep it honest (leave it unset rather than guess).
+when the profile's quant, KV dtype, or `max-model-len` changes — it's a recorded observation, so
+keep it honest (leave it unset rather than guess).
 
 **Prerequisite:** the model must be READY (see §4 step 4) — the script doesn't wait for startup.
-The model is auto-discovered from `/v1/models`; pass `--model <id>` only to override.
 
 ### 7. Finalize
 
