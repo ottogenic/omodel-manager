@@ -132,6 +132,24 @@ DEFAULT_CONFIG = {
             "model": "nvidia/Qwen3.6-35B-A3B-NVFP4",
             "port": 8000,
             "usecase": ["Reasoning", "Agentic", "General"],
+            "notes": [
+                "Qwen3.6-35B-A3B-NVFP4 (nvidia/ModelOpt): hybrid GDN/Mamba MoE, mixed "
+                "NVFP4 (MLP) + FP8 (attention).",
+                "GB10/sm_121 has NO native FP4 -> force every GEMM onto the working Marlin path "
+                "(VLLM_NVFP4_GEMM_BACKEND=marlin, VLLM_USE_FLASHINFER_MOE_FP4=0, "
+                "VLLM_TEST_FORCE_FP8_MARLIN=1) and kill the broken E8M0 FP8 path "
+                "(VLLM_USE_DEEP_GEMM=0). Matches the 27b-nvfp4 / a3b-fp8 siblings. The model card "
+                "omits these (it targets datacenter Blackwell with native FP4); without them this "
+                "profile ran the FlashInfer/DeepGEMM FP8 kernels and produced degenerate '!!!!' "
+                "output on the Spark under load.",
+                "tool-call-parser = qwen3_xml (per the card); qwen3_coder breaks tool calls here.",
+            ],
+            "env": {
+                "VLLM_NVFP4_GEMM_BACKEND": "marlin",
+                "VLLM_USE_FLASHINFER_MOE_FP4": "0",
+                "VLLM_TEST_FORCE_FP8_MARLIN": "1",
+                "VLLM_USE_DEEP_GEMM": "0",
+            },
             "vllm_args": {
                 "tensor-parallel-size": 1,
                 "kv-cache-dtype": "fp8",
@@ -152,7 +170,7 @@ DEFAULT_CONFIG = {
                                        '"moe_backend":"triton"}'),
                 "load-format": "fastsafetensors",
                 "reasoning-parser": "qwen3",
-                "tool-call-parser": "qwen3_coder",
+                "tool-call-parser": "qwen3_xml",
                 "enable-auto-tool-choice": True,
                 "enable-log-requests": True,
             },

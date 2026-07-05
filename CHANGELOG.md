@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **`qwen3.6-35b-a3b-nvfp4`: force the sm_121 Marlin path + fix tool parser.** This profile was
+  the only NVFP4/FP8 one with an empty `env` — it ran the FlashInfer/DeepGEMM FP8 kernels
+  (`DeepGEMM E8M0 enabled`) that GB10/sm_121 mishandles (no native FP4), producing degenerate
+  `!!!!` output under load. Added the env block its siblings already carry
+  (`VLLM_NVFP4_GEMM_BACKEND=marlin`, `VLLM_USE_FLASHINFER_MOE_FP4=0`, `VLLM_TEST_FORCE_FP8_MARLIN=1`,
+  `VLLM_USE_DEEP_GEMM=0`). Also corrected `tool-call-parser` `qwen3_coder` → `qwen3_xml` (per the
+  model card; `qwen3_coder` broke tool calls). The card omits these env vars because it targets
+  datacenter Blackwell with native FP4 — they're required on the Spark.
+
 ### Changed
 - **Profile names standardized to upstream + `list` sorted.** Six keys renamed to match the
   published HF names (breaking — key = served-model-name = container name): `qwen3.6-35b-nvfp4`
