@@ -15,6 +15,7 @@ import io
 import json
 import os
 import pathlib
+import socket
 import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
@@ -499,6 +500,19 @@ class FmtTokensTests(unittest.TestCase):
         self.assertEqual(mm._fmt_tokps(41.6), "42")     # rounds
         self.assertEqual(mm._fmt_tokps(None), "—")      # unmeasured
         self.assertEqual(mm._fmt_tokps("nope"), "—")
+
+
+class HttpModelsTests(unittest.TestCase):
+    def test_refused_connection_is_starting(self):
+        # A container that's up but still loading refuses connections; that must read as
+        # 'starting' (keep polling), NOT 'error' — otherwise agents thrash. Grab a free
+        # port and release it so nothing is listening on it.
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+        phase, _ = mm.http_models("127.0.0.1", port, timeout=1.0)
+        self.assertEqual(phase, "starting")
 
 
 if __name__ == "__main__":
