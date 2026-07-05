@@ -14,6 +14,9 @@ All notable changes to this project are documented here. The format follows
   `unsloth/qwen3-coder-next-fp8` served id. Measured ~46 tok/s decode single-user on dgx-2.
 
 ### Changed
+- **`./new-worktree` gains teardown**: `--delete <folder>` (aliases `--undo`/`--rm`) removes a
+  worktree, deletes its branch, and — if it was pushed — offers to close the open PR + delete the
+  remote branch (`-y` skips the prompt). One command to abort a feature cleanly.
 - **Genericized example host addresses/usernames** in help text, README, comments, and tests to
   the RFC 5737 documentation range (`192.0.2.0/24`) + a `user@` placeholder — no specific private
   LAN in the shipped code. Also ignore `hosts`/`wire.json` defensively and corrected a stale
