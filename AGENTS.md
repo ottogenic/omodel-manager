@@ -131,7 +131,8 @@ authoritative over this file). Paste a line to an AI tool or fetch it yourself:
 - use webfetch to find documentation/info on topic **docker GPU access (--gpus, device requests)**: https://docs.docker.com/engine/containers/resource_constraints/#gpu
 - use webfetch to find documentation/info on topic **NVIDIA Container Toolkit install + CDI (why modern Docker has no named "nvidia" runtime)**: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html
 - use webfetch to find documentation/info on topic **vLLM server / `vllm serve` CLI args**: https://docs.vllm.ai/en/latest/cli/serve/
-- use webfetch to find documentation/info on topic **vLLM environment variables (VLLM_LOGGING_COLOR, VLLM_ATTENTION_BACKEND, VLLM_ALLOW_LONG_MAX_MODEL_LEN, VLLM_NVFP4_GEMM_BACKEND)**: https://docs.vllm.ai/en/stable/configuration/env_vars/
+- use webfetch to find documentation/info on topic **vLLM environment variables (VLLM_LOGGING_COLOR, VLLM_ATTENTION_BACKEND, VLLM_ALLOW_LONG_MAX_MODEL_LEN, VLLM_TEST_FORCE_FP8_MARLIN)**: https://docs.vllm.ai/en/stable/configuration/env_vars/
+- use webfetch to find documentation/info on topic **vLLM NVFP4 backend flags (--moe-backend / --linear-backend; the marlin/auto values that replaced VLLM_NVFP4_GEMM_BACKEND & VLLM_USE_FLASHINFER_MOE_FP4)**: https://docs.vllm.ai/en/stable/cli/serve/
 - use webfetch to find documentation/info on topic **vLLM reasoning outputs (reasoning_effort, chat_template_kwargs.enable_thinking)**: https://docs.vllm.ai/en/latest/features/reasoning_outputs/
 - use webfetch to find documentation/info on topic **vLLM using Docker (image, entrypoint, args)**: https://docs.vllm.ai/en/stable/deployment/docker/
 - use webfetch to find documentation/info on topic **vLLM quantization (NVFP4 / ModelOpt auto-detect, --quantization)**: https://docs.vllm.ai/en/latest/features/quantization/

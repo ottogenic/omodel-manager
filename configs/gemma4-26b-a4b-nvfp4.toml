@@ -10,9 +10,9 @@
 # are read per decode step, so on the 273 GB/s GB10 bus it runs ~52 tok/s vs the
 # dense 31B's ~7 (ai-muninn DGX Spark benchmark) -- the Spark's pick for latency.
 #
-# sm_121 (GB10) has no native FP4 MoE kernels: serve with VLLM_USE_FLASHINFER_MOE_FP4=0
-# to force the working Marlin FP4 dequant path (see the omodel-manager profile env).
-# TP=1 only in vLLM for this model.
+# sm_121 (GB10) has no native FP4 MoE kernels: serve with --moe-backend marlin to force the
+# working Marlin FP4 dequant path (the CUTLASS/FlashInfer FP4 MoE path gives garbage; leave the
+# linear GEMM on auto = FlashInfer CUTLASS). TP=1 only in vLLM for this model.
 #
 # Thinking is controlled via chat_template_kwargs.enable_thinking (per-request) or
 # --default-chat-template-kwargs (server-wide), same as the 31B.
