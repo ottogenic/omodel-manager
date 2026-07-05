@@ -14,6 +14,10 @@ All notable changes to this project are documented here. The format follows
   `unsloth/qwen3-coder-next-fp8` served id. Measured ~46 tok/s decode single-user on dgx-2.
 
 ### Changed
+- **Recorded `tok_s` (single-user decode speed) on every benchmarked launch profile** — from
+  the overnight GB10 benchmarking run, committed to `DEFAULT_CONFIG` so they persist across
+  `config --init` (previously they lived only in the local sandbox and were lost on a reset).
+  `gemma4-26b-a4b-nvfp4` remains unmeasured.
 - **`AGENTS.md` slimmed to invariants + a skill index; task detail moved to lazy-loaded
   skills.** The full `AGENTS.md` was injected into every model request (~5k tokens) even for
   trivial turns. It's now a lean always-on core (invariants + working agreement + a skill
