@@ -129,6 +129,7 @@ DEFAULT_CONFIG = {
     },
     "models": {
         "qwen3.6-35b-a3b-nvfp4": {
+            "tok_s": 45,
             "image": "vllm/vllm-openai:nightly",
             "model": "nvidia/Qwen3.6-35B-A3B-NVFP4",
             "port": 8000,
@@ -176,6 +177,7 @@ DEFAULT_CONFIG = {
             },
         },
         "qwen3.6-35b-a3b-fp8": {
+            "tok_s": 22,
             "image": "vllm/vllm-openai:nightly",
             "notes": [
                 "Qwen3.6-35B-A3B FP8 (e4m3): hybrid GDN/Mamba MoE (qwen3_5_moe), "
@@ -213,6 +215,7 @@ DEFAULT_CONFIG = {
             },
         },
         "qwen3.6-35b-a3b-bf16": {
+            "tok_s": 14,
             "image": "vllm/vllm-openai:nightly",
             "notes": [
                 "Qwen/Qwen3.6-35B-A3B (BF16 base, qwen3_5_moe MoE: 35B total / ~3B active). "
@@ -244,6 +247,7 @@ DEFAULT_CONFIG = {
             },
         },
         "nemotron-3-super-120b-a12b-nvfp4-256k": {
+            "tok_s": 11,
             "image": "vllm/vllm-openai:nightly",
             "notes": [
                 "Rolling nightly-aarch64 image (GB10/sm_121, CUDA 13); NVIDIA's Spark "
@@ -292,6 +296,7 @@ DEFAULT_CONFIG = {
         },
         # Same model/box as -256k; inherits everything, overrides only context+concurrency.
         "nemotron-3-super-120b-a12b-nvfp4-1m": {
+            "tok_s": 11,
             "image": "vllm/vllm-openai:nightly",
             "extends": "nemotron-3-super-120b-a12b-nvfp4-256k",
             "notes": [
@@ -307,6 +312,7 @@ DEFAULT_CONFIG = {
             },
         },
         "qwen3.6-27b-nvfp4-256k": {
+            "tok_s": 7,
             "image": "vllm/vllm-openai:nightly",
             "notes": ["unsloth Qwen3.6-27B NVFP4 -- 256K (native) context, MTP speculative "
                       "decoding, up to 2 concurrent users."],
@@ -334,6 +340,7 @@ DEFAULT_CONFIG = {
             },
         },
         "qwen3.6-27b-nvfp4-512k": {
+            "tok_s": 9,
             "image": "vllm/vllm-openai:nightly",
             "notes": ["unsloth Qwen3.6-27B NVFP4 -- 512K context via YaRN rope scaling "
                       "(--hf-overrides), single user (max-num-seqs 1), no spec decoding."],
@@ -364,6 +371,7 @@ DEFAULT_CONFIG = {
             },
         },
         "qwen3.6-27b-fp8-256k": {
+            "tok_s": 7,
             "image": "vllm/vllm-openai:nightly",
             "notes": ["Official Qwen Qwen3.6-27B FP8 (e4m3) -- dense 27B parameter model, 256K native context. "
                       "No MoE, so no VLLM_USE_DEEP_GEMM needed. Reasoning model (thinking ON by default), tool-calling. "
@@ -390,6 +398,7 @@ DEFAULT_CONFIG = {
             },
         },
         "qwen3.6-27b-fp8-512k": {
+            "tok_s": 7,
             "image": "vllm/vllm-openai:nightly",
             "notes": ["Official Qwen Qwen3.6-27B FP8 (e4m3) -- 512K context via YaRN rope scaling "
                       "(--hf-overrides), single user (max-num-seqs 1). YARN extrapolation from 256K trained window."],
@@ -419,6 +428,7 @@ DEFAULT_CONFIG = {
             },
         },
         "glm-4.7-flash": {
+            "tok_s": 18,
             "notes": ["zai-org/GLM-4.7-Flash on the nightly aarch64 image (DGX Spark = ARM); "
                       "MLA attention (VLLM_ATTENTION_BACKEND=TRITON_MLA); high concurrency "
                       "(max-num-seqs 64). Recipe has no port -> defaults to 8000."],
@@ -442,6 +452,7 @@ DEFAULT_CONFIG = {
             },
         },
         "gemma4-31b-it-nvfp4": {
+            "tok_s": 6,
             "notes": [
                 "Gemma 4 31B IT NVFP4 (4-bit MLP/embeddings via ModelOpt; attention stays "
                 "BF16 -> real footprint ~30GB). Multimodal (text+image), reasoning + tools.",
@@ -511,6 +522,7 @@ DEFAULT_CONFIG = {
             },
         },
         "qwen3-coder-next-nvfp4": {
+            "tok_s": 38,
             "notes": [
                 "Qwen3-Coder-Next hybrid MoE from Red Hat: ~79.7B total / ~3B active per "
                 "token (512 experts, 10 active + 1 shared, DeltaNet architecture). NVFP4 "
@@ -551,6 +563,7 @@ DEFAULT_CONFIG = {
             },
         },
         "qwen3-coder-next-fp8": {
+            "tok_s": 42,
             "image": "vllm/vllm-openai:nightly",
             "notes": [
                 "Qwen3-Coder-Next FP8: hybrid GDN/DeltaNet MoE (~80B total / ~3B active, "
