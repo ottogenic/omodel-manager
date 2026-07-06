@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **PR-review tooling:** the `REVIEW.md` checks and the `pr-review` skill now use `python3` (the
+  WSL env has no `python`), and the skill documents worktree-safe PR checkout plus a fallback for
+  `gh pr merge`'s local post-merge error when `main` is checked out in a sibling worktree.
+
 ### Changed
 - **`AGENTS.md` now tells agents to *delegate* PR reviews to `agent-review`** (via the `task` tool,
   by name) rather than reviewing inline — placed in `AGENTS.md` so it reaches every agent's context,
