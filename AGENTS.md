@@ -58,8 +58,10 @@ via the `skill` tool).
 | Edit launch profiles or launch behavior (Docker/vLLM/SSH reference + vetted gotchas) | **`edit-launch-profiles`** |
 | Make a code change (file layout, how to extend, checks to run) | **`code-changes`** |
 | Commit + open a pull request | **`open-a-pr`** |
+| Review / approve / merge an open PR | **`pr-review`** |
 
 Other docs (read directly when relevant): `SPARK_NOTES.md` (DGX Spark GB10/sm_121 hardware
 traps), `configs/README.md` (config format), `README.md` (user-facing).
 
-**Reviewer (Claude):** to review/approve/merge open PRs, follow **`REVIEW.md`**.
+**Reviewing a PR?** Load the **`pr-review`** skill — it holds the process; `REVIEW.md` is the
+repo's bar it checks against.
