@@ -58,10 +58,13 @@ via the `skill` tool).
 | Edit launch profiles or launch behavior (Docker/vLLM/SSH reference + vetted gotchas) | **`edit-launch-profiles`** |
 | Make a code change (file layout, how to extend, checks to run) | **`code-changes`** |
 | Commit + open a pull request | **`open-a-pr`** |
-| Review / approve / merge an open PR | **`pr-review`** |
+| Review / approve / merge an open PR | delegate to **`agent-review`** (see the note below the table) |
 
 Other docs (read directly when relevant): `SPARK_NOTES.md` (DGX Spark GB10/sm_121 hardware
 traps), `configs/README.md` (config format), `README.md` (user-facing).
 
-**Reviewing a PR?** Load the **`pr-review`** skill — it holds the process; `REVIEW.md` is the
-repo's bar it checks against.
+**PR reviews** are handled by the **`agent-review`** subagent — it checks the PR against `REVIEW.md`
+(the repo's bar), returns an itemized list of issues + suggested fixes, and merges only when the
+review is clean. **If you have the `task` tool, delegate the review to `agent-review`** (call it by
+name — `@agent-review` is only for when a human types it) rather than reviewing inline; when it
+reports issues, get them fixed and re-delegate (same `task_id`) to re-review.

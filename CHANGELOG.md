@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- **`AGENTS.md` now tells agents to *delegate* PR reviews to `agent-review`** (via the `task` tool,
+  by name) rather than reviewing inline — placed in `AGENTS.md` so it reaches every agent's context,
+  including the prompt-free primaries. So "please review this PR" routes to `agent-review` from any agent.
 - **PR-review workflow split: `REVIEW.md` is now just the repo's *bar*; the review *process* moved
   to a new `pr-review` skill.** `REVIEW.md` keeps only the checks, invariants, and merge conditions;
   the `pr-review` skill holds the process — review first, hand the parent agent an itemized list of
