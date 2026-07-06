@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **PR-review workflow split: `REVIEW.md` is now just the repo's *bar*; the review *process* moved
+  to a new `pr-review` skill.** `REVIEW.md` keeps only the checks, invariants, and merge conditions;
+  the `pr-review` skill holds the process — review first, hand the parent agent an itemized list of
+  issues + suggested fixes, and merge only when clean. (This is what `agent-review` runs.)
+
 ### Added
 - **`gemma4-26b-fp8` launch profile** — RedHatAI's FP8 quantized Gemma 4 26B-A4B MoE variant.
   26B total / ~3.8B active per token, multimodal (text+image), reasoning + tool-calling.
