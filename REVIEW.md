@@ -6,8 +6,8 @@ is only the bar the skill checks against.
 
 ## Checks (must pass)
 
-    python -m py_compile omodel-manager
-    python -m unittest            # test_omodel_manager.py + test_configs.py — offline, no docker/network
+    python3 -m py_compile omodel-manager
+    python3 -m unittest           # test_omodel_manager.py + test_configs.py — offline, no docker/network
 
 ## Invariants — a diff that breaks any of these is NOT mergeable
 
