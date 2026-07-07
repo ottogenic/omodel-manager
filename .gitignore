@@ -22,7 +22,8 @@ model_manager.json
 # vendor-neutral standard; per-tool instruction files don't belong in the repo)
 CLAUDE.md
 GEMINI.md
-.claude/
+.claude/*
+!.claude/skills/
 .cursor/
 .cursorrules
 .windsurf/
