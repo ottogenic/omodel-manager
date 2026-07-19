@@ -128,74 +128,103 @@ DEFAULT_CONFIG = {
         },
     },
     "models": {
-        "qwen3.6-35b-a3b-nvfp4": {
-            "tok_s": 45,
+        "qwen3.6-35b-a3b-nvfp4-nvidia": {
             "image": "vllm/vllm-openai:nightly",
             "model": "nvidia/Qwen3.6-35B-A3B-NVFP4",
             "port": 8000,
-            "usecase": ["Reasoning", "Agentic", "General"],
+            "usecase": [
+                "Reasoning",
+                "Agentic",
+                "General",
+            ],
             "notes": [
-                "Qwen3.6-35B-A3B-NVFP4 (nvidia/ModelOpt): hybrid GDN/Mamba MoE, mixed "
-                "NVFP4 (MLP) + FP8 (attention).",
-                "GB10/sm_121 NVFP4: pin the MoE to the working Marlin dequant path (--moe-backend "
-                "marlin) -- the CUTLASS/FlashInfer FP4 MoE path yields degenerate '!!!!' output on "
-                "the Spark. Leave the NVFP4 *linear* GEMM on auto (FlashInfer CUTLASS, the correct "
-                "sm_121 path). FP8 attention -> Marlin (VLLM_TEST_FORCE_FP8_MARLIN=1); kill the "
-                "broken E8M0 FP8-MoE path (VLLM_USE_DEEP_GEMM=0). (VLLM_NVFP4_GEMM_BACKEND / "
-                "VLLM_USE_FLASHINFER_MOE_FP4 were the pre-deprecation env form of the MoE pin; "
-                "current nightlies use the --moe-backend flag.) The model card omits these (it "
-                "targets datacenter Blackwell with native FP4).",
-                "tool-call-parser = qwen3_xml (per the card); qwen3_coder breaks tool calls here.",
+                "BROKEN ON CURRENT NIGHTLY (v0.23.1rc1.dev748, tested 2026-07-19): emits pure '!!!!' garbage despite clean startup (MARLIN NvFp4 MoE selected). Isolated to the NVFP4-MoE Marlin kernel miscompiling for the nvidia/modelopt checkpoint -- persists with fp8-KV and forced-FP8-Marlin removed. The unsloth checkpoint on the SAME nightly is clean. DO NOT USE until a nightly fixes it; re-validate GENERATION (not just startup) before trusting.",
+                "Qwen3.6-35B-A3B-NVFP4 (nvidia/ModelOpt): hybrid GDN/Mamba MoE, mixed NVFP4 (MLP) + FP8 (attention). Multimodal, reasoning, tool-calling.",
+                "GB10/sm_121 NVFP4: pin MoE to Marlin (--moe-backend marlin) -- the CUTLASS/FlashInfer FP4 MoE path yields degenerate '!!!!' output on Spark (no native FP4 MoE kernels; this qwen3_5_moe+GDN checkpoint is in the blast radius). Leave NVFP4 linear GEMM on auto. FP8 attention->Marlin (VLLM_TEST_FORCE_FP8_MARLIN=1); kill broken E8M0 FP8-MoE (VLLM_USE_DEEP_GEMM=0). See SPARK_NOTES.",
+                "QUALITY-FIRST: MTP speculative decode is DISABLED. vLLM #47087 documents MTP degenerating into repetition/garbage loops on deep agentic convos for this exact model (depth 2 AND 3); #47194 shows MTP+prefix-caching leaks tool-call XML as plain text + kills recall; #44734 crashes on NVFP4+MTP+fp8KV/Blackwell. Removing MTP is the sourced fix for looping/failed tool calls. Prefix-caching also removed (unsafe with the hybrid Mamba/GDN state under spec-decode).",
+                "tool-call-parser qwen3_xml == qwen3_coder in vLLM (same class, PR #48922); parser choice is cosmetic. reasoning-parser qwen3. Anti-loop sampling lives in the config TOML presets (harness-side), not here.",
+                "First launch with --keep so a startup crash's logs survive. Validate GENERATION (not just startup) on every image bump -- nightly regressed NVFP4 to garbage before.",
             ],
             "env": {
                 "VLLM_TEST_FORCE_FP8_MARLIN": "1",
                 "VLLM_USE_DEEP_GEMM": "0",
             },
             "vllm_args": {
+                "served-model-name": "qwen3.6-35b-a3b-nvfp4-nvidia",
+                "quantization": "modelopt",
                 "tensor-parallel-size": 1,
                 "kv-cache-dtype": "fp8",
                 "attention-backend": "flashinfer",
                 "moe-backend": "marlin",
-                # 0.7 (not 0.85): with MTP on, the UMA graph-mem estimator reads negative
-                # (#35313) and over-sizes KV -> OOM at 0.85. 0.7 leaves real headroom.
-                "gpu-memory-utilization": 0.7,
+                "gpu-memory-utilization": 0.85,
                 "max-model-len": 262144,
-                "max-num-seqs": 4,   # 10 was a throughput-test value; 4 is the tuned default
-                "max-num-batched-tokens": 8192,
+                "max-num-seqs": 4,
+                "max-num-batched-tokens": 16384,
                 "enable-chunked-prefill": True,
-                "async-scheduling": True,
-                "enable-prefix-caching": True,
-                # GB10: 2 is the MTP sweet spot; 3 over-drafts the single MTP head off its
-                # own unverified guesses (acceptance falls off). Verify accept-rate on-box.
-                "speculative-config": ('{"method":"mtp","num_speculative_tokens":2,'
-                                       '"moe_backend":"triton"}'),
-                "load-format": "fastsafetensors",
                 "reasoning-parser": "qwen3",
                 "tool-call-parser": "qwen3_xml",
                 "enable-auto-tool-choice": True,
                 "enable-log-requests": True,
             },
         },
+        "qwen3.6-35b-a3b-nvfp4-unsloth": {
+            "tok_s": 59,
+            "image": "vllm/vllm-openai:nightly",
+            "model": "unsloth/Qwen3.6-35B-A3B-NVFP4",
+            "port": 8000,
+            "usecase": [
+                "Reasoning",
+                "Vision",
+                "Agentic",
+            ],
+            "notes": [
+                "Qwen3.6-35B-A3B-NVFP4 (unsloth): compressed-tensors mixed FP8(dynamic/token)+NVFP4(dynamic), W4A4. Same base as the nvidia NVFP4 + FP8 siblings. ~26.5GB. Multimodal, reasoning, tool-calling. MTP module bundled. Quant auto-detected -> DO NOT pass --quantization.",
+                "GB10/sm_121 CRITICAL: force --moe-backend marlin. Unsloth's card says 'do NOT use Marlin (2x slower)' but that is a B200/SM100 claim that does NOT transfer to GB10 -- on sm_121 there are no working native FP4 MoE kernels and the CUTLASS/FlashInfer FP4 MoE path produces '!!!!' garbage (qwen3_5_moe+GDN is doubly affected). Marlin runs it as W4A16: slower, numerically safe. Quality > speed. VLLM_NVFP4_GEMM_BACKEND does NOT cover the MoE path -- the --moe-backend flag does.",
+                "Do NOT pass --linear-backend flashinfer_b12x (startup-fatal on stock image: 'no flashinfer_b12x kernel exists for this layer type'). --moe-backend flashinfer_b12x is ~within margin of Marlin on speed and risks garbage -> use Marlin. CUTE_DSL_ARCH=sm_121a set (harmless; lights up b12x if a future nightly supports it).",
+                "max-num-batched-tokens 16384: the default 2048 < GDN/Mamba block_size 2096 -> AssertionError at startup (35B-A3B-specific). enable-prefix-caching left OFF (MiaAI reports NoneType crash with Mamba layers; build-dependent -- enable only after validating).",
+                "QUALITY-FIRST: MTP disabled on bring-up (see nvidia sibling notes / vLLM #47087). Add '{\"method\":\"mtp\",\"num_speculative_tokens\":2,\"moe_backend\":\"triton\"}' only after clean output confirmed; MTP is quality-neutral (speed only).",
+                "NO IMAGE PIN (rolling nightly, per operator). Garbage-output is a live risk on every image bump: send a fixed smoke prompt on startup and assert output isn't degenerate (!!!!/repeats/empty-after-thinking) before routing traffic. reasoning-parser qwen3; tool-call-parser qwen3_coder (matches Unsloth template+OpenCode; A/B vs qwen3_xml if tools break).",
+                "VLLM_TEST_FORCE_FP8_MARLIN NOT set here (unlike the nvidia sibling): this checkpoint FP8-quantizes lm_head, and forcing FP8->Marlin drags ParallelLMHead into prepare_fp8_layer_for_marlin -> AttributeError 'output_size_per_partition' at load (observed 2026-07-19, nightly). --moe-backend marlin already routes the MoE correctly; FP8 attention takes the working non-forced path.",
+            ],
+            "env": {
+                "CUTE_DSL_ARCH": "sm_121a",
+                "VLLM_USE_DEEP_GEMM": "0",
+            },
+            "vllm_args": {
+                "served-model-name": "qwen3.6-35b-a3b-nvfp4-unsloth",
+                "tensor-parallel-size": 1,
+                "kv-cache-dtype": "fp8",
+                "attention-backend": "flashinfer",
+                "moe-backend": "marlin",
+                "gpu-memory-utilization": 0.85,
+                "max-model-len": 262144,
+                "max-num-seqs": 4,
+                "max-num-batched-tokens": 16384,
+                "enable-chunked-prefill": True,
+                "reasoning-parser": "qwen3",
+                "tool-call-parser": "qwen3_coder",
+                "enable-auto-tool-choice": True,
+                "enable-log-requests": True,
+            },
+        },
         "qwen3.6-35b-a3b-fp8": {
-            "tok_s": 22,
+            "tok_s": 46,
             "image": "vllm/vllm-openai:nightly",
             "notes": [
-                "Qwen3.6-35B-A3B FP8 (e4m3): hybrid GDN/Mamba MoE (qwen3_5_moe), "
-                "multimodal (image-text-to-text), reasoning (thinking ON by default), "
-                "tool-calling. Requires vLLM >= 0.19.0.",
-                "Blackwell / DGX Spark (sm_121): VLLM_USE_DEEP_GEMM=0 is REQUIRED -- "
-                "DeepGEMM E8M0 FP8-MoE weight processing crashes at load "
-                "(Unknown SF transformation) and drops accuracy ~4% (vLLM #37804). "
-                "Disabled, FP8-MoE falls back to TRITON, the working backend on sm_121 (#43507).",
-                "Perf (256-tok decode, vs NVFP4 sibling): ~55 tok/s single-stream, "
-                "~136 tok/s at 4x concurrency. NVFP4 is ~1.7x faster single-stream but "
-                "flat under load -- prefer NVFP4 for latency, this profile for concurrent throughput.",
-                "First launch with --keep so a startup crash's logs survive "
-                "(detached --rm removes them).",
+                "Qwen3.6-35B-A3B FP8 (e4m3): hybrid GDN/Mamba MoE (qwen3_5_moe), multimodal, reasoning, tool-calling. Requires vLLM >= 0.19.0.",
+                "Blackwell/DGX Spark (sm_121): VLLM_USE_DEEP_GEMM=0 (defensive) -- E8M0 FP8-MoE weight processing has crashed at load on sm_121 (#37804); MoE falls back to TRITON. Research could not confirm it's strictly required on current nightlies; verify kernel path in boot log, harmless if DeepGEMM isn't selected.",
+                "max-num-batched-tokens 16384: best-measured QoS knob on GB10 for this arch (DocAI: -74% single-user P99 TTFT vs 65536) and clears any low-default mamba-align assertion.",
+                "QUALITY-FIRST: MTP disabled to match the NVFP4 siblings for a clean A/B (vLLM #47087 looping). MTP depth 2 (never 3) is the speed option; re-add after quality validated.",
+                "tool-call-parser qwen3_coder (official Qwen card for THIS checkpoint; qwen3_xml is the nvidia-NVFP4 pairing but resolves to the same vLLM class). Anti-loop sampling is harness-side (config TOML presets).",
+                "First launch with --keep so a startup crash's logs survive.",
             ],
             "model": "Qwen/Qwen3.6-35B-A3B-FP8",
             "port": 8000,
-            "usecase": ["Reasoning", "Vision", "Agentic"],
+            "usecase": [
+                "Reasoning",
+                "Vision",
+                "Agentic",
+            ],
             "env": {
                 "VLLM_USE_DEEP_GEMM": "0",
             },
@@ -206,8 +235,8 @@ DEFAULT_CONFIG = {
                 "gpu-memory-utilization": 0.85,
                 "max-model-len": 262144,
                 "max-num-seqs": 4,
+                "max-num-batched-tokens": 16384,
                 "enable-chunked-prefill": True,
-                "speculative-config": '{"method":"mtp","num_speculative_tokens":2}',
                 "reasoning-parser": "qwen3",
                 "tool-call-parser": "qwen3_coder",
                 "enable-auto-tool-choice": True,
