@@ -1,24 +1,33 @@
-# qwen3.6-35b-nvfp4 — sampling & thinking reference
+# qwen3.6-35b-a3b-nvfp4-unsloth — sampling & thinking reference
 #
-# NVIDIA NVFP4 quant of Qwen3.6-35B-A3B (MoE). Reasoning model, thinking ON by
-# default, tool-calling. Launch via the omodel-manager `qwen3.6-35b-nvfp4` profile.
+# Unsloth NVFP4 quant of Qwen3.6-35B-A3B (MoE). compressed-tensors mixed
+# FP8(dynamic/token) + NVFP4(dynamic), W4A4. Same base model as the nvidia-NVFP4
+# and FP8 siblings — sampling is per-model, not per-quant, so the presets match
+# them. Launch via the omodel-manager `qwen3.6-35b-a3b-nvfp4-unsloth` profile.
 # Values are STARTING POINTS to sweep from, not guarantees.
 #
+# Hardware note (Blackwell / DGX Spark, sm_121): the launch profile forces
+# --moe-backend marlin (the CUTLASS/FlashInfer FP4 MoE path yields '!!!!' garbage
+# on GB10) and CUTE_DSL_ARCH=sm_121a. That is a launch/vllm_args concern, not a
+# sampling one. See SPARK_NOTES.md and the profile notes.
+#
+# Anti-loop rule that matters on this checkpoint (thinking model): temperature
+# NEVER 0; add presence_penalty when repetition appears (card allows 0-2). The
+# Unsloth build tends toward LONGER thinking — keep max_output generous (>=32k)
+# or thinking starves and responses come back empty/looping.
+#
 # Thinking is a chat-template toggle (not a sampling param). Turn it off per
-# request with  chat_template_kwargs = { enable_thinking = false }  (or add
-# /no_think to the prompt). Anti-loop rule that matters:
-#   temperature 0.6 (NOT 0) + presence_penalty ~0.8.
+# request with  chat_template_kwargs = { enable_thinking = false }.
 
-match  = ["qwen3.6-35b-a3b-nvfp4", "nvidia/Qwen3.6-35B-A3B-NVFP4"]
-source = "https://huggingface.co/nvidia/Qwen3.6-35B-A3B-NVFP4"
+match  = ["qwen3.6-35b-a3b-nvfp4-unsloth", "unsloth/Qwen3.6-35B-A3B-NVFP4"]
+source = "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-NVFP4"
 
 [capabilities]
-vision           = { input = ["text", "image"], output = ["text"] }  # verified 2026-07-01: 4x4 blue PNG -> "Blue" on n2
+vision           = { input = ["text", "image"], output = ["text"] }  # config.json: vision_config + image_token_id; verify live (4x4 blue PNG -> "Blue")
 reasoning        = true
 tool_call        = true
 thinking_control = "enable_thinking"  # enable_thinking | reasoning_effort | soft_switch | none
-concurrency      = 4                  # mirrors the launch profile's max-num-seqs; adapters use it
-                                      # as the default team work-budget (parallel worker cap)
+concurrency      = 4                  # mirrors the launch profile's max-num-seqs
 
 [context]
 native       = 262144
@@ -34,13 +43,13 @@ min_thinking = 131072
 #   presence_penalty  (0.0) anti-loop; +0.5…+1.5 breaks repetition; >1.5 risks language mixing.
 #   frequency_penalty (0.0) 0.1–0.5 curbs verbatim repeats.
 #   repetition_penalty(1.0) 1.05–1.15; don't stack hard with presence/frequency.
-#   max_output              16k–32k for thinking (the reasoning trace eats budget).
+#   max_output              32k for thinking (the reasoning trace eats budget; too small = empty replies).
 
 [presets.reason]              # research & planning (thinking on) -- card "Thinking / General"
 thinking   = true
 max_output = 32768
 [presets.reason.sampling]
-temperature      = 1.0        # card: General/reasoning thinking = 1.0 (precise coding uses 0.6)
+temperature      = 1.0        # card: General/reasoning thinking = 1.0
 top_p            = 0.95
 top_k            = 20
 min_p            = 0.0
@@ -50,20 +59,20 @@ presence_penalty = 1.5        # card: General thinking presence_penalty = 1.5 (a
 thinking   = true
 max_output = 32768
 [presets.code.sampling]
-temperature = 0.6
-top_p       = 0.95
-top_k       = 20
-min_p       = 0.0
+temperature      = 0.6        # card: precise coding
+top_p            = 0.95
+top_k            = 20
+min_p            = 0.0
 
 [presets.agent]               # unattended worker: coding sampling + preserved thinking
 thinking   = true
 max_output = 32768
 options.chat_template_kwargs = { preserve_thinking = true }
 [presets.agent.sampling]
-temperature = 0.6
-top_p       = 0.95
-top_k       = 20
-min_p       = 0.0
+temperature      = 0.6
+top_p            = 0.95
+top_k            = 20
+min_p            = 0.0
 
 [presets.instruct]            # fast, no thinking
 thinking   = false
