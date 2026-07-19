@@ -7,6 +7,28 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **`qwen3.6-35b-a3b-nvfp4-unsloth` launch profile + config** — Unsloth's compressed-tensors
+  NVFP4 (W4A4) quant of Qwen3.6-35B-A3B. Validated on DGX Spark (GB10/sm_121): 100% tool-call and
+  100% code-quality over 10 runs each, no looping, ~59 tok/s single-user. Forces `--moe-backend
+  marlin` (the non-Marlin FP4 MoE path garbages on sm_121; Unsloth's "don't use Marlin" is a B200
+  claim that doesn't transfer). Recommended default for the 35B-A3B slot.
+- **`utils/quality_eval.py`** — a stdlib-only, repeatable quality battery: a graded tool-call suite
+  (selection/args/hallucination/loop-detection) and a code-quality suite (executable unit tests),
+  run N times each and scored as pass-rates. Built for the 35B-A3B A/B; reusable for any model.
+
+### Changed
+- **Qwen3.6-35B-A3B profiles are now quality-first (MTP disabled).** `qwen3.6-35b-a3b-fp8` and the
+  NVFP4 siblings now disable MTP speculative decoding: it reproducibly degenerates into
+  repetition/garbage loops on this hybrid GDN/Mamba MoE (vLLM #47087/#47194), confirmed on-box. All
+  three also add `--max-num-batched-tokens 16384` (QoS + clears the GDN mamba-align assertion).
+  Anti-loop sampling stays harness-side in the config presets (card-recommended values).
+- **Renamed `qwen3.6-35b-a3b-nvfp4` -> `qwen3.6-35b-a3b-nvfp4-nvidia`** (profile + config) to
+  disambiguate the NVIDIA/modelopt checkpoint from the new Unsloth one and avoid served-id
+  cross-matching. Marked BROKEN on the current nightly: it emits `!!!!` garbage despite a clean
+  startup (NVFP4-MoE Marlin kernel miscompile for the modelopt checkpoint; the Unsloth checkpoint
+  on the same nightly is clean).
+
+### Added
 - **`.claude/skills/getting-started` onboarding skill** — an end-to-end setup guide (shell aliases,
   DGX provisioning, launching a first model, the HF token, installing OpenCode, syncing + tweaking
   the roster) for Claude to walk a new user through, with copy-paste commands at each step.
