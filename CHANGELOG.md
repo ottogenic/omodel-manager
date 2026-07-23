@@ -26,6 +26,16 @@ All notable changes to this project are documented here. The format follows
   path, and the `ps --hosts` help no longer claims omitting it queries local only.
 
 ### Added
+- **`gpt-oss-120b` launch profile + config** — OpenAI's gpt-oss-120b (116.8B total / 5.1B active,
+  native MXFP4 MoE; harmony reasoning + tool-calling, 131K context). Validated on-box dgx-3
+  (GB10/sm_121) 2026-07-23: clean generation, reasoning-field separation + tool calls both work;
+  **~31.5 tok/s decode @ ~49k ctx (N=1), ~17/req @ N=4**. Serves the **OpenAI** checkpoint, not
+  Unsloth — Unsloth's Aug-2025 harmony/template fixes were merged upstream within days and its
+  safetensors repo has an open vLLM tool-call failure report (`unslothai #5162`); weights are
+  identical MXFP4. sm_121 specifics: `--moe-backend marlin` + `VLLM_MARLIN_USE_ATOMIC_ADD=1` (the
+  stock CUTLASS/FlashInfer FP4 MoE path emits silent `!!!!`), `--attention-backend TRITON_ATTN`;
+  the harmony `o200k_base.tiktoken` vocab is shipped as a mounted **asset** (the DGX can't reach
+  `openaipublic.blob.core.windows.net`, so without it every chat request 500s with HarmonyError).
 - **`qwen3.6-35b-a3b-nvfp4-unsloth` launch profile + config** — Unsloth's compressed-tensors
   NVFP4 (W4A4) quant of Qwen3.6-35B-A3B. Validated on DGX Spark (GB10/sm_121): 100% tool-call and
   100% code-quality over 10 runs each, no looping, ~59 tok/s single-user. Forces `--moe-backend
