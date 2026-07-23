@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **`laguna-s-2.1-nvfp4` launch profile + config** — poolside's Laguna-S-2.1 agentic coding model
+  (118B total / ~8.5B active MoE), served from poolside's own NVFP4 quant (~72GB, the only variant
+  that fits 128GB). Image pinned `v0.25.1` (laguna arch needs vLLM ≥ 0.25.0). DFlash speculative
+  decoding on (`num_speculative_tokens 7` — output-identical, community-validated), `poolside_v1`
+  tool/reasoning parsers, thinking on by default, 262144 context (poolside's quantized-quality
+  ceiling). **Security-audited before download**: all-safetensors across base/NVFP4/DFlash repos;
+  the trust-remote-code custom `.py` files read in full (transformers-only imports, no I/O/network/
+  exec); verified poolside org; `--revision` pins the audited commit so future repo pushes can't
+  inject new executable code. Validated on-box dgx-3 2026-07-23 (see profile notes for numbers).
+
 ### Documentation
 - **Audited every externally-checkable DGX Spark claim in `SPARK_NOTES.md` and the `DEFAULT_CONFIG`
   model notes against upstream vLLM/GitHub, NVIDIA/vendor specs, and Docker Hub (2026-07-22), and
@@ -28,13 +39,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 - **Quality-first rework of the FP8 profiles** (`qwen3-coder-next-fp8`, `unsloth-qwen3-coder-next-fp8`,
-  `qwen3.6-27b-fp8-256k`; notes-only warning on `-512k`) — committed at the operator's request
-  **ahead of on-hardware re-validation** (every changed value is flagged in the profile notes;
-  re-run quality_eval + benchmark before trusting):
+  `qwen3.6-27b-fp8-256k`; notes-only warning on `-512k`) — **validated on-box dgx-3 2026-07-23**:
+  coder-next quality_eval 100% tool + 100% code (runs=2), functional PASS, log free of the
+  uncalibrated-scale warnings, 36.6 tok/s @ ~54k (bf16-KV price ~13% vs 42) with TTFT/prefill
+  massively improved (14.2s / 3,835 tok/s); 27b-256k functional PASS incl. reasoning, 6.5 tok/s
+  @ ~54k (unchanged vs fp8 KV — the fix was free); 27b-512k READY + clean generation. The unsloth
+  coder-next sibling carries the same config, not separately re-benchmarked:
   - **fp8 KV cache removed** on the three profiles: Qwen FP8 checkpoints ship no k/v/q scales, so
     fp8 KV ran **uncalibrated scale-1.0 fp8 attention** — vLLM's own startup log warns "may cause
-    accuracy issues" (observed live on dgx-3). Coder-next `max-model-len` drops 262144 → **170000**
-    (bf16-KV capacity at 0.85 util, community-validated); the dense 27B keeps full 262144.
+    accuracy issues" (observed live on dgx-3). **Full 262144 context retained everywhere**: measured
+    on-box, bf16 KV still yields a 1,050,664-token KV pool on the DeltaNet hybrid (only 12/48 layers
+    hold KV) — ~4 full-context sequences; the dense 27B also fits full context in bf16.
     `qwen3.6-27b-fp8-512k` deliberately keeps fp8 KV (bf16 doesn't fit 524288) and now carries a
     "quality price of 512K + static-YaRN short-context cost" warning steering daily use to `-256k`.
   - **Prefix caching removed** on the coder-next hybrids: vLLM labels Mamba/GDN "align" mode
@@ -44,9 +59,10 @@ All notable changes to this project are documented here. The format follows
     mamba-align `block_size 2096 > 2048` guard, vLLM #36697; matches the 35B family's value).
   - **`VLLM_MARLIN_USE_ATOMIC_ADD=1` added** on the coder-next pair — inert on the log-confirmed
     TRITON FP8-MoE path, load-bearing if a future nightly auto-selects MARLIN (known `!!!!` race).
-  - `tok_s` cleared on the three changed profiles per the re-measure rule (old values preserved in
-    notes: 42 / 46 / 7). `SPARK_NOTES.md` fp8-KV row rewritten: fp8 KV is a capacity tool with a
-    real quality cost, not a Qwen default.
+  - `tok_s` re-measured post-change per the re-measure rule: coder-next **37** (was 42), 27b-256k
+    **7** (unchanged); unsloth sibling left unset pending its own run (old 46 preserved in notes).
+    `SPARK_NOTES.md` fp8-KV row rewritten: fp8 KV is a capacity tool with a real quality cost, not
+    a Qwen default.
 
 ### Changed
 - **`launch` with no host now runs locally** — the registered-hosts guard (a hard error demanding

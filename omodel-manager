@@ -400,6 +400,7 @@ DEFAULT_CONFIG = {
             },
         },
         "qwen3.6-27b-fp8-256k": {
+            "tok_s": 7,
             "image": "vllm/vllm-openai:nightly",
             "notes": ["Official Qwen Qwen3.6-27B FP8 (e4m3) -- dense 27B parameter model, 256K native context. "
                       "No MoE, so no VLLM_USE_DEEP_GEMM needed. Reasoning model (thinking ON by default), tool-calling. "
@@ -409,7 +410,10 @@ DEFAULT_CONFIG = {
                       "scale-1.0 attention (vLLM warns 'may cause accuracy issues'; observed live on the "
                       "coder-next sibling). A dense 27B (~18GB weights) has ample room for bf16 KV at "
                       "262144 / 0.9 util -- unlike the -512k sibling, which must keep fp8 KV to fit. "
-                      "Was tok_s 7 with fp8 KV -- re-measure (bandwidth roofline ~10, so expect similar).",
+                      "VALIDATED on-box dgx-3 2026-07-23: log clean (kv_cache_dtype auto->bf16, no "
+                      "uncalibrated-scale warnings), 1,213,773-token KV pool, functional PASS incl. "
+                      "reasoning-field check, 6.5 tok/s @ ~54k N=1 (tok_s unchanged vs fp8 KV -- "
+                      "dense decode is weights-bandwidth-bound, so the quality fix was free).",
                       ],
             "model": "Qwen/Qwen3.6-27B-FP8",
             "port": 8000,
@@ -650,6 +654,7 @@ DEFAULT_CONFIG = {
             },
         },
         "qwen3-coder-next-fp8": {
+            "tok_s": 37,
             "image": "vllm/vllm-openai:nightly",
             "notes": [
                 "Qwen3-Coder-Next FP8: hybrid GDN/DeltaNet MoE (~80B total / ~3B active, "
@@ -665,18 +670,23 @@ DEFAULT_CONFIG = {
                 "memory vs pure-attention 80B. ~64GB weights on GB10.",
                 "No thinking/reasoning mode -- standard causal LM. tool-call-parser qwen3_coder. "
                 "No MTP weights in this checkpoint -> speculative decode not available (correct to omit).",
-                "QUALITY-FIRST rework 2026-07-23 (research + on-box log evidence; NOT yet re-validated "
-                "on hardware -- operator to run quality_eval + benchmark): (1) fp8 KV cache REMOVED -- "
+                "QUALITY-FIRST rework 2026-07-23, VALIDATED on-box same day (see the validation note "
+                "below): (1) fp8 KV cache REMOVED -- "
                 "checkpoint ships no k/v/q scales, so fp8 attention ran with uncalibrated scale 1.0 "
-                "(vLLM log: 'may cause accuracy issues'); bf16 KV needs max-model-len <= ~170000 at "
-                "0.85 util (community-validated with flashinfer). (2) prefix caching REMOVED -- vLLM "
+                "(vLLM log: 'may cause accuracy issues'); bf16 KV keeps FULL 262144 context -- "
+                "measured on-box 2026-07-23: 1,050,664-token KV pool at 0.85 util (DeltaNet: only "
+                "12/48 layers hold KV), i.e. ~4 full-context seqs. (2) prefix caching REMOVED -- vLLM "
                 "labels Mamba/GDN 'align' mode experimental, ~zero reuse on hybrids, edge-case state-"
                 "corruption reports. (3) fastsafetensors REMOVED (load-time only; GDS unavailable on "
                 "UMA; NGC ImportError reports). (4) max-num-batched-tokens 16384 added (GDN mamba-align "
                 "block_size 2096 > old 2048 default, vLLM #36697; matches the 35B family's validated "
                 "QoS value). Attention stays flashinfer: with bf16 KV it runs fully-bf16 kernels "
                 "(log-confirmed) and is what the fast published Spark recipes use; triton_attn is the "
-                "fallback if quality still lags. Was tok_s 42 @ ~50k ctx with fp8 KV -- re-measure.",
+                "fallback if quality still lags. VALIDATED on-box dgx-3 2026-07-23: startup log "
+                "clean (no uncalibrated-scale / experimental-cache warnings), functional PASS, "
+                "quality_eval 100% tool + 100% code (runs=2), 36.6 tok/s decode @ ~54k ctx N=1 "
+                "(was 42 with fp8 KV -- the ~13% is the bf16-KV price), TTFT 14.2s / prefill "
+                "3,835 tok/s (max-num-batched-tokens win).",
                 "MoE path (log-confirmed on 0.23.1 nightly): 'Using TRITON Fp8 MoE backend' -- correct "
                 "for sm_121. VLLM_MARLIN_USE_ATOMIC_ADD=1 is inert on TRITON but load-bearing if a "
                 "future nightly's auto-selection flips to MARLIN (known '!!!!' race without it).",
@@ -694,7 +704,7 @@ DEFAULT_CONFIG = {
                 "tensor-parallel-size": 1,
                 "attention-backend": "flashinfer",
                 "gpu-memory-utilization": 0.85,
-                "max-model-len": 170000,
+                "max-model-len": 262144,
                 "max-num-seqs": 4,
                 "max-num-batched-tokens": 16384,
                 "enable-chunked-prefill": True,
@@ -722,8 +732,9 @@ DEFAULT_CONFIG = {
                 "No thinking/reasoning mode -- standard causal LM. tool-call-parser qwen3_coder.",
                 "QUALITY-FIRST rework 2026-07-23, mirroring qwen3-coder-next-fp8 (same arch, same "
                 "evidence -- see that profile's notes for the full rationale; NOT yet re-validated on "
-                "hardware): fp8 KV cache / prefix caching / fastsafetensors removed; max-model-len "
-                "170000 (bf16-KV capacity at 0.85 util); max-num-batched-tokens 16384 (GDN mamba-align "
+                "hardware): fp8 KV cache / prefix caching / fastsafetensors removed; full 262144 "
+                "context retained (bf16 KV fits: 1.05M-token pool measured on the Qwen sibling); "
+                "max-num-batched-tokens 16384 (GDN mamba-align "
                 "guard, vLLM #36697); VLLM_MARLIN_USE_ATOMIC_ADD=1 as inert Marlin-race insurance "
                 "(current log-confirmed path is TRITON FP8 MoE). Was tok_s 46 @ ~50k ctx with fp8 KV "
                 "-- re-measure.",
@@ -741,7 +752,7 @@ DEFAULT_CONFIG = {
                 "tensor-parallel-size": 1,
                 "attention-backend": "flashinfer",
                 "gpu-memory-utilization": 0.85,
-                "max-model-len": 170000,
+                "max-model-len": 262144,
                 "max-num-seqs": 4,
                 "max-num-batched-tokens": 16384,
                 "enable-chunked-prefill": True,
@@ -808,6 +819,76 @@ DEFAULT_CONFIG = {
                 "enable-auto-tool-choice": True,
                 "tool-call-parser": "openai",
                 "reasoning-parser": "openai_gptoss",
+                "enable-log-requests": True,
+            },
+        },
+        "laguna-s-2.1-nvfp4": {
+            "tok_s": 9,
+            "image": "vllm/vllm-openai:v0.25.1",
+            "model": "poolside/Laguna-S-2.1-NVFP4",
+            "port": 8000,
+            "usecase": ["Coding", "Agentic", "Reasoning"],
+            "notes": [
+                "poolside Laguna-S-2.1 NVFP4: 118B total / ~8.5B active MoE agentic coding model "
+                "(256 experts top-10 + 1 shared, per-head softplus gating; 12 full-attn + 36 "
+                "sliding-window layers). poolside's OWN NVFP4 quant (~72GB) -- the only variant that "
+                "fits 128GB (BF16 235GB, FP8 121GB). FP8 KV baked into the quant (auto-detected -- "
+                "do NOT pass --kv-cache-dtype). OpenMDW-1.1 license, ungated.",
+                "VALIDATED on-box dgx-3 2026-07-23: functional PASS (clean generation, code "
+                "executes, poolside_v1 tool call + reasoning-field separation both work). SPEED IS "
+                "CONTENT-DEPENDENT (DFlash draft acceptance): house benchmark (prose summarize, "
+                "~55k ctx) 8.9 tok/s N=1 = tok_s 9 -- the drafter's worst case; CODE content at "
+                "short ctx measured 53 tok/s. TTFT 18.6s / prefill ~3,000 tok/s @ 55k. 817,498-"
+                "token KV pool. Cold start ~22.5 min, warm restart ~10 min (flashinfer cache).",
+                "IMAGE PINNED v0.25.1: laguna arch + per-head gating + poolside_v1 parsers need "
+                "vLLM >= 0.25.0; v0.25.1 is the community-validated Spark tag. Do NOT pass "
+                "--linear-backend flashinfer_b12x (broken on 0.25.1).",
+                "SECURITY (audited 2026-07-23): all-safetensors across base/NVFP4/DFlash repos; the "
+                "custom code that runs under trust-remote-code (configuration_laguna.py / "
+                "modeling_laguna.py) read in full -- transformers-only imports, no I/O/network/exec; "
+                "NVFP4 modeling file byte-identical to audited base; DFlash config.py is a clean "
+                "pydantic schema. Verified poolside org (release linked from poolside.ai blog). "
+                "--revision PINS the audited commit so future repo pushes can't inject new code -- "
+                "RE-AUDIT the .py files before bumping the revision. (Drafter repo can't be "
+                "revision-pinned via speculative-config; audited at 7237947.)",
+                "DFlash speculative decode (poolside/Laguna-S-2.1-DFlash-NVFP4, ~7GB): "
+                "output-identical spec decode, num_speculative_tokens 7 NOT 15 (community: 15 tanks "
+                "acceptance to 2-15%; 7 gives ~40-50 vs ~13-14 tok/s bare). REQUIRES low "
+                "max-num-seqs (crashes at default 256). Do NOT send min_p / logit_bias while spec "
+                "decode is on (400s) -- min_p omitted from the config TOML presets for this reason.",
+                "max-model-len 262144 = poolside's quality ceiling for quantized checkpoints (arch "
+                "supports 1M via YaRN; degrades quantized). Prefix caching ON (v0.25.1 default, "
+                "deliberately kept: normal-attention model -- 12 full + 36 sliding-window layers, "
+                "no Mamba/GDN state -- so the hybrid-cache risks don't apply, and agent loops gain "
+                "big TTFT wins; community Spark configs run it with DFlash). max-num-batched-tokens "
+                "9216 = 8192 + headroom for DFlash draft slots (8192 exactly triggers vLLM's "
+                "max_num_scheduled_tokens warning). First start ~22 min (weights download + "
+                "FlashInfer JIT + CUDA graphs); flashinfer-cache volume makes restarts much faster. "
+                "Sampling (NVFP4 card): temp 0.7 / top_p 0.95 / top_k 20 -- in the config TOML.",
+            ],
+            "volumes": ["~/.cache/flashinfer:/root/.cache/flashinfer"],
+            "env": {
+                "MAX_JOBS": "4",
+                "NVCC_THREADS": "2",
+                "CUTE_DSL_ARCH": "sm_121a",
+                "FLASHINFER_CACHE_DIR": "/root/.cache/flashinfer",
+            },
+            "vllm_args": {
+                "served-model-name": "laguna-s-2.1-nvfp4",
+                "revision": "07614121b31898586430f189d27a25a0be310843",
+                "tensor-parallel-size": 1,
+                "attention-backend": "FLASHINFER",
+                "gpu-memory-utilization": 0.85,
+                "max-model-len": 262144,
+                "max-num-seqs": 4,
+                "max-num-batched-tokens": 9216,
+                "enable-chunked-prefill": True,
+                "enable-auto-tool-choice": True,
+                "tool-call-parser": "poolside_v1",
+                "reasoning-parser": "poolside_v1",
+                "default-chat-template-kwargs": '{"enable_thinking": true}',
+                "speculative-config": ('{"method":"dflash","model":"poolside/Laguna-S-2.1-DFlash-NVFP4",'
+                                       '"num_speculative_tokens":7}'),
                 "enable-log-requests": True,
             },
         },
