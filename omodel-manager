@@ -989,8 +989,10 @@ def docker(args, capture=False, check=False, tty=False):
 
 
 def list_managed(include_all=False, remote=_UNSET):
-    """Return list of dicts for running containers (managed, or all vllm if include_all).
-    When remote is omitted, uses the global REMOTE; pass None for local only."""
+    """Return list of dicts for running containers (managed, or all vllm if include_all),
+    or None when the host can't be queried at all (SSH/docker failure) -- so callers can
+    tell 'unreachable' from 'idle'. When remote is omitted, uses the global REMOTE;
+    pass None for local only."""
     if remote is _UNSET:
         remote = REMOTE
     fmt = "{{json .}}"
@@ -1000,7 +1002,7 @@ def list_managed(include_all=False, remote=_UNSET):
     res = _docker_on(remote, args, capture=True)
     if res.returncode != 0:
         print(res.stderr.strip(), file=sys.stderr)
-        return []
+        return None
     rows = []
     for line in res.stdout.splitlines():
         line = line.strip()
@@ -1296,10 +1298,29 @@ def host_of(name):
     return name if any(name == a for a, _ in load_hosts()) else None
 
 
+def _apply_profile_remote(args):
+    """launch/pull parity for logs/stop/health: when the positional names a profile
+    whose config sets a per-model `remote`, target that host. An explicit --host wins;
+    a container name or host positional isn't a profile key, so it's a no-op."""
+    global REMOTE
+    key = getattr(args, "target", None)
+    if getattr(args, "remote", None) or not key or not os.path.exists(CONFIG_PATH):
+        return
+    cfg = load_config(create=False)
+    if key in cfg.get("models", {}):
+        r = resolve_entry(cfg, key).get("remote")
+        if r:
+            REMOTE = resolve_host(r)
+
+
 def _managed_on(remote):
     """(container_name, model_key) for the single managed container on `remote`, or
     exit with a clear error. Used when a command gets a host but no model name."""
     rows = list_managed(remote=remote)
+    if rows is None:
+        print(f"ERROR: cannot query {remote or 'local'} (SSH/docker failed -- box down? "
+              f"try `{_cli_name()} install {remote or ''} --fix`).", file=sys.stderr)
+        sys.exit(1)
     if len(rows) > 1:
         names = ", ".join(r.get("Names", "") for r in rows)
         print(f"ERROR: {len(rows)} managed containers on {remote or 'local'} ({names}). "
@@ -1343,9 +1364,8 @@ def cmd_ps(args):
 
     all_rows, state, pulling = [], {}, {}
     for t in targets:
-        try:
-            rows = list_managed(include_all=args.all, remote=t)
-        except SystemExit:
+        rows = list_managed(include_all=args.all, remote=t)
+        if rows is None:                     # SSH/docker failed -- the box is down, not idle
             state[t] = "unreachable"
             continue
         for r in rows:
@@ -1608,21 +1628,25 @@ def _launch_status(body):
 def cmd_launch(args):
     cfg = load_config()
     merged = merge_model(cfg, args.key)
-    # Per-model remote target overrides the config default (but not an explicit --host).
+    # Host resolution: explicit host (positional / --host) > --local > per-model
+    # `remote` > config defaults.remote (already in REMOTE) > local.
     global REMOTE
-    if not args.remote and merged.get("remote"):
+    if args.local:
+        if args.remote:
+            print(f"ERROR: --local contradicts the explicit host '{args.remote}' -- pick one.",
+                  file=sys.stderr)
+            sys.exit(1)
+        REMOTE = None                      # override defaults.remote / per-model remote
+    elif not args.remote and merged.get("remote"):
         REMOTE = resolve_host(merged["remote"])
-    # Guard: hosts are registered but none was chosen -> don't silently launch local.
+    # Local launch is the default -- but when hosts are registered, say so out loud
+    # so a forgotten host is a visible one-liner, not a silent local pull.
     if not REMOTE and not args.local:
         registered = load_hosts()
         if registered:
             names = ", ".join(a for a, _ in registered)
-            print(f"ERROR: no host selected, but {len(registered)} host(s) are registered "
-                  f"({names}).\n"
-                  f"  Run on one:      {_cli_name()} launch {args.key} --host <alias>\n"
-                  f"  Force local:     {_cli_name()} launch {args.key} --local\n"
-                  f"  Find a free one: {_cli_name()} ps", file=sys.stderr)
-            sys.exit(1)
+            print(f"Launching locally. (Registered hosts: {names} -- use "
+                  f"`{_cli_name()} launch {args.key} <host>` to target one.)")
     need_docker()
     # Download/verify declared assets locally, then (if remote) push them to the box.
     asset_mounts = resolve_assets(args.key, merged, do_fetch=not args.no_fetch,
@@ -1639,9 +1663,9 @@ def cmd_launch(args):
         allc = docker(["ps", "-a", "--format", "{{.Names}}"], capture=True)
         if allc.returncode == 0 and name in allc.stdout.split():
             print(f"ERROR: container '{name}' already exists (running or stopped). "
-                  f"Remove it first:\n  {sys.argv[0]} stop {args.key}{rflag}", file=sys.stderr)
+                  f"Remove it first:\n  {_cli_name()} stop {args.key}{rflag}", file=sys.stderr)
             sys.exit(1)
-        for r in list_managed(include_all=True):
+        for r in list_managed(include_all=True) or []:
             if not args.force and _label(r.get("Labels", ""), LABEL_PORT) == str(merged["port"]):
                 print(f"ERROR: port {merged['port']} already used by '{r.get('Names')}'. "
                       f"Use --force to launch anyway.", file=sys.stderr)
@@ -1735,7 +1759,7 @@ def cmd_pull_status(args):
     global REMOTE
     # `pull-status <host>`: no key given but a host is set -> find what's on that box.
     if not args.key and REMOTE:
-        rows = list_managed(remote=REMOTE)
+        rows = list_managed(remote=REMOTE) or []
         if rows:
             args.key = _label(rows[0].get("Labels", ""), LABEL_MODEL) or rows[0].get("Names")
         else:
@@ -1768,7 +1792,8 @@ def cmd_pull_status(args):
         # No bg-pull log. If the container is already running, it was a direct (cached-image)
         # launch -- say so plainly instead of "nothing is pulling", which reads like a failure
         # and sends agents into a poll loop.
-        running = any(r.get("Names") == container_name(args.key) for r in list_managed(remote=REMOTE))
+        running = any(r.get("Names") == container_name(args.key)
+                      for r in list_managed(remote=REMOTE) or [])
         if running:
             print(f"'{args.key}': launched directly (image was cached); the container is "
                   f"running{where}. There's no pull to track -- poll `{p} health "
@@ -1806,6 +1831,7 @@ def cmd_fetch(args):
 
 
 def cmd_stop(args):
+    _apply_profile_remote(args)
     need_docker()
     target = resolve_target(args.target) if args.target else _managed_on(REMOTE)[0]
     if not args.yes:
@@ -1827,8 +1853,16 @@ def cmd_stop(args):
 
 
 def cmd_logs(args):
+    _apply_profile_remote(args)
     need_docker()
-    target = resolve_target(args.target) if args.target else _managed_on(REMOTE)[0]
+    if args.target:
+        ref, rs = args.target, _rsuf()
+        target = resolve_target(args.target)
+    else:
+        # Host-addressed (`logs dgx-2`) or bare `logs`: the positional was consumed, so
+        # suggest the host form back (it's self-contained), or fall back to the model key.
+        target, key = _managed_on(REMOTE)
+        ref, rs = (_host_label(REMOTE), "") if REMOTE else (key, "")
     largs = ["logs"]
     if args.tail is not None:
         largs += ["--tail", str(args.tail)]
@@ -1842,22 +1876,23 @@ def cmd_logs(args):
         # Ctrl-C while following just detaches the viewer; the container keeps running.
         print("\nStopped following logs -- the container is still running.")
         _suggest([
-            ("Re-attach to logs", f"{_cli_name()} logs {args.target}{_rsuf()} -f"),
-            ("Check readiness", f"{_cli_name()} health {args.target}{_rsuf()}"),
-            ("Stop the model", f"{_cli_name()} stop {args.target}{_rsuf()}"),
+            ("Re-attach to logs", f"{_cli_name()} logs {ref}{rs} -f"),
+            ("Check readiness", f"{_cli_name()} health {ref}{rs}"),
+            ("Stop the model", f"{_cli_name()} stop {ref}{rs}"),
         ])
         return
     sys.exit(rc)
 
 
 def cmd_health(args):
+    _apply_profile_remote(args)
     need_docker()
     cfg = load_config(create=False) if os.path.exists(CONFIG_PATH) else {"models": {}}
     hostaddr = remote_host() or "127.0.0.1"
     targets = []   # (label, host, port, running)
     if args.target:
         merged = merge_model(cfg, args.target) if args.target in cfg.get("models", {}) else None
-        rows = list_managed(include_all=True)
+        rows = list_managed(include_all=True) or []
         for r in rows:
             if r.get("Names") in (args.target, container_name(args.target)):
                 targets.append((r.get("Names"), hostaddr,
@@ -1865,7 +1900,7 @@ def cmd_health(args):
         if not targets and merged:
             targets.append((args.target, hostaddr, merged["port"], False))
     else:
-        for r in list_managed(include_all=args.all):
+        for r in list_managed(include_all=args.all) or []:
             targets.append((r.get("Names"), hostaddr,
                             _label(r.get("Labels", ""), LABEL_PORT), True))
     if not targets:
@@ -2199,7 +2234,7 @@ def main():
     p.add_argument("--all", action="store_true", help="also include other vllm/* containers")
     p.add_argument("--hosts", metavar="USER@HOST", action="append",
                    help="query these hosts over SSH (repeat for multiple; "
-                        "omit --remote/--hosts to query local only)")
+                        "default: every registered host, else local)")
     p.set_defaults(func=cmd_ps)
 
     for alias in ("models", "list"):
@@ -2221,7 +2256,8 @@ def main():
                    help="pull inline and block until the container starts (default: if the image "
                         "is uncached, pull + launch in the background and return immediately)")
     p.add_argument("--local", action="store_true",
-                   help="launch on this machine even though hosts are registered (skips the guard)")
+                   help="force a local launch, overriding a config defaults.remote / "
+                        "per-model remote (without it, no host given already means local)")
     p.set_defaults(func=cmd_launch)
 
     p = sub.add_parser("pull", help="pre-pull a profile's image so `launch` starts instantly",

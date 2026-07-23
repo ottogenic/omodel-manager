@@ -178,8 +178,8 @@ class NonBlockingLaunchTests(unittest.TestCase):
                 os.environ["HOME"] = old
 
 
-class LaunchGuardTests(unittest.TestCase):
-    """`launch` must refuse a silent local run when hosts are registered."""
+class LaunchTargetTests(unittest.TestCase):
+    """`launch` with no host runs locally -- visibly when hosts are registered."""
 
     def setUp(self):
         self._hosts, self._remote, self._need = mm.HOSTS_FILE, mm.REMOTE, mm.need_docker
@@ -197,22 +197,84 @@ class LaunchGuardTests(unittest.TestCase):
                     foreground=False, keep=False, force=False, no_fetch=True,
                     refresh=False, wait=False)
         base.update(kw)
-        # Swallow the dry-run banner so the test suite stays quiet.
-        with contextlib.redirect_stdout(io.StringIO()), \
-                contextlib.redirect_stderr(io.StringIO()):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
             mm.cmd_launch(SimpleNamespace(**base))
+        return out.getvalue()
 
-    def test_guard_blocks_local_when_hosts_registered(self):
+    def test_default_is_local_with_a_visible_note(self):
+        # Hosts registered, none chosen -> launch locally and say so (was a hard error).
         mm.save_hosts([("dgx1", "user@a")])
+        out = self._launch()
+        self.assertIn("Launching locally", out)
+        self.assertIn("dgx1", out)                 # the note names the registered hosts
+
+    def test_local_flag_overrides_default_remote(self):
+        # --local must undo a defaults.remote that main() already resolved into REMOTE.
+        mm.save_hosts([("dgx1", "user@a")])
+        mm.REMOTE = "user@a"
+        out = self._launch(local=True)
+        self.assertIsNone(mm.REMOTE)
+        self.assertIn("locally", out)              # dry-run banner confirms a local launch
+
+    def test_local_plus_explicit_host_conflicts(self):
         with self.assertRaises(SystemExit):
-            self._launch()
+            self._launch(local=True, remote="dgx1")
 
-    def test_local_flag_bypasses_guard(self):
+    def test_no_hosts_is_quietly_local(self):
+        out = self._launch()                       # empty registry: local, no note
+        self.assertNotIn("Registered hosts", out)
+
+
+class ListManagedTests(unittest.TestCase):
+    """list_managed tells 'can't query the host' (None) from 'nothing running' ([])."""
+
+    def setUp(self):
+        self._d = mm._docker_on
+
+    def tearDown(self):
+        mm._docker_on = self._d
+
+    def test_failure_returns_none(self):
+        mm._docker_on = lambda t, a, capture=False: SimpleNamespace(
+            returncode=255, stdout="", stderr="ssh: connect to host user@down: refused")
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertIsNone(mm.list_managed(remote="user@down"))
+
+    def test_empty_returns_list(self):
+        mm._docker_on = lambda t, a, capture=False: SimpleNamespace(
+            returncode=0, stdout="", stderr="")
+        self.assertEqual(mm.list_managed(remote="user@a"), [])
+
+    def test_rows_parsed(self):
+        row = json.dumps({"Names": "otools-vllm-x", "Labels": "otools.model=x"})
+        mm._docker_on = lambda t, a, capture=False: SimpleNamespace(
+            returncode=0, stdout=row + "\n", stderr="")
+        self.assertEqual(mm.list_managed(remote="user@a")[0]["Names"], "otools-vllm-x")
+
+
+class PsUnreachableTests(unittest.TestCase):
+    """A host that can't be queried shows as 'unreachable', not 'idle' (README promise)."""
+
+    def setUp(self):
+        self._hosts, self._remote = mm.HOSTS_FILE, mm.REMOTE
+        self._lm, self._shutil = mm.list_managed, mm.shutil
+        mm.HOSTS_FILE = os.path.join(tempfile.mkdtemp(), "hosts")
+        mm.REMOTE = None
         mm.save_hosts([("dgx1", "user@a")])
-        self._launch(local=True)   # --local + --dry-run: must not raise
+        mm.shutil = SimpleNamespace(which=lambda n: "/bin/" + n)   # pretend ssh exists
 
-    def test_no_hosts_allows_local(self):
-        self._launch()             # empty registry: local is fine
+    def tearDown(self):
+        mm.HOSTS_FILE, mm.REMOTE = self._hosts, self._remote
+        mm.list_managed, mm.shutil = self._lm, self._shutil
+
+    def test_down_host_reads_unreachable(self):
+        mm.list_managed = lambda **k: None         # SSH/docker failure on every host
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            mm.cmd_ps(SimpleNamespace(all=False, hosts=None))
+        self.assertIn("unreachable", out.getvalue())
+        self.assertNotIn("idle", out.getvalue())
 
 
 class DropCachesTests(unittest.TestCase):

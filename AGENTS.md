@@ -36,9 +36,9 @@ task-specific lives in a **skill** (see the index at the bottom) that loads on d
   A single-step task or a plain question needs no list.
 - **Plan approval is for the whole plan.** After a "go"/"proceed", execute all remaining
   steps in sequence without stopping to re-ask between them; discover prerequisites yourself.
-- **Always target a host explicitly** on remote `launch`/`ps`/`logs`/`health`
-  (`--host <alias>`) — never launch locally by accident. Pick an idle box from `ps`, don't
-  grep the config. (Details in the `launch-and-operate` skill.)
+- **`launch` with no host runs locally.** When operating remote boxes, always name the
+  host explicitly (`launch <profile> <alias>` or `--host <alias>`) — pick an idle box from
+  `ps`, don't grep the config. (Details in the `launch-and-operate` skill.)
 - **Parallel-safe git.** Other agents may share this repo. Work in your own `git worktree`,
   branch first (`git switch -c …`), stage **explicit paths** (never `git add -A`), and start
   from a clean tree — if `git status` shows work that isn't yours, stop and surface it. Test
