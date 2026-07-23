@@ -277,6 +277,51 @@ class PsUnreachableTests(unittest.TestCase):
         self.assertNotIn("idle", out.getvalue())
 
 
+class SyncTests(unittest.TestCase):
+    """`sync` resets model_manager.json from DEFAULT_CONFIG, backing up local edits."""
+
+    def setUp(self):
+        self._cfgpath = mm.CONFIG_PATH
+        mm.CONFIG_PATH = os.path.join(tempfile.mkdtemp(), "model_manager.json")
+
+    def tearDown(self):
+        mm.CONFIG_PATH = self._cfgpath
+
+    def _sync(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            mm.cmd_sync(SimpleNamespace())
+        return out.getvalue()
+
+    def test_creates_when_missing(self):
+        out = self._sync()
+        self.assertIn("Synced", out)
+        with open(mm.CONFIG_PATH) as f:
+            self.assertEqual(json.load(f), mm.DEFAULT_CONFIG)
+        self.assertFalse(os.path.exists(mm.CONFIG_PATH + ".bak"))  # nothing to back up
+
+    def test_backs_up_and_replaces_stale_config(self):
+        stale = json.loads(json.dumps(mm.DEFAULT_CONFIG))
+        stale["models"].pop(next(iter(stale["models"])))       # simulate pre-merge sandbox
+        stale["models"]["local-experiment"] = {"model": "x/y", "port": 8000}
+        mm.save_config(stale)
+        out = self._sync()
+        self.assertIn("Backed up", out)
+        self.assertIn("new profiles:", out)
+        self.assertIn("local-experiment", out)                 # surfaced as removed
+        self.assertTrue(os.path.exists(mm.CONFIG_PATH + ".bak"))
+        with open(mm.CONFIG_PATH + ".bak") as f:
+            self.assertEqual(json.load(f), stale)              # old content preserved
+        with open(mm.CONFIG_PATH) as f:
+            self.assertEqual(json.load(f), mm.DEFAULT_CONFIG)
+
+    def test_in_sync_is_a_noop(self):
+        mm.save_config(mm.DEFAULT_CONFIG)
+        out = self._sync()
+        self.assertIn("Already in sync", out)
+        self.assertFalse(os.path.exists(mm.CONFIG_PATH + ".bak"))
+
+
 class DropCachesTests(unittest.TestCase):
     """Automatic page-cache drop before every launch (UMA guard, vLLM #35313)."""
 
