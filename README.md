@@ -62,9 +62,11 @@ Optional: `python omodel-manager shell-init` adds an `omm` shell alias.
 
 `--host ALIAS|USER@HOST` runs any docker-touching command on that host over SSH —
 an alias from `install` (e.g. `dgx1`) or a raw `user@ip`. (`--remote` is a legacy
-alias for `--host`.) Set `defaults.remote` in the config to make it the default. If
-any host is registered, `launch` won't silently run local — pick a `--host`, or pass
-`--local` to force local.
+alias for `--host`.) Set `defaults.remote` in the config to make it the default. With
+no host given, `launch` runs locally — when hosts are registered it prints a one-line
+"Launching locally (registered hosts: …)" reminder so a forgotten host stays visible.
+`--local` forces a local launch even when `defaults.remote` is set (combining it with
+an explicit host is an error).
 
 **Address a running model by its host** instead of typing a model name + `--host` — with
 one model per box, the hostname is unambiguous (and stable). Run `ps`, then `logs dgx-2` /

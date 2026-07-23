@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **`launch` with no host now runs locally** — the registered-hosts guard (a hard error demanding
+  `--host`/`--local`) is gone. On a GPU box itself, `omm launch <profile>` just works; when hosts
+  are registered it prints a one-line "Launching locally (registered hosts: …)" reminder instead of
+  erroring. Remote launch is unchanged (`launch <profile> <host>`, `--host`, or `defaults.remote`
+  in the per-machine config). `--local` remains as the override for `defaults.remote` / a
+  per-model `remote`; combining it with an explicit host is now an error.
+
+### Fixed
+- **`ps` now actually reports `unreachable`** — an SSH/docker failure used to fall through to
+  `idle` (the unreachable branch was dead code), so a powered-off box looked free to launch on.
+  `list_managed` now distinguishes "can't query the host" (`None`) from "nothing running" (`[]`).
+- **Host-addressed `logs` no longer prints `omm logs None -f` in its Ctrl-C hints** — the
+  suggestions echo the host (or model key) that addressed the container.
+- **`logs`/`stop`/`health` honor a per-model `remote`** from the config, matching
+  `launch`/`pull`/`pull-status`.
+- Cosmetics: the container-already-exists error suggests `omm stop …` instead of the raw script
+  path, and the `ps --hosts` help no longer claims omitting it queries local only.
+
 ### Added
 - **`qwen3.6-35b-a3b-nvfp4-unsloth` launch profile + config** — Unsloth's compressed-tensors
   NVFP4 (W4A4) quant of Qwen3.6-35B-A3B. Validated on DGX Spark (GB10/sm_121): 100% tool-call and
