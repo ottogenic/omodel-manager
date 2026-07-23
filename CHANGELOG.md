@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Documentation
+- **Audited every externally-checkable DGX Spark claim in `SPARK_NOTES.md` and the `DEFAULT_CONFIG`
+  model notes against upstream vLLM/GitHub, NVIDIA/vendor specs, and Docker Hub (2026-07-22), and
+  corrected the wrong ones** — notes only, no launch behavior changed:
+  - **Misattributed citations fixed:** `#43906` (cited for the NVFP4-MoE `!!!!` garbage — it's
+    actually an MXFP8 issue), `#40291` (cited for a Gemma `--quantization` ValueError — it's an
+    unrelated OOM bug), PR `#31740` (described as *merged* sm_121 support — still **open**; support
+    ships via nightly/NGC builds), PR `#40708` ("≥ 0.19.1" is impossible — it merged *after* 0.19.1),
+    and the FP8-MoE load crash (re-cited to `#47436`; the ~4% accuracy figure belongs to `#37804`).
+  - **Facts corrected:** MSI **EdgeXpert** (was "EdgeExpert"); `:nightly-aarch64` is **not** a
+    separate build lineage (identical digest to the arm64 half of `:nightly` as of 2026-07-22); the
+    bandwidth roofline is a **ceiling** (measured decode ~35–70% of it); `VLLM_TEST_FORCE_FP8_MARLIN`
+    affects the FP8 **linear/GEMM** path, not attention; `VLLM_MXFP4_BACKEND` is **unknown** on the
+    0.23.x nightly (verified on-box during gpt-oss bring-up).
+  - **New watch-list hooks:** native FP4 MoE kernels have landed (FlashInfer b12x, PR #40082) so the
+    Marlin-vs-`auto` A/B is now live and overdue; `#35313` (the UMA false-OOM behind the pre-launch
+    drop-caches guard) was closed 2026-04-13 → retest whether the guard is still needed; retest the
+    modelopt-NVFP4 `!!!!` case with `VLLM_MARLIN_USE_ATOMIC_ADD=1` (its signature matches the
+    documented Marlin-MoE atomic-add race, which that profile doesn't set).
+
 ### Changed
 - **`launch` with no host now runs locally** — the registered-hosts guard (a hard error demanding
   `--host`/`--local`) is gone. On a GPU box itself, `omm launch <profile>` just works; when hosts

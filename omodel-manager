@@ -140,7 +140,7 @@ DEFAULT_CONFIG = {
             "notes": [
                 "BROKEN ON CURRENT NIGHTLY (v0.23.1rc1.dev748, tested 2026-07-19): emits pure '!!!!' garbage despite clean startup (MARLIN NvFp4 MoE selected). Isolated to the NVFP4-MoE Marlin kernel miscompiling for the nvidia/modelopt checkpoint -- persists with fp8-KV and forced-FP8-Marlin removed. The unsloth checkpoint on the SAME nightly is clean. DO NOT USE until a nightly fixes it; re-validate GENERATION (not just startup) before trusting.",
                 "Qwen3.6-35B-A3B-NVFP4 (nvidia/ModelOpt): hybrid GDN/Mamba MoE, mixed NVFP4 (MLP) + FP8 (attention). Multimodal, reasoning, tool-calling.",
-                "GB10/sm_121 NVFP4: pin MoE to Marlin (--moe-backend marlin) -- the CUTLASS/FlashInfer FP4 MoE path yields degenerate '!!!!' output on Spark (no native FP4 MoE kernels; this qwen3_5_moe+GDN checkpoint is in the blast radius). Leave NVFP4 linear GEMM on auto. FP8 attention->Marlin (VLLM_TEST_FORCE_FP8_MARLIN=1); kill broken E8M0 FP8-MoE (VLLM_USE_DEEP_GEMM=0). See SPARK_NOTES.",
+                "GB10/sm_121 NVFP4: pin MoE to Marlin (--moe-backend marlin) -- the CUTLASS/FlashInfer FP4 MoE path yields degenerate '!!!!' output on Spark (no native FP4 MoE kernels; this qwen3_5_moe+GDN checkpoint is in the blast radius). Leave NVFP4 linear GEMM on auto. FP8 linear/GEMM->Marlin (VLLM_TEST_FORCE_FP8_MARLIN=1 -- affects the FP8 linear path, NOT attention); kill broken E8M0 FP8-MoE (VLLM_USE_DEEP_GEMM=0). See SPARK_NOTES.",
                 "QUALITY-FIRST: MTP speculative decode is DISABLED. vLLM #47087 documents MTP degenerating into repetition/garbage loops on deep agentic convos for this exact model (depth 2 AND 3); #47194 shows MTP+prefix-caching leaks tool-call XML as plain text + kills recall; #44734 crashes on NVFP4+MTP+fp8KV/Blackwell. Removing MTP is the sourced fix for looping/failed tool calls. Prefix-caching also removed (unsafe with the hybrid Mamba/GDN state under spec-decode).",
                 "tool-call-parser qwen3_xml == qwen3_coder in vLLM (same class, PR #48922); parser choice is cosmetic. reasoning-parser qwen3. Anti-loop sampling lives in the config TOML presets (harness-side), not here.",
                 "First launch with --keep so a startup crash's logs survive. Validate GENERATION (not just startup) on every image bump -- nightly regressed NVFP4 to garbage before.",
@@ -487,7 +487,8 @@ DEFAULT_CONFIG = {
                 "BF16 -> real footprint ~30GB). Multimodal (text+image), reasoning + tools.",
                 "Needs the Gemma4-specific image (Gemma4ForConditionalGeneration / "
                 "transformers ~5.5); rolling gemma4-cu130 tag.",
-                "Do NOT pass --quantization; vLLM auto-detects (explicit -> ValueError, vLLM #40291).",
+                "Do NOT pass --quantization; vLLM auto-detects (explicit reportedly errors -- but the "
+                "#40291 cite is an unrelated OOM bug, no ValueError issue located; auto-detect is safe).",
                 "kv-cache fp8 intentionally OMITTED on Spark (predictability + sm121 FP8-kernel "
                 "risk; ~30GB model leaves KV room).",
                 "DENSE 31B is bandwidth-heavy on GB10 (~7 tok/s); the gemma4-26b-a4b MoE "
@@ -521,8 +522,8 @@ DEFAULT_CONFIG = {
                 "step on the 273 GB/s bus -> ~52 tok/s vs the 31B's ~7 (ai-muninn DGX Spark "
                 "benchmark). ~16.5GB weights leave ~82GB for KV cache.",
                 "Needs the Gemma4-specific image (Gemma4ForConditionalGeneration); rolling "
-                "gemma4-cu130 tag. Do NOT pass --quantization (auto-detected; explicit -> "
-                "ValueError, vLLM #40291).",
+                "gemma4-cu130 tag. Do NOT pass --quantization (auto-detected; explicit reportedly "
+                "errors -- the #40291 cite is an unrelated OOM bug, not a quant-flag ValueError).",
                 "sm_121 has no native FP4 MoE kernels: --moe-backend marlin forces the working "
                 "Marlin FP4 dequant path (the CUTLASS/FlashInfer FP4 MoE path yields '!!!!' garbage "
                 "on GB10). Leave the linear GEMM on auto (FlashInfer CUTLASS). (Was the deprecated "
@@ -560,8 +561,9 @@ DEFAULT_CONFIG = {
                 "26B total / ~3.8B active per token. Multimodal (text+image), reasoning + tools.",
                 "Better than NVFP4 on GB10: native FP8 hardware support vs Marlin fallback. "
                 "Measured ~37 tok/s decode on GB10 at N=1, ~1.7-22 tok/s at N=4 (parallel slowdown).",
-                "Uses compressed-tensors FP8-Dynamic format. Requires vLLM >= 0.19.1 for "
-                "compressed-tensors MoE weight loading fixes (PRs #40708, #41683).",
+                "Uses compressed-tensors FP8-Dynamic format. Needs the compressed-tensors MoE "
+                "loading fixes: PR #40708 (merged 2026-05-09 -> a POST-0.19.1 release, NOT 0.19.1 "
+                "as earlier noted) and PR #41683 (still open as of 2026-07 -- not yet released).",
                 "sm_121 (GB10) requires --attention-backend TRITON_ATTN (FlashInfer has "
                 "accuracy bugs on Blackwell FP8) and --moe-backend marlin (FP4 MoE unavailable).",
                 "kv-cache fp8 recommended to save ~50% KV memory for longer contexts.",
@@ -600,8 +602,9 @@ DEFAULT_CONFIG = {
                 "token (512 experts, 10 active + 1 shared, DeltaNet architecture). NVFP4 "
                 "quantized (compressed-tensors). Pure text (no vision). 262K native "
                 "context, extendable to 1M via YaRN.",
-                "Pinned nightly-aarch64 image: sm_121 support required (merged in vLLM "
-                "PR #31740, needs vLLM >= 0.15.0). GB10/Blackwell ARM64 only.",
+                "Pinned nightly-aarch64 image for sm_121 (GB10/Blackwell ARM64). sm_121 support "
+                "ships via the nightly/NGC builds; the in-tree support PR #31740 was still OPEN as "
+                "of 2026-07-22 (not a tagged release), so run a nightly and re-validate on bumps.",
                 "DeltaNet: only 12 full-attention layers (25%) maintain KV cache -> "
                 "dramatically less KV memory vs pure-attention 80B. KV cache @ 262K "
                 "context (FP8): ~61.7GB on GB10.",
