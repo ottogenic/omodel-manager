@@ -7,6 +7,28 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- **Quality-first rework of the FP8 profiles** (`qwen3-coder-next-fp8`, `unsloth-qwen3-coder-next-fp8`,
+  `qwen3.6-27b-fp8-256k`; notes-only warning on `-512k`) — committed at the operator's request
+  **ahead of on-hardware re-validation** (every changed value is flagged in the profile notes;
+  re-run quality_eval + benchmark before trusting):
+  - **fp8 KV cache removed** on the three profiles: Qwen FP8 checkpoints ship no k/v/q scales, so
+    fp8 KV ran **uncalibrated scale-1.0 fp8 attention** — vLLM's own startup log warns "may cause
+    accuracy issues" (observed live on dgx-3). Coder-next `max-model-len` drops 262144 → **170000**
+    (bf16-KV capacity at 0.85 util, community-validated); the dense 27B keeps full 262144.
+    `qwen3.6-27b-fp8-512k` deliberately keeps fp8 KV (bf16 doesn't fit 524288) and now carries a
+    "quality price of 512K + static-YaRN short-context cost" warning steering daily use to `-256k`.
+  - **Prefix caching removed** on the coder-next hybrids: vLLM labels Mamba/GDN "align" mode
+    experimental (live log), reuse on hybrids is ~zero, and state-corruption edge cases are reported.
+  - **`--load-format fastsafetensors` removed** (load-time only; GDS unavailable on UMA; NGC
+    ImportError reports) and **`max-num-batched-tokens 16384` added** on the coder-next pair (GDN
+    mamba-align `block_size 2096 > 2048` guard, vLLM #36697; matches the 35B family's value).
+  - **`VLLM_MARLIN_USE_ATOMIC_ADD=1` added** on the coder-next pair — inert on the log-confirmed
+    TRITON FP8-MoE path, load-bearing if a future nightly auto-selects MARLIN (known `!!!!` race).
+  - `tok_s` cleared on the three changed profiles per the re-measure rule (old values preserved in
+    notes: 42 / 46 / 7). `SPARK_NOTES.md` fp8-KV row rewritten: fp8 KV is a capacity tool with a
+    real quality cost, not a Qwen default.
+
+### Changed
 - **`launch` with no host now runs locally** — the registered-hosts guard (a hard error demanding
   `--host`/`--local`) is gone. On a GPU box itself, `omm launch <profile>` just works; when hosts
   are registered it prints a one-line "Launching locally (registered hosts: …)" reminder instead of

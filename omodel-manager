@@ -400,11 +400,17 @@ DEFAULT_CONFIG = {
             },
         },
         "qwen3.6-27b-fp8-256k": {
-            "tok_s": 7,
             "image": "vllm/vllm-openai:nightly",
             "notes": ["Official Qwen Qwen3.6-27B FP8 (e4m3) -- dense 27B parameter model, 256K native context. "
                       "No MoE, so no VLLM_USE_DEEP_GEMM needed. Reasoning model (thinking ON by default), tool-calling. "
-                      "~18GB weights on disk, ~20-30GB runtime memory, very comfortable on GB10."],
+                      "~18GB weights on disk, ~20-30GB runtime memory, very comfortable on GB10.",
+                      "QUALITY-FIRST rework 2026-07-23 (NOT yet re-validated on hardware): fp8 KV cache "
+                      "REMOVED -- Qwen FP8 checkpoints ship no k/v/q scales, so fp8 KV runs uncalibrated "
+                      "scale-1.0 attention (vLLM warns 'may cause accuracy issues'; observed live on the "
+                      "coder-next sibling). A dense 27B (~18GB weights) has ample room for bf16 KV at "
+                      "262144 / 0.9 util -- unlike the -512k sibling, which must keep fp8 KV to fit. "
+                      "Was tok_s 7 with fp8 KV -- re-measure (bandwidth roofline ~10, so expect similar).",
+                      ],
             "model": "Qwen/Qwen3.6-27B-FP8",
             "port": 8000,
             "usecase": ["Coding", "Agentic", "Reasoning"],
@@ -415,7 +421,6 @@ DEFAULT_CONFIG = {
                 "served-model-name": "qwen3.6-27b-fp8",
                 "tensor-parallel-size": 1,
                 "dtype": "bfloat16",
-                "kv-cache-dtype": "fp8",
                 "gpu-memory-utilization": 0.9,
                 "max-model-len": 262144,
                 "max-num-seqs": 1,
@@ -430,7 +435,14 @@ DEFAULT_CONFIG = {
             "tok_s": 7,
             "image": "vllm/vllm-openai:nightly",
             "notes": ["Official Qwen Qwen3.6-27B FP8 (e4m3) -- 512K context via YaRN rope scaling "
-                      "(--hf-overrides), single user (max-num-seqs 1). YARN extrapolation from 256K trained window."],
+                      "(--hf-overrides), single user (max-num-seqs 1). YARN extrapolation from 256K trained window.",
+                      "QUALITY NOTE (2026-07-23): this profile deliberately KEEPS fp8 KV cache -- bf16 KV "
+                      "does not fit 524288 tokens on 128GB, so uncalibrated-scale fp8 KV is the price of "
+                      "512K (the -256k sibling dropped it). Static YaRN factor 2.0 also degrades SHORT-"
+                      "context quality (Qwen card guidance: enable rope scaling only when needed). "
+                      "Quality-first daily driver = qwen3.6-27b-fp8-256k; use this profile only when a "
+                      "task genuinely needs >256K.",
+                      ],
             "model": "Qwen/Qwen3.6-27B-FP8",
             "port": 8000,
             "usecase": ["Long-context", "Coding", "Reasoning"],
@@ -635,7 +647,6 @@ DEFAULT_CONFIG = {
             },
         },
         "qwen3-coder-next-fp8": {
-            "tok_s": 42,
             "image": "vllm/vllm-openai:nightly",
             "notes": [
                 "Qwen3-Coder-Next FP8: hybrid GDN/DeltaNet MoE (~80B total / ~3B active, "
@@ -649,7 +660,23 @@ DEFAULT_CONFIG = {
                 "projection layout, vLLM #40934).",
                 "DeltaNet: only 12 full-attention layers (25%) maintain KV cache -> dramatically less KV "
                 "memory vs pure-attention 80B. ~64GB weights on GB10.",
-                "No thinking/reasoning mode -- standard causal LM. tool-call-parser qwen3_coder.",
+                "No thinking/reasoning mode -- standard causal LM. tool-call-parser qwen3_coder. "
+                "No MTP weights in this checkpoint -> speculative decode not available (correct to omit).",
+                "QUALITY-FIRST rework 2026-07-23 (research + on-box log evidence; NOT yet re-validated "
+                "on hardware -- operator to run quality_eval + benchmark): (1) fp8 KV cache REMOVED -- "
+                "checkpoint ships no k/v/q scales, so fp8 attention ran with uncalibrated scale 1.0 "
+                "(vLLM log: 'may cause accuracy issues'); bf16 KV needs max-model-len <= ~170000 at "
+                "0.85 util (community-validated with flashinfer). (2) prefix caching REMOVED -- vLLM "
+                "labels Mamba/GDN 'align' mode experimental, ~zero reuse on hybrids, edge-case state-"
+                "corruption reports. (3) fastsafetensors REMOVED (load-time only; GDS unavailable on "
+                "UMA; NGC ImportError reports). (4) max-num-batched-tokens 16384 added (GDN mamba-align "
+                "block_size 2096 > old 2048 default, vLLM #36697; matches the 35B family's validated "
+                "QoS value). Attention stays flashinfer: with bf16 KV it runs fully-bf16 kernels "
+                "(log-confirmed) and is what the fast published Spark recipes use; triton_attn is the "
+                "fallback if quality still lags. Was tok_s 42 @ ~50k ctx with fp8 KV -- re-measure.",
+                "MoE path (log-confirmed on 0.23.1 nightly): 'Using TRITON Fp8 MoE backend' -- correct "
+                "for sm_121. VLLM_MARLIN_USE_ATOMIC_ADD=1 is inert on TRITON but load-bearing if a "
+                "future nightly's auto-selection flips to MARLIN (known '!!!!' race without it).",
                 "First launch with --keep so a startup crash's logs survive.",
             ],
             "model": "Qwen/Qwen3-Coder-Next-FP8",
@@ -657,18 +684,17 @@ DEFAULT_CONFIG = {
             "usecase": ["Coding", "Agentic", "General"],
             "env": {
                 "VLLM_USE_DEEP_GEMM": "0",
+                "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
             },
             "vllm_args": {
                 "served-model-name": "qwen3-coder-next-fp8",
                 "tensor-parallel-size": 1,
-                "kv-cache-dtype": "fp8",
                 "attention-backend": "flashinfer",
                 "gpu-memory-utilization": 0.85,
-                "max-model-len": 262144,
+                "max-model-len": 170000,
                 "max-num-seqs": 4,
+                "max-num-batched-tokens": 16384,
                 "enable-chunked-prefill": True,
-                "enable-prefix-caching": True,
-                "load-format": "fastsafetensors",
                 "enable-log-requests": True,
                 "enable-auto-tool-choice": True,
                 "tool-call-parser": "qwen3_coder",
@@ -691,26 +717,31 @@ DEFAULT_CONFIG = {
                 "DeltaNet: only 12 full-attention layers (25%) maintain KV cache -> dramatically less KV "
                 "memory vs pure-attention 80B. ~64GB weights on GB10.",
                 "No thinking/reasoning mode -- standard causal LM. tool-call-parser qwen3_coder.",
+                "QUALITY-FIRST rework 2026-07-23, mirroring qwen3-coder-next-fp8 (same arch, same "
+                "evidence -- see that profile's notes for the full rationale; NOT yet re-validated on "
+                "hardware): fp8 KV cache / prefix caching / fastsafetensors removed; max-model-len "
+                "170000 (bf16-KV capacity at 0.85 util); max-num-batched-tokens 16384 (GDN mamba-align "
+                "guard, vLLM #36697); VLLM_MARLIN_USE_ATOMIC_ADD=1 as inert Marlin-race insurance "
+                "(current log-confirmed path is TRITON FP8 MoE). Was tok_s 46 @ ~50k ctx with fp8 KV "
+                "-- re-measure.",
                 "First launch with --keep so a startup crash's logs survive.",
             ],
             "model": "unsloth/Qwen3-Coder-Next-FP8",
             "port": 8000,
             "usecase": ["Coding", "Agentic", "General"],
-            "tok_s": 46,
             "env": {
                 "VLLM_USE_DEEP_GEMM": "0",
+                "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
             },
             "vllm_args": {
                 "served-model-name": "unsloth/qwen3-coder-next-fp8",
                 "tensor-parallel-size": 1,
-                "kv-cache-dtype": "fp8",
                 "attention-backend": "flashinfer",
                 "gpu-memory-utilization": 0.85,
-                "max-model-len": 262144,
+                "max-model-len": 170000,
                 "max-num-seqs": 4,
+                "max-num-batched-tokens": 16384,
                 "enable-chunked-prefill": True,
-                "enable-prefix-caching": True,
-                "load-format": "fastsafetensors",
                 "enable-log-requests": True,
                 "enable-auto-tool-choice": True,
                 "tool-call-parser": "qwen3_coder",
