@@ -716,6 +716,67 @@ DEFAULT_CONFIG = {
                 "tool-call-parser": "qwen3_coder",
             },
         },
+        "gpt-oss-120b": {
+            "tok_s": 31,
+            "image": "vllm/vllm-openai:nightly",
+            "model": "openai/gpt-oss-120b",
+            "port": 8000,
+            "usecase": ["Reasoning", "Agentic", "Coding", "General"],
+            "notes": [
+                "OpenAI gpt-oss-120b: 116.8B total / 5.1B active MoE, NATIVE MXFP4 experts (this IS "
+                "the release format -- no higher-precision 'original' upstream; every published eval "
+                "is at this precision). ~60GB weights. Harmony reasoning + tool-calling, 131K native "
+                "context. Validated on-box dgx-3 (GB10/sm_121) 2026-07-23: clean generation, "
+                "reasoning-field separation + tool calls work; ~31.5 tok/s decode @ ~49k ctx N=1 "
+                "(~17/req @ N=4).",
+                "Serve the OPENAI checkpoint, NOT unsloth/gpt-oss-120b: Unsloth's Aug-2025 harmony/"
+                "template fixes were merged upstream by OpenAI within days; the Unsloth safetensors "
+                "repo is unchanged since 2025-08-09 and has an OPEN vLLM tool-call failure report "
+                "(unslothai #5162). Weights are identical MXFP4 either way; Unsloth's value is now "
+                "fine-tuning only.",
+                "GB10/sm_121 MXFP4: the stock CUTLASS/FlashInfer FP4 MoE path emits SILENT '!!!!' "
+                "garbage. Force Marlin with the --moe-backend marlin FLAG (log confirms 'Using MARLIN "
+                "Mxfp4 MoE backend') + VLLM_MARLIN_USE_ATOMIC_ADD=1 (defuses a Marlin-MoE race that "
+                "prints '!!!!' at TP=1) + --attention-backend TRITON_ATTN. The VLLM_MXFP4_BACKEND env "
+                "is UNKNOWN on the 0.23.x nightly (ignored with a warning) -- the flag is the "
+                "mechanism. See SPARK_NOTES.",
+                "HARMONY VOCAB is shipped as an ASSET (o200k_base.tiktoken) mounted at "
+                "TIKTOKEN_RS_CACHE_DIR/<sha1(url)>: the DGX can't reach "
+                "openaipublic.blob.core.windows.net, so without it EVERY chat request 500s with "
+                "HarmonyError 'failed to download or load vocab file' (verified on-box 2026-07-23).",
+                "NEVER --enforce-eager (silently halves decode). Re-validate GENERATION (not just "
+                "startup) on image bumps. Optional speed lever: NVIDIA ships an EAGLE3 draft head "
+                "(nvidia/gpt-oss-120b-Eagle3-v3, in vLLM's gpt-oss recipe) for spec-decode -- A/B "
+                "on-box before enabling.",
+            ],
+            "env": {
+                "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
+                "TIKTOKEN_RS_CACHE_DIR": "/root/.cache/tiktoken",
+            },
+            "assets": [
+                {
+                    "url": ("https://openaipublic.blob.core.windows.net/encodings/"
+                            "o200k_base.tiktoken"),
+                    "container": "/root/.cache/tiktoken/fb374d419588a4632f3f557e76b4b70aebbca790",
+                },
+            ],
+            "vllm_args": {
+                "served-model-name": "gpt-oss-120b",
+                "quantization": "mxfp4",
+                "tensor-parallel-size": 1,
+                "kv-cache-dtype": "fp8",
+                "attention-backend": "TRITON_ATTN",
+                "moe-backend": "marlin",
+                "gpu-memory-utilization": 0.85,
+                "max-model-len": 131072,
+                "max-num-seqs": 4,
+                "max-num-batched-tokens": 8192,
+                "enable-auto-tool-choice": True,
+                "tool-call-parser": "openai",
+                "reasoning-parser": "openai_gptoss",
+                "enable-log-requests": True,
+            },
+        },
     },
 }
 

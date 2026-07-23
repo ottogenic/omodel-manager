@@ -1,0 +1,68 @@
+# gpt-oss-120b — sampling & capability reference
+#
+# OpenAI gpt-oss-120b: 116.8B total / 5.1B active MoE, NATIVE MXFP4 experts. Harmony
+# format — reasoning (analysis channel) + tool-calling. Depth is controlled by
+# `reasoning_effort` (low | medium | high), not an on/off switch. Launch via the
+# omodel-manager `gpt-oss-120b` profile. Values are STARTING POINTS to sweep from.
+#
+# Validated on-box dgx-3 (GB10/sm_121) 2026-07-23: clean generation (no '!!!!'),
+# reasoning-field separation + tool calls both work. ~31.5 tok/s decode @ ~49k ctx (N=1).
+#
+# Card sampling: temperature=1.0, top_p=1.0 (OpenAI's gpt-oss default).
+
+match  = ["gpt-oss-120b", "openai/gpt-oss-120b"]
+source = "https://huggingface.co/openai/gpt-oss-120b"
+
+[capabilities]
+vision           = false                  # pure text (gpt-oss-120b has no vision)
+reasoning        = true                   # harmony analysis channel; verified on-box
+tool_call        = true                   # OpenAI tool parser; verified on-box
+thinking_control = "reasoning_effort"     # low | medium | high (harmony)
+concurrency      = 4                       # mirrors the launch profile's max-num-seqs
+
+[context]
+native = 131072
+
+# ── Task-mode presets ────────────────────────────────────────────────────────
+# gpt-oss always reasons; `reasoning_effort` trades latency for depth. Sampling
+# knobs (vLLM default in parens):
+#   temperature (1.0)   1.0 = OpenAI default; 0.6–0.8 for focused coding.
+#   top_p       (1.0)   1.0 = default; 0.9–0.95 to tighten.
+# reasoning_effort is a non-standard body param -> it lives under each preset's
+# `options`, not `sampling`.
+
+[presets.reason]              # research & planning — deepest thinking
+thinking   = true
+max_output = 32768
+[presets.reason.sampling]
+temperature = 1.0
+top_p       = 1.0
+[presets.reason.options]
+reasoning_effort = "high"
+
+[presets.code]                # code generation — tighter sampling, deep thinking
+thinking   = true
+max_output = 32768
+[presets.code.sampling]
+temperature = 0.7
+top_p       = 0.95
+[presets.code.options]
+reasoning_effort = "high"
+
+[presets.agent]               # tool-using agent loops — balance depth vs latency
+thinking   = true
+max_output = 16384
+[presets.agent.sampling]
+temperature = 1.0
+top_p       = 1.0
+[presets.agent.options]
+reasoning_effort = "medium"
+
+[presets.instruct]            # quick instructions — minimal reasoning
+thinking   = false
+max_output = 8192
+[presets.instruct.sampling]
+temperature = 1.0
+top_p       = 1.0
+[presets.instruct.options]
+reasoning_effort = "low"
