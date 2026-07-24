@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **`omm sync`** — one command to refresh `model_manager.json` from the committed
+  `DEFAULT_CONFIG` after a `git pull` (named to pair with `omw sync`). Newly merged profiles
+  showed up in `DEFAULT_CONFIG` but not in `omm list` until you remembered
+  `config --init --force`; `sync` is the discoverable spelling of that reset, prints which
+  profiles were added/removed, and **backs up a differing old config to `.bak`** so local
+  tweaks are never silently lost. (`config --init --force` still works.)
 - **`laguna-s-2.1-nvfp4` launch profile + config** — poolside's Laguna-S-2.1 agentic coding model
   (118B total / ~8.5B active MoE), served from poolside's own NVFP4 quant (~72GB, the only variant
   that fits 128GB). Image pinned `v0.25.1` (laguna arch needs vLLM ≥ 0.25.0). DFlash speculative
