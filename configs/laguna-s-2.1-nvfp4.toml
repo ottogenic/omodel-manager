@@ -6,9 +6,37 @@
 # Launch via the omodel-manager `laguna-s-2.1-nvfp4` profile (vLLM >= 0.25.0 required).
 # Values are STARTING POINTS to sweep from.
 #
-# NVFP4 card sampling: temperature=0.7, top_p=0.95, top_k=20.
+# ── Sampling: one official recommendation, ALL modes (verified 2026-07-25) ──
+# poolside publishes exactly ONE sampling rec — temperature 0.7 + top_p 0.95 ("best
+# balance of quality and reliability", NVFP4 card) with top_k 20 ("eval-certified
+# truncation", generation_config.json). There is NO official coding-vs-reasoning split,
+# and NO effort levels in this release ("two thinking settings: off and max" —
+# https://docs.poolside.ai/release-notes/models). Identical presets below are
+# deliberate, not an oversight.
+#   card:  https://huggingface.co/poolside/Laguna-S-2.1-NVFP4
+#   gen:   https://huggingface.co/poolside/Laguna-S-2.1-NVFP4/raw/main/generation_config.json
 # CAUTION: do NOT send min_p or logit_bias while DFlash speculative decoding is on
-# (server 400s) — min_p left at 0.0 in every preset for that reason.
+# (server 400s) — min_p intentionally absent from every preset.
+#
+# ── Re-thinking loops ("But wait… But wait…") — known issue, sourced 2026-07-25 ──
+# Mild re-verification is this model's intended "persistent verification" style, and
+# overthinking is a vendor-acknowledged limitation ("may think for long sequences
+# before making progress" — https://poolside.ai/blog/introducing-laguna-s-2-1).
+# Hard loops (verbatim repeats until finish_reason: length) are a STAFF-CONFIRMED
+# defect, worst in 4-bit quants; poolside's 07-22 re-quant (our pinned revision)
+# reduces but does not eliminate it:
+#   https://huggingface.co/poolside/Laguna-S-2.1-NVFP4/discussions/7   (staff fix)
+#   https://huggingface.co/poolside/Laguna-S-2.1-NVFP4/discussions/10  (post-fix repro)
+# Documented mitigations, in order of evidence:
+#   1. repetition_penalty 1.10-1.15 — rescued 4/8 previously-0/8 runs in the
+#      discussions/10 repro. NOT set below: it penalizes legitimately repetitive
+#      code tokens (warned in-thread) — quality-first default is off; add per-request
+#      if a task loops to the length limit.
+#   2. preserve_thinking in agent loops (set below) — official base-card rec, and one
+#      report of it stopping tool-call looping (discussions/5).
+#   3. thinking_token_budget does NOT work for this model on vLLM (accepted silently,
+#      no effect — https://huggingface.co/poolside/Laguna-S-2.1-NVFP4/discussions/9).
+#      Don't reach for it.
 
 match  = ["laguna-s-2.1-nvfp4", "poolside/Laguna-S-2.1-NVFP4"]
 source = "https://huggingface.co/poolside/Laguna-S-2.1-NVFP4"
@@ -40,16 +68,19 @@ temperature = 0.7
 top_p       = 0.95
 top_k       = 20
 
-[presets.agent]               # unattended agentic loops — card recommends preserving
-thinking   = true             # thinking across tool-call turns (interleaved by design)
-max_output = 32768
+[presets.agent]               # unattended agentic loops. preserve_thinking is the
+thinking   = true             # OFFICIAL agentic rec: "works best with preserved
+max_output = 32768            # thinking… may stop reasoning in follow-up steps if
+                              # prior thinking blocks are dropped"
+                              # (https://huggingface.co/poolside/Laguna-S-2.1)
+options.chat_template_kwargs = { preserve_thinking = true }
 [presets.agent.sampling]
 temperature = 0.7
 top_p       = 0.95
 top_k       = 20
 
-[presets.instruct]            # quick answers — thinking off
-thinking   = false
+[presets.instruct]            # quick answers — thinking off (loops live in thinking;
+thinking   = false            # this mode sidesteps them entirely)
 max_output = 16384
 [presets.instruct.sampling]
 temperature = 0.7

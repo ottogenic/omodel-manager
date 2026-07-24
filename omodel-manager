@@ -865,6 +865,18 @@ DEFAULT_CONFIG = {
                 "max_num_scheduled_tokens warning). First start ~22 min (weights download + "
                 "FlashInfer JIT + CUDA graphs); flashinfer-cache volume makes restarts much faster. "
                 "Sampling (NVFP4 card): temp 0.7 / top_p 0.95 / top_k 20 -- in the config TOML.",
+                "RE-THINKING LOOPS (researched 2026-07-25): 'But wait...' re-verification is the "
+                "model's intended style + a vendor-acknowledged overthinking limitation; HARD loops "
+                "(verbatim repeats to length limit) are a STAFF-CONFIRMED defect, worst in 4-bit "
+                "quants (HF NVFP4 discussions/7, /10). Our pinned revision 0761412 IS poolside's "
+                "07-22 looping-fix re-quant (repo HEAD as of 07-25); staff promised a further "
+                "'final checkpoint' -- WATCH the repo, re-audit the .py files, and bump the pin "
+                "when it lands. Mitigation if a task loops to length: repetition_penalty 1.10-1.15 "
+                "per-request (4/8 rescue in discussions/10; penalizes code tokens -- not a default). "
+                "thinking_token_budget does NOT work for this model (discussions/9). NOTE: the "
+                "07-21 DFlash draft predates the 07-22 re-quant target -- community reports "
+                "collapsed draft acceptance (speed-only; we still measured 53 tok/s on code). "
+                "Check for an updated DFlash checkpoint when bumping the target revision.",
             ],
             "volumes": ["~/.cache/flashinfer:/root/.cache/flashinfer"],
             "env": {
