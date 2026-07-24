@@ -2367,6 +2367,42 @@ def cmd_config(args):
     print(json.dumps(cfg, indent=2))
 
 
+def cmd_sync(args):
+    """Reset model_manager.json from the committed DEFAULT_CONFIG -- the `git pull`
+    companion (named to match `omw sync`). Backs up a differing existing file first so
+    local tweaks are never silently lost."""
+    p = _cli_name()
+    fresh = json.loads(json.dumps(DEFAULT_CONFIG))   # deep copy
+    old = None
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH) as f:
+                old = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            old = None                               # unreadable -> treat as absent, still back up
+    if old == fresh:
+        print(f"Already in sync: {CONFIG_PATH} matches DEFAULT_CONFIG "
+              f"({len(fresh.get('models', {}))} profiles).")
+        return
+    if os.path.exists(CONFIG_PATH):
+        bak = CONFIG_PATH + ".bak"
+        shutil.copyfile(CONFIG_PATH, bak)
+        print(f"Backed up your old config to {bak}")
+    save_config(fresh)
+    oldm = set((old or {}).get("models", {}))
+    newm = set(fresh.get("models", {}))
+    added, removed = sorted(newm - oldm), sorted(oldm - newm)
+    print(f"Synced {CONFIG_PATH} from DEFAULT_CONFIG ({len(newm)} profiles).")
+    if added:
+        print(f"  new profiles: {', '.join(added)}")
+    if removed:
+        print(f"  removed (were local-only or renamed): {', '.join(removed)}")
+    _suggest([
+        ("See the refreshed roster", f"{p} list"),
+        ("Run a model", f"{p} launch <profile>{_rsuf()}"),
+    ])
+
+
 def cmd_shell_init(args):
     """Append an `omm` alias for this script to the user's shell rc (idempotent)."""
     script = os.path.abspath(__file__)
@@ -2493,6 +2529,10 @@ def main():
     p.add_argument("--purge", action="store_true",
                    help="also stop its otools containers and drop the remote docker-group membership")
     p.set_defaults(func=cmd_uninstall)
+
+    p = sub.add_parser("sync", help="reset model_manager.json from the committed DEFAULT_CONFIG "
+                                    "(run after `git pull`; backs up a differing old file)")
+    p.set_defaults(func=cmd_sync)
 
     p = sub.add_parser("config", help="show/init/edit the config file")
     p.add_argument("--path", action="store_true", help="print the config path")

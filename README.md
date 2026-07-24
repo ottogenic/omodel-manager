@@ -9,7 +9,8 @@ Built for a DGX Spark setup but works against any host with Docker + NVIDIA GPUs
 - **Stdlib only.** No `pip install`, no dependencies — just Python 3.
 - **Config-driven.** Curated launch profiles are the committed source of truth in the
   script's `DEFAULT_CONFIG`; `config --init` writes them to a **local, git-ignored**
-  `model_manager.json` you freely tune (reset anytime with `config --init --force`).
+  `model_manager.json` you freely tune (after a `git pull`, `omm sync` refreshes it from
+  the committed defaults — with a `.bak` of your old file).
 - **Local or remote.** Run Docker here, or on a GPU box over SSH (`--host`); one
   `install` bootstraps the box and gives it a short alias (`dgx1`).
 
@@ -57,6 +58,7 @@ Optional: `python omodel-manager shell-init` adds an `omm` shell alias.
 | `fetch <profile>` | Pre-download a profile's declared assets |
 | `install <user@ip> [alias] [--fix]` (alias `setup`) | Bootstrap a remote (SSH, docker, group, HF token, drop-caches sudo rule) + register it under an alias |
 | `uninstall <alias\|host> [--purge]` | Unregister a host + revoke the otools key (`--purge` also drops docker-group/containers + drop-caches rule) |
+| `sync` | Reset `model_manager.json` from the committed `DEFAULT_CONFIG` — run after `git pull` to pick up newly merged profiles (backs up a differing old file to `.bak`; pairs with `omw sync`) |
 | `config [--path/--init/--edit]` | Show/init/edit the config file |
 | `shell-init` (alias `install-aliases`) | Add the `omm` shell alias |
 
@@ -85,9 +87,11 @@ than ever prompting. See [SPARK_NOTES.md](SPARK_NOTES.md) for the hardware backg
 The committed **source of truth** is `DEFAULT_CONFIG` inside the `omodel-manager` script.
 `config --init` writes it to a **local, git-ignored `model_manager.json`** next to the
 script (override with `--config PATH` or `$OMODEL_MANAGER_CONFIG`) — that file is your
-editable sandbox and is what the tool reads. Tune it freely; `config --init --force`
-resets it from the hardcoded defaults. **Promote** a vetted change by editing
-`DEFAULT_CONFIG` and committing — never commit `model_manager.json`. Structure:
+editable sandbox and is what the tool reads. Tune it freely; **after every `git pull`, run
+`omm sync`** to refresh it from the committed defaults (it backs up a differing old file
+to `.bak` first; `config --init --force` is the older spelling of the same reset).
+**Promote** a vetted change by editing `DEFAULT_CONFIG` and committing — never commit
+`model_manager.json`. Structure:
 
 ```jsonc
 {
