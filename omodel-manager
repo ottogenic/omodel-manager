@@ -577,18 +577,25 @@ DEFAULT_CONFIG = {
             },
         },
         "gemma4-26b-fp8": {
-            "tok_s": 37,
+            "tok_s": 36,
             "notes": [
-                "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic -- FP8 quantized MoE variant. "
-                "26B total / ~3.8B active per token. Multimodal (text+image), reasoning + tools.",
-                "Better than NVFP4 on GB10: native FP8 hardware support vs Marlin fallback. "
-                "Measured ~37 tok/s decode on GB10 at N=1, ~1.7-22 tok/s at N=4 (parallel slowdown).",
-                "Uses compressed-tensors FP8-Dynamic format. Needs the compressed-tensors MoE "
-                "loading fixes: PR #40708 (merged 2026-05-09 -> a POST-0.19.1 release, NOT 0.19.1 "
-                "as earlier noted) and PR #41683 (still open as of 2026-07 -- not yet released).",
-                "sm_121 (GB10) requires --attention-backend TRITON_ATTN (FlashInfer has "
-                "accuracy bugs on Blackwell FP8) and --moe-backend marlin (FP4 MoE unavailable).",
-                "kv-cache fp8 recommended to save ~50% KV memory for longer contexts.",
+                "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic -- FP8 (compressed-tensors, per-channel "
+                "weight / per-token dynamic activation) MoE. 26B total / ~3.8B active. Multimodal "
+                "(text+image), reasoning + tools. Native in mainline vLLM (nightly).",
+                "VALIDATED on-box dgx-3 2026-07-26 (GB10/sm_121): 36 tok/s decode @ ~53k ctx N=1 "
+                "(TTFT ~29s / prefill ~1,880 tok/s); clean code gen + gemma4 tool-calls.",
+                "MoE backend = TRITON (native FP8 on GB10 via the mma.sync path). NOT marlin: GB10 "
+                "HAS native FP8 (unlike FP4), so marlin's weight-only dequant is the wrong path -- "
+                "it logs a 'no native FP8' warning and skips the FP8 tensor cores. At ~50k ctx "
+                "marlin and triton measure IDENTICAL (36) because decode is KV-bandwidth-bound, not "
+                "MoE-compute-bound; triton only pulls ahead in compute-bound regimes (short ctx / "
+                "high concurrency).",
+                "attention-backend TRITON_ATTN (FlashInfer has FP8 accuracy bugs on Blackwell). "
+                "kv-cache fp8 (~50% KV saving). DeepGEMM does NOT engage for this per-channel FP8 "
+                "(verified in-log) -- no VLLM_USE_DEEP_GEMM=0 needed (that's for block-quantized "
+                "FP8 like Qwen).",
+                "For CODING throughput, see gemma4-26b-fp8-mtp (MTP speculative decode: ~1.5x at "
+                "40k code, ~2.2x short).",
             ],
             "image": "vllm/vllm-openai:nightly",
             "model": "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic",
@@ -602,7 +609,7 @@ DEFAULT_CONFIG = {
                 "tensor-parallel-size": 1,
                 "dtype": "auto",
                 "attention-backend": "triton_attn",
-                "moe-backend": "marlin",
+                "moe-backend": "triton",
                 "kv-cache-dtype": "fp8",
                 "gpu-memory-utilization": 0.85,
                 "max-model-len": 262144,
@@ -615,6 +622,36 @@ DEFAULT_CONFIG = {
                 "tool-call-parser": "gemma4",
                 "enable-auto-tool-choice": True,
                 "enable-log-requests": True,
+            },
+        },
+        # CODING-optimized variant of gemma4-26b-fp8: same triton FP8 base + MTP speculative
+        # decode. Big win on code (89% draft acceptance), a slight loss on prose (46%).
+        "gemma4-26b-fp8-mtp": {
+            "extends": "gemma4-26b-fp8",
+            "tok_s": 54,
+            "port": 8002,
+            "usecase": ["Coding", "Agentic", "Reasoning"],
+            "notes": [
+                "gemma4-26b-fp8 + MTP speculative decode (num_speculative_tokens 8). Drafter = "
+                "google/gemma-4-26B-A4B-it-assistant (~870MB, GATED -- auto-downloads). Native on "
+                "the nightly (Resolved arch Gemma4MTPModel, no patch).",
+                "VALIDATED on-box dgx-3 2026-07-26: 89% draft acceptance on CODE -> ~54 tok/s @ "
+                "~41k code (1.5x the non-MTP 36) and ~79 tok/s at short ctx (2.2x). gamma 8 beats 4 "
+                "at long ctx (better KV amortization); 4 edges it short. Prefix caching drops "
+                "repeat-context TTFT ~21s -> ~0.3s (agent-loop win).",
+                "tok_s 54 is CODE @ ~40k. MTP is content-dependent: prose draft acceptance is only "
+                "~46%, so PROSE @ ~50k is a slight LOSS (~27) vs the base -- use this variant for "
+                "coding, the base gemma4-26b-fp8 for prose/vision/general.",
+                "Trade-offs: spec decode disables min_p / logit_bias; the drafter is a gated "
+                "dependency; ~higher memory (crashed once at 0.85 util on a rapid restart -- ensure "
+                "clean teardown before relaunch, or trim gpu-memory-utilization if tight).",
+                "NOTE: the house benchmark measures PROSE (summarize) and under-represents MTP -- "
+                "measure code decode directly for a representative number.",
+            ],
+            "vllm_args": {
+                "served-model-name": "gemma4-26b-fp8-mtp",
+                "speculative-config": ('{"method":"mtp","model":"google/gemma-4-26B-A4B-it-assistant",'
+                                       '"num_speculative_tokens":8}'),
             },
         },
         "qwen3-coder-next-nvfp4": {

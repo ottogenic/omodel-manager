@@ -133,11 +133,15 @@ def run_one(base_url, model, story, max_tokens, timeout):
         return {"ok": False, "err": "no output tokens"}
     ttft = first - start
     gen = (last - first) if (last and n > 1) else 0.0
+    # Count TOKENS, not SSE chunks. With speculative decoding vLLM emits several accepted
+    # tokens per chunk, so chunk-counting (n) under-reports decode speed by up to ~Nx.
+    # usage.completion_tokens is the true count; fall back to n only if usage is absent.
+    out_toks = usage.get("completion_tokens", n)
     return {"ok": True, "ttft": ttft,
             "in_toks": usage.get("prompt_tokens", 0),
-            "out_toks": usage.get("completion_tokens", n),
+            "out_toks": out_toks,
             "prefill_tps": (usage.get("prompt_tokens", 0) / ttft) if ttft else 0.0,
-            "decode_tps": ((n - 1) / gen) if gen > 0 else 0.0}
+            "decode_tps": ((out_toks - 1) / gen) if gen > 0 else 0.0}
 
 
 def main():
