@@ -19,9 +19,14 @@ All notable changes to this project are documented here. The format follows
   plugin, not stock vLLM, and omm can't pip-install at launch — so bake it into the image. Also needs
   vLLM >= 0.21 / main for `Cohere2MoeForCausalLM` (the 0.23 nightly has it). GB10 config mirrors
   `gpt-oss-120b`: `--moe-backend marlin` + `VLLM_MARLIN_USE_ATOMIC_ADD=1` (avoid the sm_121
-  CUTLASS-FP4-MoE `!!!!` garbage), bf16 KV, 256K context, `cohere_command4` parsers. **Not yet
-  validated on hardware** — build the image on the Spark, launch, and verify generation (and A/B
-  `--moe-backend` marlin vs triton).
+  CUTLASS-FP4-MoE `!!!!` garbage), bf16 KV, 256K context, `cohere_command4` parsers. **On-box
+  2026-07-26 (dgx-3): config verified correct** (arch resolves natively with TRC off, MARLIN MoE
+  selected, compressed-tensors auto-detected, weights download + melody image builds), **but it
+  cannot load yet** — vLLM's FusedMoE loader throws `AttributeError: 'RoutedExperts' object has no
+  attribute 'w2_bias'` (no Cohere2Moe per-expert-bias support in the `dev748` nightly). This is the
+  upstream gap Cohere flags with "use vLLM main until a new release"; the profile carries a ⚠️ note
+  and should not be launched until the melody image is rebuilt on a vLLM that supports Cohere2Moe
+  expert biases.
 
 ### Changed
 - **Laguna-S-2.1: `trust-remote-code` disabled; revision pin removed — now tracks latest.**

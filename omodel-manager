@@ -913,6 +913,14 @@ DEFAULT_CONFIG = {
             "port": 8000,
             "usecase": ["Coding", "Agentic", "Reasoning"],
             "notes": [
+                "⚠️  ON-BOX 2026-07-26 (dgx-3, vLLM 0.23.1 dev748 nightly): FAILS TO LOAD -- "
+                "AttributeError: 'RoutedExperts' object has no attribute 'w2_bias' (vLLM's FusedMoE "
+                "loader lacks Cohere2Moe per-expert down-proj bias support). The config is CORRECT "
+                "(arch resolved natively with trust-remote-code off, MARLIN MoE selected, "
+                "compressed-tensors auto-detected, weights downloaded) -- this is an UPSTREAM gap: "
+                "Cohere says 'use vLLM main until a new release', and the stock nightly isn't new "
+                "enough. Do NOT launch until the melody image is rebuilt on a vLLM that supports "
+                "Cohere2Moe expert biases.",
                 "Cohere North-Mini-Code 1.0 (Cohere2MoeForCausalLM): 30B total / 3B active MoE "
                 "(128 experts, 8 active), 3:1 sliding-window/global attention, 256K native ctx / "
                 "64K max output. Apache-2.0, ungated. Interleaved thinking + agentic tool-use. "
