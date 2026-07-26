@@ -530,6 +530,7 @@ DEFAULT_CONFIG = {
             },
         },
         "gemma4-26b-a4b-nvfp4": {
+            "tok_s": 28,
             "notes": [
                 "Gemma 4 26B-A4B NVFP4 -- the MoE sibling of the dense 31B: 25.2B total / "
                 "3.8B active per token (8 of 128 experts + 1 shared, 1024-tok sliding window). "
@@ -537,20 +538,25 @@ DEFAULT_CONFIG = {
                 "The Spark's pick over the dense 31B: only 3.8B active params read per decode "
                 "step on the 273 GB/s bus -> ~52 tok/s vs the 31B's ~7 (ai-muninn DGX Spark "
                 "benchmark). ~16.5GB weights leave ~82GB for KV cache.",
-                "Needs the Gemma4-specific image (Gemma4ForConditionalGeneration); rolling "
-                "gemma4-cu130 tag. Do NOT pass --quantization (auto-detected; explicit reportedly "
-                "errors -- the #40291 cite is an unrelated OOM bug, not a quant-flag ValueError).",
+                "IMAGE = standard vllm/vllm-openai:nightly (Gemma4 is now native in mainline vLLM "
+                "-- no gemma4-cu130, no patch shim). The old gemma4-cu130 pin (vLLM 0.19.x) could "
+                "NOT load this NVFP4 quant (per-expert scale KeyError, PR #41683); the mainline "
+                "nightly loads it cleanly. Do NOT pass --quantization (compressed-tensors "
+                "auto-detected; explicit reportedly errors).",
                 "sm_121 has no native FP4 MoE kernels: --moe-backend marlin forces the working "
                 "Marlin FP4 dequant path (the CUTLASS/FlashInfer FP4 MoE path yields '!!!!' garbage "
                 "on GB10). Leave the linear GEMM on auto (FlashInfer CUTLASS). (Was the deprecated "
                 "VLLM_USE_FLASHINFER_MOE_FP4=0 env form of the same pin.) TP=1 only in vLLM here.",
-                "kv-cache fp8 intentionally OMITTED on Spark (predictability + sm121 FP8-kernel "
-                "risk; the light model leaves ample KV room). Card sampling: temp 1.0, top_p 0.95.",
-                "⚠️  LAUNCH ISSUE: Current gemma4-cu130 nightly lacks fix for per-expert NVFP4 scale "
-                "keys (vLLM PR #41683, open as of 2026-07-05). Error: KeyError: 'layers.0.experts.0.down_proj.input_scale'. "
-                "Wait for PR merge + new image release before attempting launch. See also gemma4-26b-fp8 which works.",
+                "KV cache: the nightly auto-selects fp8_e4m3 from the model config (we pass no "
+                "--kv-cache-dtype) -> ~7.5M-token KV pool; output verified coherent with it. Card "
+                "sampling: temp 1.0, top_p 0.95.",
+                "VALIDATED on-box dgx-3 2026-07-26 (vllm/vllm-openai:nightly, GB10/sm_121): loads "
+                "(Resolved arch Gemma4ForConditionalGeneration, MARLIN NvFp4 MoE, TRITON_ATTN), and "
+                "clean code generation + gemma4 tool-calls both PASS (no '!!!!'). Decode 28 tok/s @ "
+                "53k ctx N=1 (TTFT 29s / prefill 1,833 tok/s); ~52 tok/s at short ctx (ai-muninn). "
+                "Weights load ~112s. Fixes the prior gemma4-cu130 launch failure.",
             ],
-            "image": "vllm/vllm-openai:gemma4-cu130",
+            "image": "vllm/vllm-openai:nightly",
             "model": "nvidia/Gemma-4-26B-A4B-NVFP4",
             "port": 8000,
             "usecase": ["Reasoning", "Vision", "Agentic", "Coding", "General"],
