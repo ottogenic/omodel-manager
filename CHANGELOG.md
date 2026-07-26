@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **`utils/quality_eval.py` now accepts `omm install` aliases** (`dgx-3`), matching its own usage
+  text and `benchmark_concurrent.py` — it previously skipped the shared hosts registry and failed
+  with a DNS error on aliases. Also handles `alias:port`; raw `user@ip` / `ip` / `host:port`
+  unchanged.
+
 ### Added
 - **`gemma4-26b-fp8-mtp`: coding-optimized MTP variant of `gemma4-26b-fp8`.** Same triton FP8 base
   + speculative decode (`num_speculative_tokens: 8`, drafter `google/gemma-4-26B-A4B-it-assistant`,
