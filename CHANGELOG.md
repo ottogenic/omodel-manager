@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **`gemma4-26b-fp8-mtp`: coding-optimized MTP variant of `gemma4-26b-fp8`.** Same triton FP8 base
+  + speculative decode (`num_speculative_tokens: 8`, drafter `google/gemma-4-26B-A4B-it-assistant`,
+  native on the nightly — `Gemma4MTPModel`, no patch). **On-box dgx-3 2026-07-26:** 89% draft
+  acceptance on code → **~54 tok/s @ ~41k code (1.5×)** and **~79 tok/s short (2.2×)** vs the
+  non-MTP 36. Content-dependent: prose acceptance is ~46%, so prose@50k is a slight *loss* — hence
+  a separate variant (use the base for prose/vision/general). Records `tok_s: 54` (code @ ~40k).
 - **`north-mini-code-w4a16`: Cohere North-Mini-Code 1.0 (30B / 3B-active agentic-coding MoE) launch
   profile.** Uses the **official** `CohereLabs/North-Mini-Code-1.0-w4a16` (compressed-tensors
   nvfp4-pack W4A16, experts-only via QAD, ~18–20GB, HumanEval ~90.2 class) — chosen over the
@@ -29,6 +35,15 @@ All notable changes to this project are documented here. The format follows
   expert biases.
 
 ### Changed
+- **`gemma4-26b-fp8`: MoE backend `marlin` → `triton` (native FP8); benchmark now counts tokens,
+  not chunks.** GB10 *has* native FP8 (unlike FP4), so forcing `--moe-backend marlin` was the wrong
+  dequant path (it logged "no native FP8 support" and skipped the FP8 tensor cores). On-box dgx-3
+  2026-07-26: triton and marlin measure identical (36 tok/s) @ ~53k — decode is KV-bound there —
+  but triton is the correct native path (vLLM's own auto-pick) and wins under load. Confirmed
+  `VLLM_USE_DEEP_GEMM=0` is a no-op for this per-channel FP8 (DeepGEMM never engages; it's only for
+  block-quantized FP8), and corrected the misleading "native FP8 / FP4-MoE-unavailable" notes.
+  **`benchmark_concurrent.py`**: `decode_tps` now uses `usage.completion_tokens` instead of
+  SSE-chunk count — chunk-counting under-reported speculative-decode throughput by up to ~N×.
 - **`gemma4-26b-a4b-nvfp4`: switched to the mainline `vllm/vllm-openai:nightly` image — now loads
   and works on GB10.** The pinned `gemma4-cu130` (vLLM 0.19.x) couldn't load the NVFP4 quant
   (per-expert scale `KeyError`, vLLM PR #41683); Gemma-4 is now native in mainline vLLM, and the
