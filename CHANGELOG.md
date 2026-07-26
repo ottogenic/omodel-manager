@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Laguna-S-2.1: `trust-remote-code` disabled; revision pin removed — now tracks latest.**
+  Validated on-box 2026-07-26: vLLM v0.25.1 loads the architecture **natively** (no TRC needed;
+  functional checks pass identically). With the repo's custom Python never executing, future
+  poolside pushes can only alter *data* (weights/configs/template), so the security rationale for
+  pinning evaporates — and poolside's promised "final checkpoint" looping fix will now be picked up
+  automatically on the next container restart instead of requiring a manual re-audit-and-bump.
+- **Laguna-S-2.1: sourced re-thinking-loop guidance + `preserve_thinking` for agent loops.**
+  Research pass (official card/blog/generation_config + HF discussions, all linked in the TOML/notes)
+  confirms: the identical sampling across presets **is** poolside's best practice (exactly one
+  official rec — temp 0.7 / top_p 0.95 / top_k 20 — no coding-vs-reasoning split, no effort levels
+  this release); mild "But wait…" re-verification is the model's intended style, while **hard loops
+  are a staff-confirmed defect worst in 4-bit quants** — our pinned revision already is the 07-22
+  fix re-quant (watch for the promised "final checkpoint"; re-audit + bump then). Config changes:
+  the `agent` preset now sets `preserve_thinking = true` (official agentic rec: the model "may stop
+  reasoning in follow-up steps if prior thinking blocks are dropped"); documented per-request
+  `repetition_penalty 1.10–1.15` as the evidenced partial mitigation (deliberately not a default —
+  it penalizes code tokens) and `thinking_token_budget` as a documented non-fix; noted the 07-21
+  DFlash draft predates the re-quant target (collapsed acceptance = speed-only).
+
 ### Added
 - **`omm sync`** — one command to refresh `model_manager.json` from the committed
   `DEFAULT_CONFIG` after a `git pull` (named to pair with `omw sync`). Newly merged profiles
