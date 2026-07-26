@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **`north-mini-code-nvfp4`: Cohere North-Mini-Code 1.0 (30B / 3B-active agentic-coding MoE) launch
+  profile.** NVFP4 build (`XanuNetworks/North-Mini-Code-1.0-NVFP4`, ~17GB, HumanEval 90.2 = FP8,
+  ~58 tok/s single on GB10 per the Spark Arena forum). Requires a **custom local image**
+  (`otools/vllm-cohere-melody:nightly` = `vllm/vllm-openai:nightly` + `pip install
+  "cohere_melody>=0.9.0"`): the `cohere_command4` tool/reasoning parsers ship in the `cohere_melody`
+  plugin, not stock vLLM, and omm can't pip-install at launch — so bake it into the image. Also needs
+  vLLM >= 0.21 / main for `Cohere2MoeForCausalLM` (the 0.23 nightly has it). GB10 config mirrors
+  `gpt-oss-120b`: `--moe-backend marlin` + `VLLM_MARLIN_USE_ATOMIC_ADD=1` (avoid the sm_121
+  CUTLASS-FP4-MoE `!!!!` garbage), bf16 KV, 256K context, `cohere_command4` parsers. **Not yet
+  validated on hardware** — build the image on the Spark, launch, and verify generation (and A/B
+  `--moe-backend` marlin vs triton).
+
 ### Changed
 - **Laguna-S-2.1: `trust-remote-code` disabled; revision pin removed — now tracks latest.**
   Validated on-box 2026-07-26: vLLM v0.25.1 loads the architecture **natively** (no TRC needed;

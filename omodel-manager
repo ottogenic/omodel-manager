@@ -904,6 +904,62 @@ DEFAULT_CONFIG = {
                 "enable-log-requests": True,
             },
         },
+        "north-mini-code-nvfp4": {
+            # LOCAL image, built on the Spark: `FROM vllm/vllm-openai:nightly` +
+            # `RUN pip install "cohere_melody>=0.9.0"`. Build it before first launch (omm
+            # won't be able to pull this tag). Rebuild when bumping the vLLM nightly.
+            "image": "otools/vllm-cohere-melody:nightly",
+            "model": "XanuNetworks/North-Mini-Code-1.0-NVFP4",
+            "port": 8000,
+            "usecase": ["Coding", "Agentic", "Reasoning"],
+            "notes": [
+                "Cohere North-Mini-Code 1.0 (Cohere2MoeForCausalLM): 30B total / 3B active MoE "
+                "(128 experts, 8 active), 3:1 sliding-window/global attention, 256K native ctx / "
+                "64K max output. Apache-2.0, ungated. Interleaved thinking + agentic tool-use. "
+                "Card sampling: temperature 1.0, top_p 0.95.",
+                "NVFP4 quant = XanuNetworks/North-Mini-Code-1.0-NVFP4 (llm-compressor "
+                "nvfp4-pack-quantized): ~17GB, HumanEval pass@1 90.2 (= the FP8 build; bf16 is "
+                "90.9) and ~58 tok/s single / ~1.67x the FP8 build on GB10 (Spark Arena forum, "
+                "reasoning-off). Experts are NVFP4 except layers 1-19 (kept BF16); router / gate / "
+                "lm_head stay high-precision.",
+                "CUSTOM IMAGE REQUIRED. The cohere_command4 tool + reasoning parsers are NOT "
+                "built into vLLM -- they come from the cohere_melody plugin (vLLM tool-calling "
+                "docs: 'requires the cohere_melody package, not installed by default'), and stock "
+                "vllm/vllm-openai images don't ship it. omm appends args to the image's `vllm "
+                "serve` entrypoint (no pip step), so bake it in: build otools/vllm-cohere-melody:"
+                "nightly on the Spark = `FROM vllm/vllm-openai:nightly` + `pip install "
+                "\"cohere_melody>=0.9.0\"`. Also needs vLLM >= 0.21 / main for Cohere2Moe (the "
+                "0.23.x nightly has the arch).",
+                "GB10/sm_121 NVFP4 MoE: --moe-backend marlin FLAG (the CUTLASS/FlashInfer FP4 MoE "
+                "path emits '!!!!' garbage on sm_121) + VLLM_MARLIN_USE_ATOMIC_ADD=1 (defuses the "
+                "Marlin-MoE TP=1 race that also prints '!!!!', per the gpt-oss-120b / coder-next "
+                "profiles). Cohere's own FP8 recipe uses --moe-backend triton -- A/B triton vs "
+                "marlin on-box for the NVFP4 build. NOT YET VALIDATED ON HARDWARE.",
+                "Do NOT pass --quantization (compressed-tensors auto-detects nvfp4-pack-quantized). "
+                "bf16 KV cache (no --kv-cache-dtype): the forum validated fp8 KV as zero-loss, but "
+                "~17GB weights leave ~100GB so bf16 KV is the quality-first default -- add "
+                "kv-cache-dtype fp8 to reclaim memory/speed if a longer context needs it.",
+                "First launch with --keep so a startup crash's logs survive. Re-validate "
+                "GENERATION (not just startup) after any image rebuild.",
+            ],
+            "env": {
+                "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
+            },
+            "vllm_args": {
+                "served-model-name": "cohere/north-mini-code",
+                "tensor-parallel-size": 1,
+                "moe-backend": "marlin",
+                "gpu-memory-utilization": 0.85,
+                "max-model-len": 262144,
+                "max-num-seqs": 4,
+                "enable-chunked-prefill": True,
+                "enable-prefix-caching": True,   # normal attention (sliding+global, no Mamba state) -> safe; agent-loop TTFT win
+                "enable-auto-tool-choice": True,
+                "tool-call-parser": "cohere_command4",
+                "reasoning-parser": "cohere_command4",
+                "enable-log-requests": True,
+            },
+        },
     },
 }
 
