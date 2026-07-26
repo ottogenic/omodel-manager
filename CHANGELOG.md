@@ -29,6 +29,13 @@ All notable changes to this project are documented here. The format follows
   expert biases.
 
 ### Changed
+- **`gemma4-26b-a4b-nvfp4`: switched to the mainline `vllm/vllm-openai:nightly` image — now loads
+  and works on GB10.** The pinned `gemma4-cu130` (vLLM 0.19.x) couldn't load the NVFP4 quant
+  (per-expert scale `KeyError`, vLLM PR #41683); Gemma-4 is now native in mainline vLLM, and the
+  nightly loads it cleanly. **Validated on-box (dgx-3, 2026-07-26):** `Gemma4ForConditionalGeneration`
+  + MARLIN NvFp4 MoE, clean code generation + `gemma4` tool-calls (no `!!!!`), decode **28 tok/s @
+  53k ctx** N=1 (TTFT 29 s / prefill 1,833 tok/s; ~52 tok/s at short ctx). Recorded `tok_s: 28`;
+  dropped the stale ⚠️ launch-blocker note.
 - **Laguna-S-2.1: `trust-remote-code` disabled; revision pin removed — now tracks latest.**
   Validated on-box 2026-07-26: vLLM v0.25.1 loads the architecture **natively** (no TRC needed;
   functional checks pass identically). With the repo's custom Python never executing, future
