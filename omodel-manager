@@ -843,14 +843,14 @@ DEFAULT_CONFIG = {
                 "IMAGE PINNED v0.25.1: laguna arch + per-head gating + poolside_v1 parsers need "
                 "vLLM >= 0.25.0; v0.25.1 is the community-validated Spark tag. Do NOT pass "
                 "--linear-backend flashinfer_b12x (broken on 0.25.1).",
-                "SECURITY (audited 2026-07-23): all-safetensors across base/NVFP4/DFlash repos; the "
-                "custom code that runs under trust-remote-code (configuration_laguna.py / "
-                "modeling_laguna.py) read in full -- transformers-only imports, no I/O/network/exec; "
-                "NVFP4 modeling file byte-identical to audited base; DFlash config.py is a clean "
-                "pydantic schema. Verified poolside org (release linked from poolside.ai blog). "
-                "--revision PINS the audited commit so future repo pushes can't inject new code -- "
-                "RE-AUDIT the .py files before bumping the revision. (Drafter repo can't be "
-                "revision-pinned via speculative-config; audited at 7237947.)",
+                "SECURITY: trust-remote-code is DISABLED for this profile (validated on-box "
+                "2026-07-26: vLLM v0.25.1 loads the arch NATIVELY -- 'Resolved architecture: "
+                "LagunaForCausalLM' with no TRC; functional PASS). The repo's custom .py files "
+                "therefore NEVER execute, so tracking latest (no --revision pin) is safe by "
+                "construction: future pushes can only alter data (safetensors weights, configs, "
+                "jinja template). Original audit 2026-07-23 (all-safetensors, clean .py, verified "
+                "poolside org) stands for the record. If TRC is ever re-enabled, re-audit the .py "
+                "files and re-pin first.",
                 "DFlash speculative decode (poolside/Laguna-S-2.1-DFlash-NVFP4, ~7GB): "
                 "output-identical spec decode, num_speculative_tokens 7 NOT 15 (community: 15 tanks "
                 "acceptance to 2-15%; 7 gives ~40-50 vs ~13-14 tok/s bare). REQUIRES low "
@@ -868,10 +868,10 @@ DEFAULT_CONFIG = {
                 "RE-THINKING LOOPS (researched 2026-07-25): 'But wait...' re-verification is the "
                 "model's intended style + a vendor-acknowledged overthinking limitation; HARD loops "
                 "(verbatim repeats to length limit) are a STAFF-CONFIRMED defect, worst in 4-bit "
-                "quants (HF NVFP4 discussions/7, /10). Our pinned revision 0761412 IS poolside's "
-                "07-22 looping-fix re-quant (repo HEAD as of 07-25); staff promised a further "
-                "'final checkpoint' -- WATCH the repo, re-audit the .py files, and bump the pin "
-                "when it lands. Mitigation if a task loops to length: repetition_penalty 1.10-1.15 "
+                "quants (HF NVFP4 discussions/7, /10). The 07-22 re-quant (current HEAD) is "
+                "poolside's looping fix; staff promised a further 'final checkpoint' -- UNPINNED, "
+                "so a container restart picks it up automatically when it lands. "
+                "Mitigation if a task loops to length: repetition_penalty 1.10-1.15 "
                 "per-request (4/8 rescue in discussions/10; penalizes code tokens -- not a default). "
                 "thinking_token_budget does NOT work for this model (discussions/9). NOTE: the "
                 "07-21 DFlash draft predates the 07-22 re-quant target -- community reports "
@@ -887,7 +887,7 @@ DEFAULT_CONFIG = {
             },
             "vllm_args": {
                 "served-model-name": "laguna-s-2.1-nvfp4",
-                "revision": "07614121b31898586430f189d27a25a0be310843",
+                "trust-remote-code": False,   # native vLLM arch; repo .py never executes (see SECURITY note)
                 "tensor-parallel-size": 1,
                 "attention-backend": "FLASHINFER",
                 "gpu-memory-utilization": 0.85,

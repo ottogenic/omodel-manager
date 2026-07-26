@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- **Laguna-S-2.1: `trust-remote-code` disabled; revision pin removed — now tracks latest.**
+  Validated on-box 2026-07-26: vLLM v0.25.1 loads the architecture **natively** (no TRC needed;
+  functional checks pass identically). With the repo's custom Python never executing, future
+  poolside pushes can only alter *data* (weights/configs/template), so the security rationale for
+  pinning evaporates — and poolside's promised "final checkpoint" looping fix will now be picked up
+  automatically on the next container restart instead of requiring a manual re-audit-and-bump.
 - **Laguna-S-2.1: sourced re-thinking-loop guidance + `preserve_thinking` for agent loops.**
   Research pass (official card/blog/generation_config + HF discussions, all linked in the TOML/notes)
   confirms: the identical sampling across presets **is** poolside's best practice (exactly one
