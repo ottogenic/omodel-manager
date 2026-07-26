@@ -6,6 +6,28 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **`north-mini-code-w4a16`: Cohere North-Mini-Code 1.0 (30B / 3B-active agentic-coding MoE) launch
+  profile.** Uses the **official** `CohereLabs/North-Mini-Code-1.0-w4a16` (compressed-tensors
+  nvfp4-pack W4A16, experts-only via QAD, ~18–20GB, HumanEval ~90.2 class) — chosen over the
+  third-party `XanuNetworks/…-NVFP4` the Spark-Arena forum benchmarked, since W4A16 is the
+  `--moe-backend marlin` dequant path we force on sm_121 anyway (so ~no speed lost) and the
+  publisher is trusted. `trust-remote-code: False` — `config.json` has no `auto_map`, so vLLM loads
+  the arch **natively** and no repo Python ever executes. Requires a **custom local image**
+  (`otools/vllm-cohere-melody:nightly` = `vllm/vllm-openai:nightly` + `pip install
+  "cohere_melody>=0.9.0"`): the `cohere_command4` tool/reasoning parsers ship in the `cohere_melody`
+  plugin, not stock vLLM, and omm can't pip-install at launch — so bake it into the image. Also needs
+  vLLM >= 0.21 / main for `Cohere2MoeForCausalLM` (the 0.23 nightly has it). GB10 config mirrors
+  `gpt-oss-120b`: `--moe-backend marlin` + `VLLM_MARLIN_USE_ATOMIC_ADD=1` (avoid the sm_121
+  CUTLASS-FP4-MoE `!!!!` garbage), bf16 KV, 256K context, `cohere_command4` parsers. **On-box
+  2026-07-26 (dgx-3): config verified correct** (arch resolves natively with TRC off, MARLIN MoE
+  selected, compressed-tensors auto-detected, weights download + melody image builds), **but it
+  cannot load yet** — vLLM's FusedMoE loader throws `AttributeError: 'RoutedExperts' object has no
+  attribute 'w2_bias'` (no Cohere2Moe per-expert-bias support in the `dev748` nightly). This is the
+  upstream gap Cohere flags with "use vLLM main until a new release"; the profile carries a ⚠️ note
+  and should not be launched until the melody image is rebuilt on a vLLM that supports Cohere2Moe
+  expert biases.
+
 ### Changed
 - **Laguna-S-2.1: `trust-remote-code` disabled; revision pin removed — now tracks latest.**
   Validated on-box 2026-07-26: vLLM v0.25.1 loads the architecture **natively** (no TRC needed;

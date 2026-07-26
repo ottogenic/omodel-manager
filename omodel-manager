@@ -904,6 +904,79 @@ DEFAULT_CONFIG = {
                 "enable-log-requests": True,
             },
         },
+        "north-mini-code-w4a16": {
+            # LOCAL image, built on the Spark: `FROM vllm/vllm-openai:nightly` +
+            # `RUN pip install "cohere_melody>=0.9.0"`. Build it before first launch (omm
+            # won't be able to pull this tag). Rebuild when bumping the vLLM nightly.
+            "image": "otools/vllm-cohere-melody:nightly",
+            "model": "CohereLabs/North-Mini-Code-1.0-w4a16",
+            "port": 8000,
+            "usecase": ["Coding", "Agentic", "Reasoning"],
+            "notes": [
+                "⚠️  ON-BOX 2026-07-26 (dgx-3, vLLM 0.23.1 dev748 nightly): FAILS TO LOAD -- "
+                "AttributeError: 'RoutedExperts' object has no attribute 'w2_bias' (vLLM's FusedMoE "
+                "loader lacks Cohere2Moe per-expert down-proj bias support). The config is CORRECT "
+                "(arch resolved natively with trust-remote-code off, MARLIN MoE selected, "
+                "compressed-tensors auto-detected, weights downloaded) -- this is an UPSTREAM gap: "
+                "Cohere says 'use vLLM main until a new release', and the stock nightly isn't new "
+                "enough. Do NOT launch until the melody image is rebuilt on a vLLM that supports "
+                "Cohere2Moe expert biases.",
+                "Cohere North-Mini-Code 1.0 (Cohere2MoeForCausalLM): 30B total / 3B active MoE "
+                "(128 experts, 8 active), 3:1 sliding-window/global attention, 256K native ctx / "
+                "64K max output. Apache-2.0, ungated. Interleaved thinking + agentic tool-use. "
+                "Card sampling: temperature 1.0, top_p 0.95.",
+                "Quant = CohereLabs/North-Mini-Code-1.0-w4a16 -- the OFFICIAL Cohere quant "
+                "(compressed-tensors nvfp4-pack, W4A16 = 4-bit weights / 16-bit activations, MoE "
+                "experts only, via Quantization-Aware Distillation; ~18-20GB). W4A16 IS the "
+                "--moe-backend marlin dequant path we force on sm_121 anyway, so ~no speed lost vs "
+                "a native-FP4 (W4A4) quant -- whose FP4 MoE path is the '!!!!' garbage one on GB10 "
+                "-- and it's a trusted publisher + a better quant method (QAD) than a third-party "
+                "PTQ. HumanEval ~90.2 class (bf16 90.9).",
+                "TRUST / SECURITY: official CohereLabs repo, and config.json has NO auto_map -> "
+                "ZERO remote code. So trust-remote-code=False (set below) costs nothing: vLLM uses "
+                "its native Cohere2MoeForCausalLM impl + tokenizer.json + the tokenizer_config chat "
+                "template (all data, not code). Defense-in-depth even for a first-party quant. "
+                "(Chosen over the third-party XanuNetworks/...-NVFP4 the Spark-Arena forum "
+                "benchmarked -- unvetted publisher.)",
+                "CUSTOM IMAGE REQUIRED. The cohere_command4 tool + reasoning parsers are NOT built "
+                "into vLLM -- they come from the cohere_melody plugin (vLLM tool-calling docs: "
+                "'requires the cohere_melody package, not installed by default'), and stock "
+                "vllm/vllm-openai images don't ship it. omm appends args to the image's `vllm "
+                "serve` entrypoint (no pip step), so bake it in: build otools/vllm-cohere-melody:"
+                "nightly on the Spark = `FROM vllm/vllm-openai:nightly` + `pip install "
+                "\"cohere_melody>=0.9.0\"`. Also needs vLLM >= 0.21 / main for Cohere2Moe (the "
+                "0.23.x nightly has the arch).",
+                "GB10/sm_121 MoE: --moe-backend marlin FLAG (the CUTLASS/FlashInfer FP4 MoE path "
+                "emits '!!!!' garbage on sm_121) + VLLM_MARLIN_USE_ATOMIC_ADD=1 (defuses the "
+                "Marlin-MoE TP=1 race that also prints '!!!!', per the gpt-oss-120b / coder-next "
+                "profiles). Cohere's own FP8 recipe uses --moe-backend triton -- A/B triton vs "
+                "marlin on-box. NOT YET VALIDATED ON HARDWARE.",
+                "Do NOT pass --quantization (compressed-tensors auto-detects nvfp4-pack-quantized). "
+                "bf16 KV cache (no --kv-cache-dtype): ~18-20GB weights leave ~100GB, so bf16 KV is "
+                "the quality-first default -- add kv-cache-dtype fp8 to reclaim memory if a longer "
+                "context needs it.",
+                "First launch with --keep so a startup crash's logs survive. Re-validate "
+                "GENERATION (not just startup) after any image rebuild.",
+            ],
+            "env": {
+                "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
+            },
+            "vllm_args": {
+                "served-model-name": "cohere/north-mini-code",
+                "trust-remote-code": False,   # native vLLM arch (no auto_map) -> repo .py never executes
+                "tensor-parallel-size": 1,
+                "moe-backend": "marlin",
+                "gpu-memory-utilization": 0.85,
+                "max-model-len": 262144,
+                "max-num-seqs": 4,
+                "enable-chunked-prefill": True,
+                "enable-prefix-caching": True,   # normal attention (sliding+global, no Mamba state) -> safe; agent-loop TTFT win
+                "enable-auto-tool-choice": True,
+                "tool-call-parser": "cohere_command4",
+                "reasoning-parser": "cohere_command4",
+                "enable-log-requests": True,
+            },
+        },
     },
 }
 
