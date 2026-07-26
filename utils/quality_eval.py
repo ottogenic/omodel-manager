@@ -25,14 +25,36 @@ No third-party deps; talks HTTP via urllib.
 import argparse, json, re, sys, time, urllib.request, urllib.error, subprocess, tempfile, os, statistics
 
 # ---------------------------------------------------------------- endpoint utils
+HOSTS_FILE = os.path.expanduser("~/.config/otools/hosts")  # shared with omm (`install` writes it)
+
+
+def resolve_host(name):
+    """An `omm install` alias / user@ip / ip / host -> the registered target (or itself).
+    Mirrors utils/benchmark_concurrent.py so both tools accept the same endpoint forms."""
+    target = name
+    try:
+        with open(HOSTS_FILE) as f:
+            for ln in f:
+                ln = ln.strip()
+                if not ln or ln.startswith("#"):
+                    continue
+                parts = ln.split(None, 1)
+                if parts[0] == name:
+                    target = parts[1].strip() if len(parts) == 2 else parts[0]
+                    break
+    except OSError:
+        pass
+    return target
+
+
 def resolve_base(host):
     if "://" in host:
         host = host.split("://", 1)[1]
-    if "@" in host:
-        host = host.split("@", 1)[1]
-    if ":" not in host:
-        host = host + ":8000"
-    return f"http://{host}/v1"
+    name, _, port = host.partition(":")
+    name = resolve_host(name)              # alias -> user@ip; raw hosts pass through
+    if "@" in name:
+        name = name.split("@", 1)[1]
+    return f"http://{name}:{port or 8000}/v1"
 
 def http_json(url, payload=None, timeout=600):
     data = json.dumps(payload).encode() if payload is not None else None
