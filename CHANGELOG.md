@@ -7,9 +7,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
-- **`north-mini-code-nvfp4`: Cohere North-Mini-Code 1.0 (30B / 3B-active agentic-coding MoE) launch
-  profile.** NVFP4 build (`XanuNetworks/North-Mini-Code-1.0-NVFP4`, ~17GB, HumanEval 90.2 = FP8,
-  ~58 tok/s single on GB10 per the Spark Arena forum). Requires a **custom local image**
+- **`north-mini-code-w4a16`: Cohere North-Mini-Code 1.0 (30B / 3B-active agentic-coding MoE) launch
+  profile.** Uses the **official** `CohereLabs/North-Mini-Code-1.0-w4a16` (compressed-tensors
+  nvfp4-pack W4A16, experts-only via QAD, ~18–20GB, HumanEval ~90.2 class) — chosen over the
+  third-party `XanuNetworks/…-NVFP4` the Spark-Arena forum benchmarked, since W4A16 is the
+  `--moe-backend marlin` dequant path we force on sm_121 anyway (so ~no speed lost) and the
+  publisher is trusted. `trust-remote-code: False` — `config.json` has no `auto_map`, so vLLM loads
+  the arch **natively** and no repo Python ever executes. Requires a **custom local image**
   (`otools/vllm-cohere-melody:nightly` = `vllm/vllm-openai:nightly` + `pip install
   "cohere_melody>=0.9.0"`): the `cohere_command4` tool/reasoning parsers ship in the `cohere_melody`
   plugin, not stock vLLM, and omm can't pip-install at launch — so bake it into the image. Also needs
