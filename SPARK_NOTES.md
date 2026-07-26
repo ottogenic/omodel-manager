@@ -97,8 +97,8 @@ coder-oneshot case); crashes/defects were model-level, not engine-level.
   documents the required hacks: llama-server takes no positional model arg
   (so "model" carries `--jinja`), `trust-remote-code` must be overridden False,
   `--entrypoint llama-server`, ctx 131072, parallel 1, n-gpu-layers 999.
-- NOTE: custom profiles in model_manager.json do NOT survive `omm sync` /
-  config regeneration (observed: profile was wiped between 07-25 and 07-26).
-  Re-run the add script after any sync.
+- The profile lives in model_manager.json and shows in `omm list`. The add
+  script exists as a recreate-from-scratch path (e.g. fresh config install);
+  in normal operation the profile persists.
 - Verified working: /v1/models on :8000, native tool-calls via --jinja
   (tool_calls array smoke test PASS), full loom pipeline run (job 95).
