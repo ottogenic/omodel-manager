@@ -82,3 +82,23 @@ when the referenced fix lands or when you next have the box.
 
 _When you close one of these, delete it here and fold the result into the trap table
 (or the model's `notes`)._
+
+## llama.cpp serving (tested 2026-07-25, kept for later testing)
+
+Alternative engine for Qwen3-Coder-Next when isolating vllm-specific issues.
+Benchmarked: quality parity with vllm FP8 at n=3 (see ottogenic/obench,
+coder-oneshot case); crashes/defects were model-level, not engine-level.
+
+- Weights: unsloth Qwen3-Coder-Next Q8_0 GGUF, 3 shards (~85 GB) under the
+  usual models dir -- the expensive part; keep them.
+- Image: scitrera/dgx-spark-llama-cpp:b10107-cu131 (pinned; daily builds exist).
+- Profile: run `python3 add-llamacpp-profile.py` to (re)add the
+  `qwen3-coder-next-q8-llamacpp` profile to model_manager.json. The script
+  documents the required hacks: llama-server takes no positional model arg
+  (so "model" carries `--jinja`), `trust-remote-code` must be overridden False,
+  `--entrypoint llama-server`, ctx 131072, parallel 1, n-gpu-layers 999.
+- NOTE: custom profiles in model_manager.json do NOT survive `omm sync` /
+  config regeneration (observed: profile was wiped between 07-25 and 07-26).
+  Re-run the add script after any sync.
+- Verified working: /v1/models on :8000, native tool-calls via --jinja
+  (tool_calls array smoke test PASS), full loom pipeline run (job 95).
