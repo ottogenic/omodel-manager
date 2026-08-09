@@ -23,7 +23,8 @@ Design:
     config) every docker call runs on that box over SSH. Bind-mount paths resolve
     against the REMOTE $HOME, declared assets are scp'd over, HF_TOKEN is forwarded
     from your local shell, and `health` targets the remote host. `install` bootstraps
-    the box (keyless SSH, docker install, docker group) -- run it first. It uses a
+    this machine when no target is given, or a remote box when given USER@HOST. Remote
+    setup includes keyless SSH, docker install, and docker group membership. It uses a
     dedicated, clearly-named key (~/.ssh/otools_model_manager_ed25519, comment
     "otools_model_manager@<laptop>") and pins it (-i + IdentitiesOnly) so the tool's
     access is self-contained and easy to revoke later.
@@ -2251,21 +2252,26 @@ def _print_results(results):
         print(f"  {mark} {name:<{width}}  {detail}")
 
 
-def _r_ok(target, cmd):
-    """True if a remote command exits 0; returns (ok, stdout)."""
-    res = run_remote(target, cmd, capture=True, batch=True)
+def _setup_run(target, cmd, capture=False, tty=False, batch=True):
+    """Run an install command locally, or over SSH when target is set."""
+    if target:
+        return run_remote(target, cmd, capture=capture, tty=tty, batch=batch)
+    return subprocess.run(["sh", "-c", cmd], text=True, capture_output=capture)
+
+
+def _setup_ok(target, cmd):
+    """True if a local/remote install check exits 0; returns (ok, stdout)."""
+    res = _setup_run(target, cmd, capture=True, batch=True)
     return res.returncode == 0, (res.stdout or "").strip()
 
 
 def cmd_install(args):
-    """Bootstrap remote prereqs AND register the host (with an optional alias) so
-    `ps` and `--host` can find it. Merges into the registry -- other hosts stay."""
-    raw = args.target or REMOTE
+    """Bootstrap local prereqs when no target is given, or bootstrap and register
+    explicit remote targets so `ps` and `--host` can find them."""
+    raw = args.target
     if not raw:
-        print("ERROR: install needs a target, e.g. `install user@192.0.2.101 dgx1` "
-              "(user@ip and an optional alias; comma-separate several hosts if you skip the alias).",
-              file=sys.stderr)
-        sys.exit(1)
+        ready, _ = _setup_host(None, args.fix)
+        sys.exit(0 if ready else 1)
     if not shutil.which("ssh"):
         print("ERROR: no `ssh` client on PATH.", file=sys.stderr)
         sys.exit(1)
@@ -2338,8 +2344,9 @@ def cmd_uninstall(args):
 
 
 def _setup_host(target, fix):
-    """Check/install prerequisites for ONE host. Returns (ready, ssh_ok)."""
-    print(f"Setup for {target}  "
+    """Check/install prerequisites locally or on one remote host."""
+    label = target or "this machine"
+    print(f"Setup for {label}  "
           f"({'FIX mode -- will make changes' if fix else 'check-only; pass --fix to remediate'})")
     results = []
 
@@ -2366,57 +2373,61 @@ def _setup_host(target, fix):
         results.append(("HF token", None,
                         f"not set -- only needed for gated models; --fix to add ({HF_TOKENS_URL})"))
 
-    # 1) dedicated, clearly-named SSH key (so it's easy to find and revoke later)
-    have_key = os.path.exists(OTOOLS_SSH_KEY)
-    if not have_key and fix:
-        os.makedirs(os.path.dirname(OTOOLS_SSH_KEY), exist_ok=True)
-        print(f"-> generating a dedicated key: {OTOOLS_SSH_KEY}  (comment: {OTOOLS_SSH_COMMENT})")
-        subprocess.run(["ssh-keygen", "-t", "ed25519", "-N", "", "-f", OTOOLS_SSH_KEY,
-                        "-C", OTOOLS_SSH_COMMENT])
+    if target:
+        # 1) dedicated, clearly-named SSH key (so it's easy to find and revoke later)
         have_key = os.path.exists(OTOOLS_SSH_KEY)
-    results.append(("otools SSH key", have_key,
-                    f"{OTOOLS_SSH_KEY}" if have_key
-                    else f"missing; --fix to generate ({OTOOLS_SSH_KEY})"))
+        if not have_key and fix:
+            os.makedirs(os.path.dirname(OTOOLS_SSH_KEY), exist_ok=True)
+            print(f"-> generating a dedicated key: {OTOOLS_SSH_KEY}  (comment: {OTOOLS_SSH_COMMENT})")
+            subprocess.run(["ssh-keygen", "-t", "ed25519", "-N", "", "-f", OTOOLS_SSH_KEY,
+                            "-C", OTOOLS_SSH_COMMENT])
+            have_key = os.path.exists(OTOOLS_SSH_KEY)
+        results.append(("otools SSH key", have_key,
+                        f"{OTOOLS_SSH_KEY}" if have_key
+                        else f"missing; --fix to generate ({OTOOLS_SSH_KEY})"))
 
-    # 2) keyless SSH using THAT key (ssh_opts() now pins -i once the key exists)
-    ok, _ = _r_ok(target, "true") if have_key else (False, "")
-    if not ok and fix and have_key:
-        print("-> installing the otools key on the remote (enter the remote password once)")
-        if shutil.which("ssh-copy-id"):
-            subprocess.run(["ssh-copy-id", "-i", OTOOLS_SSH_PUB, target])
-        else:
-            pubkey = open(OTOOLS_SSH_PUB).read().strip()
-            remote_cmd = ("mkdir -p ~/.ssh && chmod 700 ~/.ssh && "
-                          "printf '%s\\n' " + shlex.quote(pubkey) + " >> ~/.ssh/authorized_keys && "
-                          "chmod 600 ~/.ssh/authorized_keys")
-            subprocess.run(ssh_argv(target) + [remote_cmd])   # interactive (password)
-        ok, _ = _r_ok(target, "true")
-    results.append(("keyless SSH", ok, "connected with otools key" if ok
-                    else "no passwordless login; --fix to set up"))
-    if not ok:
-        _print_results(results)
-        print("\nSSH must work before the rest -- skipping this host.")
-        return False, False
+        # 2) keyless SSH using THAT key (ssh_opts() now pins -i once the key exists)
+        ok, _ = _setup_ok(target, "true") if have_key else (False, "")
+        if not ok and fix and have_key:
+            print("-> installing the otools key on the remote (enter the remote password once)")
+            if shutil.which("ssh-copy-id"):
+                subprocess.run(["ssh-copy-id", "-i", OTOOLS_SSH_PUB, target])
+            else:
+                pubkey = open(OTOOLS_SSH_PUB).read().strip()
+                remote_cmd = ("mkdir -p ~/.ssh && chmod 700 ~/.ssh && "
+                              "printf '%s\\n' " + shlex.quote(pubkey) + " >> ~/.ssh/authorized_keys && "
+                              "chmod 600 ~/.ssh/authorized_keys")
+                subprocess.run(ssh_argv(target) + [remote_cmd])   # interactive (password)
+            ok, _ = _setup_ok(target, "true")
+        results.append(("keyless SSH", ok, "connected with otools key" if ok
+                        else "no passwordless login; --fix to set up"))
+        if not ok:
+            _print_results(results)
+            print("\nSSH must work before the rest -- skipping this host.")
+            return False, False
 
     # 3) docker installed
-    dok, _ = _r_ok(target, "command -v docker")
+    dok, _ = _setup_ok(target, "command -v docker")
     if not dok and fix:
-        print("-> installing Docker via get.docker.com (sudo; may prompt on the remote) ...")
-        run_remote(target,
+        where = " on the remote" if target else ""
+        print(f"-> installing Docker via get.docker.com (sudo; may prompt{where}) ...")
+        _setup_run(target,
                    "curl -fsSL https://get.docker.com -o /tmp/get-docker.sh && sudo sh /tmp/get-docker.sh",
                    tty=True, batch=False)
-        dok, _ = _r_ok(target, "command -v docker")
-    ver = _r_ok(target, "docker --version")[1] if dok else ""
+        dok, _ = _setup_ok(target, "command -v docker")
+    ver = _setup_ok(target, "docker --version")[1] if dok else ""
     results.append(("docker installed", dok, ver or "missing; --fix to install"))
 
     # 4) docker usable without sudo (docker group)
-    nosudo, _ = (_r_ok(target, "docker info") if dok else (False, ""))
-    in_grp = ("docker" in _r_ok(target, "id -nG")[1].split()) if dok else False
+    nosudo, _ = (_setup_ok(target, "docker info") if dok else (False, ""))
+    in_grp = ("docker" in _setup_ok(target, "id -nG")[1].split()) if dok else False
     if not nosudo and dok and fix:
-        print("-> adding remote user to the `docker` group (sudo; prompt) ...")
-        run_remote(target, "sudo usermod -aG docker $USER", tty=True, batch=False)
+        who = "remote user" if target else "current user"
+        print(f"-> adding {who} to the `docker` group (sudo; prompt) ...")
+        _setup_run(target, "sudo usermod -aG docker $USER", tty=True, batch=False)
         in_grp = True
-        detail = "added to docker group -- LOG OUT/IN (or reboot) on the remote, then re-run setup"
+        where = " on the remote" if target else ""
+        detail = f"added to docker group -- LOG OUT/IN (or reboot){where}, then re-run install"
         results.append(("docker w/o sudo", False, detail))
     else:
         results.append(("docker w/o sudo", nosudo,
@@ -2429,23 +2440,23 @@ def _setup_host(target, fix):
     if fix:
         print("-> installing the scoped drop-caches helper + NOPASSWD sudoers rule "
               f"({DROP_CACHES_HELPER}; sudo, may prompt once) ...")
-        run_remote(target, _drop_caches_install_cmd(), tty=True, batch=False)
-    dc_ok, _ = _r_ok(target, "sudo -n -l %s >/dev/null 2>&1" % DROP_CACHES_HELPER)
+        _setup_run(target, _drop_caches_install_cmd(), tty=True, batch=False)
+    dc_ok, _ = _setup_ok(target, "sudo -n -l %s >/dev/null 2>&1" % DROP_CACHES_HELPER)
     results.append(("drop-caches sudo", dc_ok,
                     "NOPASSWD rule active (launch drops page cache automatically)" if dc_ok
                     else "no NOPASSWD rule; --fix to add (launches warn + skip the drop otherwise)"))
 
     # 5) GPU: driver + container runtime (check + advise; we don't auto-install the toolkit)
-    drv = _r_ok(target, "nvidia-smi -L 2>/dev/null | head -1")[1] if (nosudo or dok) else ""
+    drv = _setup_ok(target, "nvidia-smi -L 2>/dev/null | head -1")[1] if (nosudo or dok) else ""
     results.append(("nvidia driver", bool(drv), drv or "nvidia-smi not found on host"))
     # --gpus all can be backed EITHER by a registered "nvidia" runtime (legacy) OR by
     # CDI (Docker 25+/29 default with the toolkit). Check several signals so a working
     # CDI setup isn't a false negative.
     gpu_ok, gpu_detail = False, ""
     if nosudo:
-        runtimes = _r_ok(target, "docker info --format '{{json .Runtimes}}' 2>/dev/null")[1].lower()
-        has_ctk = _r_ok(target, "command -v nvidia-ctk")[0]
-        has_cdi = _r_ok(target, "ls /etc/cdi/nvidia.yaml /etc/cdi/nvidia.json 2>/dev/null")[0]
+        runtimes = _setup_ok(target, "docker info --format '{{json .Runtimes}}' 2>/dev/null")[1].lower()
+        has_ctk = _setup_ok(target, "command -v nvidia-ctk")[0]
+        has_cdi = _setup_ok(target, "ls /etc/cdi/nvidia.yaml /etc/cdi/nvidia.json 2>/dev/null")[0]
         if "nvidia" in runtimes:
             gpu_ok, gpu_detail = True, "nvidia runtime registered"
         elif has_ctk:
@@ -2459,7 +2470,7 @@ def _setup_host(target, fix):
     results.append(("docker GPU runtime", gpu_ok, gpu_detail))
 
     _print_results(results)
-    if os.path.exists(OTOOLS_SSH_KEY):
+    if target and os.path.exists(OTOOLS_SSH_KEY):
         print(f"\nThis tool uses its own key {OTOOLS_SSH_KEY} (comment '{OTOOLS_SSH_COMMENT}').")
         print(f"  To revoke later: on the remote, delete the authorized_keys line matching "
               f"'{OTOOLS_SSH_COMMENT}'\n"
@@ -2467,10 +2478,12 @@ def _setup_host(target, fix):
               f"  and locally: rm {OTOOLS_SSH_KEY} {OTOOLS_SSH_PUB}")
     essentials = {"keyless SSH", "docker installed", "docker w/o sudo",
                   "nvidia driver", "docker GPU runtime", "drop-caches sudo"}
+    if not target:
+        essentials.remove("keyless SSH")
     ready = all(ok for name, ok, _ in results if name in essentials)
     print(f"\n{'READY: launch away.' if ready else 'NOT READY -- address the [FAIL] rows above'}"
           + ("" if fix else "  (re-run with --fix to remediate)"))
-    ssh_ok = next((o for n, o, _ in results if n == "keyless SSH"), False)
+    ssh_ok = next((o for n, o, _ in results if n == "keyless SSH"), not target)
     return ready, ssh_ok
 
 
@@ -2639,16 +2652,16 @@ def main():
     p.set_defaults(func=cmd_health)
 
     p = sub.add_parser("install", aliases=["setup"],
-                       help="bootstrap a remote (SSH, docker, group) + register it (with an alias) "
-                            "for `ps`/`--host`")
+                       help="bootstrap this machine, or bootstrap + register a remote host")
     p.add_argument("target", nargs="?",
-                   help="USER@HOST to install; comma-separate several (a,b) when giving no alias. "
+                   help="USER@HOST to install (default: this machine); comma-separate several "
+                        "(a,b) when giving no alias. "
                         "Reachable hosts are saved to ~/.config/otools/hosts so `ps` and `--host` "
                         "find them.")
     p.add_argument("alias", nargs="?",
                    help="short name for this host, e.g. dgx1 (then `launch <model> --host dgx1`)")
-    p.add_argument("--fix", action="store_true", help="remediate failures (generates keys, "
-                                                      "installs docker, adds docker group)")
+    p.add_argument("--fix", action="store_true", help="remediate failures (installs docker, adds "
+                                                      "docker group; remote setup also adds SSH keys)")
     p.set_defaults(func=cmd_install)
 
     p = sub.add_parser("uninstall",

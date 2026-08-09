@@ -20,6 +20,7 @@ import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
 from types import SimpleNamespace
+from unittest import mock
 
 # The tool is a hyphenated, extension-less executable ("omodel-manager"), so it
 # can't be `import`ed by name -- load it from the sibling file with an explicit
@@ -96,6 +97,75 @@ class HostsStoreTests(unittest.TestCase):
         self.assertEqual(mm._host_label("user@192.0.2.101"), "dgx1")
         self.assertEqual(mm._host_label("user@unknown"), "user@unknown")  # no alias -> raw
         self.assertIsNone(mm._host_label(None))
+
+
+class InstallTests(unittest.TestCase):
+    """`install` targets this machine when no remote is named."""
+
+    def setUp(self):
+        self._hosts, self._remote = mm.HOSTS_FILE, mm.REMOTE
+        mm.HOSTS_FILE = os.path.join(tempfile.mkdtemp(), "hosts")
+        mm.REMOTE = "user@configured-default"
+
+    def tearDown(self):
+        mm.HOSTS_FILE, mm.REMOTE = self._hosts, self._remote
+
+    def test_no_target_installs_locally_without_ssh_or_registration(self):
+        args = SimpleNamespace(target=None, alias=None, fix=True)
+        with mock.patch.object(mm, "_setup_host", return_value=(True, True)) as setup, \
+                mock.patch.object(mm.shutil, "which") as which, \
+                mock.patch.object(mm, "save_hosts") as save:
+            with self.assertRaises(SystemExit) as raised:
+                mm.cmd_install(args)
+        self.assertEqual(raised.exception.code, 0)
+        setup.assert_called_once_with(None, True)
+        which.assert_not_called()
+        save.assert_not_called()
+
+    def test_explicit_target_keeps_remote_setup_and_registration(self):
+        args = SimpleNamespace(target="user@192.0.2.101", alias="dgx1", fix=True)
+        with mock.patch.object(mm, "_setup_host", return_value=(True, True)) as setup, \
+                mock.patch.object(mm.shutil, "which", return_value="/usr/bin/ssh"), \
+                mock.patch.object(mm, "load_hosts", return_value=[]), \
+                mock.patch.object(mm, "save_hosts") as save:
+            with self.assertRaises(SystemExit) as raised:
+                mm.cmd_install(args)
+        self.assertEqual(raised.exception.code, 0)
+        setup.assert_called_once_with("user@192.0.2.101", True)
+        save.assert_called_once_with([("dgx1", "user@192.0.2.101")])
+
+    def test_local_setup_skips_ssh_prerequisites(self):
+        def setup_ok(target, cmd):
+            self.assertIsNone(target)
+            if cmd == "docker --version":
+                return True, "Docker version 29"
+            if cmd == "id -nG":
+                return True, "user docker"
+            if cmd.startswith("nvidia-smi"):
+                return True, "GPU 0: NVIDIA GB10"
+            if "Runtimes" in cmd:
+                return True, '{"nvidia": {}}'
+            return True, ""
+
+        out = io.StringIO()
+        with mock.patch.object(mm, "hf_token", return_value="hf_test"), \
+                mock.patch.object(mm, "_setup_ok", side_effect=setup_ok), \
+                contextlib.redirect_stdout(out):
+            ready, local_ok = mm._setup_host(None, False)
+        self.assertTrue(ready)
+        self.assertTrue(local_ok)
+        self.assertIn("Setup for this machine", out.getvalue())
+        self.assertNotIn("SSH", out.getvalue())
+
+    def test_setup_runner_executes_locally_without_ssh(self):
+        completed = SimpleNamespace(returncode=0, stdout="ok\n")
+        with mock.patch.object(mm.subprocess, "run", return_value=completed) as run, \
+                mock.patch.object(mm, "run_remote") as remote:
+            result = mm._setup_run(None, "command -v docker", capture=True)
+        self.assertIs(result, completed)
+        run.assert_called_once_with(["sh", "-c", "command -v docker"], text=True,
+                                    capture_output=True)
+        remote.assert_not_called()
 
 
 class NonBlockingLaunchTests(unittest.TestCase):
