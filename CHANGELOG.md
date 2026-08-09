@@ -13,6 +13,11 @@ All notable changes to this project are documented here. The format follows
   unchanged.
 
 ### Added
+- **Targetless `install` now provisions the local machine.** On a DGX host itself,
+  `omm install` runs the read-only prerequisite report and `omm install --fix` installs/repairs
+  Docker, docker-group membership, the HF token, and the scoped drop-caches sudo rule directly.
+  SSH setup and remote-host registration are skipped; explicit `install <user@host> [alias]`
+  behavior is unchanged. No new mode flag was added.
 - **`gemma4-26b-fp8-mtp`: coding-optimized MTP variant of `gemma4-26b-fp8`.** Same triton FP8 base
   + speculative decode (`num_speculative_tokens: 8`, drafter `google/gemma-4-26B-A4B-it-assistant`,
   native on the nightly — `Gemma4MTPModel`, no patch). **On-box dgx-3 2026-07-26:** 89% draft
