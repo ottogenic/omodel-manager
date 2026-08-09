@@ -1,0 +1,57 @@
+# laguna-dflash-s-2.1-nvfp4 - matched RC2 DFlash performance variant
+#
+# Same capabilities and checkpoint-authoritative sampling as the target-only profile,
+# with the pinned poolside/Laguna-S-2.1-DFlash-NVFP4 RC2 draft. Seven proposals measured
+# 18.4 tok/s at ~55K on dgx4 versus 16.6 target-only; acceptance is workload-dependent.
+# Do not send nonzero min_p or logit_bias while speculative decoding is enabled.
+
+match = ["laguna-dflash-s-2.1-nvfp4", "poolside/Laguna-S-2.1-DFlash-NVFP4"]
+source = "https://huggingface.co/poolside/Laguna-S-2.1-DFlash-NVFP4"
+
+[capabilities]
+vision           = false
+reasoning        = true
+tool_call        = true
+thinking_control = "enable_thinking"
+concurrency      = 1
+
+[context]
+native = 131072
+
+[presets.reason]
+thinking   = true
+max_output = 32768
+[presets.reason.sampling]
+temperature = 1.0
+top_p       = 1.0
+top_k       = 20
+
+[presets.code]
+thinking   = true
+max_output = 32768
+[presets.code.sampling]
+temperature = 1.0
+top_p       = 1.0
+top_k       = 20
+
+[presets.agent]
+thinking   = true
+max_output = 32768
+options.chat_template_kwargs = { preserve_thinking = true }
+[presets.agent.sampling]
+temperature = 1.0
+top_p       = 1.0
+top_k       = 20
+
+[presets.instruct]
+thinking   = false
+max_output = 16384
+[presets.instruct.sampling]
+temperature = 1.0
+top_p       = 1.0
+top_k       = 20
+
+[variants.think]
+options.chat_template_kwargs = { enable_thinking = true }
+[variants.no-think]
+options.chat_template_kwargs = { enable_thinking = false }

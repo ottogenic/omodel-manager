@@ -1,30 +1,29 @@
 # laguna-s-2.1-nvfp4 — sampling & capability reference
 #
-# poolside Laguna-S-2.1, official NVFP4 quant (~72GB): 118B total / ~8.5B active MoE
+# poolside Laguna-S-2.1 RC2, official NVFP4/BF16 hybrid (99.7GB): 118B total / ~8.5B active MoE
 # agentic coding model (256 experts top-10 + shared; 12 full-attn + 36 sliding-window
 # layers). Interleaved thinking between tool calls; poolside_v1 parsers. OpenMDW-1.1.
 # Launch via the omodel-manager `laguna-s-2.1-nvfp4` profile (vLLM >= 0.25.0 required).
 # Values are STARTING POINTS to sweep from.
 #
-# ── Sampling: one official recommendation, ALL modes (verified 2026-07-25) ──
-# poolside publishes exactly ONE sampling rec — temperature 0.7 + top_p 0.95 ("best
-# balance of quality and reliability", NVFP4 card) with top_k 20 ("eval-certified
-# truncation", generation_config.json). There is NO official coding-vs-reasoning split,
+# ── Sampling: checkpoint defaults, ALL modes (verified 2026-08-09) ──
+# RC2's authoritative generation_config.json sets temperature 1.0 + top_p 1.0 +
+# top_k 20 + min_p 0.0. There is NO official coding-vs-reasoning split,
 # and NO effort levels in this release ("two thinking settings: off and max" —
 # https://docs.poolside.ai/release-notes/models). Identical presets below are
 # deliberate, not an oversight.
 #   card:  https://huggingface.co/poolside/Laguna-S-2.1-NVFP4
 #   gen:   https://huggingface.co/poolside/Laguna-S-2.1-NVFP4/raw/main/generation_config.json
-# CAUTION: do NOT send min_p or logit_bias while DFlash speculative decoding is on
-# (server 400s) — min_p intentionally absent from every preset.
+# min_p is intentionally absent: the server supplies the checkpoint's 0.0 default,
+# and nonzero min_p is incompatible with the separate DFlash profile.
 #
 # ── Re-thinking loops ("But wait… But wait…") — known issue, sourced 2026-07-25 ──
 # Mild re-verification is this model's intended "persistent verification" style, and
 # overthinking is a vendor-acknowledged limitation ("may think for long sequences
 # before making progress" — https://poolside.ai/blog/introducing-laguna-s-2-1).
 # Hard loops (verbatim repeats until finish_reason: length) are a STAFF-CONFIRMED
-# defect, worst in 4-bit quants; poolside's 07-22 re-quant (our pinned revision)
-# reduces but does not eliminate it:
+# defect, worst in 4-bit quants. The August RC2 replacement is pinned by the launch
+# profile, but poolside has not published a controlled before/after termination test:
 #   https://huggingface.co/poolside/Laguna-S-2.1-NVFP4/discussions/7   (staff fix)
 #   https://huggingface.co/poolside/Laguna-S-2.1-NVFP4/discussions/10  (post-fix repro)
 # Documented mitigations, in order of evidence:
@@ -46,26 +45,26 @@ vision           = false                  # text-only
 reasoning        = true                   # interleaved thinking (poolside_v1 reasoning parser)
 tool_call        = true                   # poolside_v1 tool parser; agentic-first model
 thinking_control = "enable_thinking"      # chat_template_kwargs; server default ON via launch flag
-concurrency      = 4                       # mirrors launch profile max-num-seqs (DFlash-constrained)
+concurrency      = 1                       # RC2's 99.7GB target leaves limited KV headroom on GB10
 
 [context]
-native = 262144                            # poolside's quality ceiling for quantized checkpoints
-                                           # (arch supports 1M via YaRN; degrades quantized)
+native = 229376                            # validated serving cap for the target-only Spark profile
+                                           # (RC2 arch/config supports 1M; card recipe uses 256K)
 
 [presets.reason]              # research & planning — thinking on
 thinking   = true
 max_output = 32768
 [presets.reason.sampling]
-temperature = 0.7
-top_p       = 0.95
+temperature = 1.0
+top_p       = 1.0
 top_k       = 20
 
 [presets.code]                # precise coding
 thinking   = true
 max_output = 32768
 [presets.code.sampling]
-temperature = 0.7
-top_p       = 0.95
+temperature = 1.0
+top_p       = 1.0
 top_k       = 20
 
 [presets.agent]               # unattended agentic loops. preserve_thinking is the
@@ -75,16 +74,16 @@ max_output = 32768            # thinking… may stop reasoning in follow-up step
                               # (https://huggingface.co/poolside/Laguna-S-2.1)
 options.chat_template_kwargs = { preserve_thinking = true }
 [presets.agent.sampling]
-temperature = 0.7
-top_p       = 0.95
+temperature = 1.0
+top_p       = 1.0
 top_k       = 20
 
 [presets.instruct]            # quick answers — thinking off (loops live in thinking;
 thinking   = false            # this mode sidesteps them entirely)
 max_output = 16384
 [presets.instruct.sampling]
-temperature = 0.7
-top_p       = 0.95
+temperature = 1.0
+top_p       = 1.0
 top_k       = 20
 
 [variants.think]

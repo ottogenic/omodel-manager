@@ -13,6 +13,15 @@ All notable changes to this project are documented here. The format follows
   unchanged.
 
 ### Added
+- **Pinned Laguna-S-2.1 RC2 target-only profile + separately validated DFlash variant.**
+  `laguna-s-2.1-nvfp4` now serves Poolside's August 99.7 GB BF16-tail RC2 target pinned at
+  `f8fdfcdc`, without speculative decoding; `laguna-dflash-s-2.1-nvfp4` adds the matched draft
+  pinned at `b3b5921a` with seven proposals. Both use the immutable stock vLLM 0.25.1 image,
+  auto-selected native `FLASHINFER_CUTLASS` MoE, explicit FP8 KV, one sequence, and independently
+  validated context limits (229,376 target-only / 131,072 DFlash). On dgx4: target-only passed
+  4/4 tool + 4/4 executable-code checks and measured 16.6 tok/s at ~55K; DFlash measured 18.4
+  tok/s with workload-dependent acceptance (~18% prose, ~38% quality battery) and passed a repeat
+  quality run. Harness configs now use RC2's authoritative 1.0 / 1.0 / top-k 20 sampling.
 - **Targetless `install` now provisions the local machine.** On a DGX host itself,
   `omm install` runs the read-only prerequisite report and `omm install --fix` installs/repairs
   Docker, docker-group membership, the HF token, and the scoped drop-caches sudo rule directly.
