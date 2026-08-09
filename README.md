@@ -28,7 +28,8 @@ Built for a DGX Spark setup but works against any host with Docker + NVIDIA GPUs
 # See what's available (context / concurrency / use-case)
 python omodel-manager list
 
-# Run one locally
+# On the DGX itself: check/provision local prerequisites, then run one locally
+python omodel-manager install --fix
 python omodel-manager launch qwen3.6-35b-a3b-nvfp4
 
 # ...or on a remote box: bootstrap + name it once, then use the alias
@@ -56,7 +57,7 @@ Optional: `python omodel-manager shell-init` adds an `omm` shell alias.
 | `ps [--all]` | Running containers **plus** every registered host, each `running`/`idle`/`pulling`/`unreachable` |
 | `stop <profile\|host>` (alias `kill`) | Stop + remove a container (`-y` to skip confirm) |
 | `fetch <profile>` | Pre-download a profile's declared assets |
-| `install <user@ip> [alias] [--fix]` (alias `setup`) | Bootstrap a remote (SSH, docker, group, HF token, drop-caches sudo rule) + register it under an alias |
+| `install [<user@ip> [alias]] [--fix]` (alias `setup`) | Bootstrap this machine when no host is given; otherwise bootstrap a remote + register it under an alias |
 | `uninstall <alias\|host> [--purge]` | Unregister a host + revoke the otools key (`--purge` also drops docker-group/containers + drop-caches rule) |
 | `sync` | Reset `model_manager.json` from the committed `DEFAULT_CONFIG` — run after `git pull` to pick up newly merged profiles (backs up a differing old file to `.bak`; pairs with `omw sync`) |
 | `config [--path/--init/--edit]` | Show/init/edit the config file |
@@ -134,9 +135,15 @@ to `.bak` first; `config --init --force` is the older spelling of the same reset
   each model is. Populate it from the benchmark (the `add-a-model` / `benchmark-model` skills);
   unmeasured profiles show `—`.
 
-## Remote, install & uninstall
+## Install, remote & uninstall
 
-`install <user@ip> [alias] --fix` bootstraps a box: generates a **dedicated** SSH key
+`install --fix` bootstraps the machine where the command runs: it installs Docker if
+missing, adds the current user to the `docker` group, checks the NVIDIA driver + container
+runtime, configures the drop-caches sudo rule, and prompts for an HF token if none is set.
+It skips SSH setup and does not add the local machine to the remote hosts registry. Run
+without `--fix` for a read-only local status report.
+
+`install <user@ip> [alias] --fix` bootstraps a remote box: generates a **dedicated** SSH key
 (`~/.ssh/otools_model_manager_ed25519`, clearly named so it's easy to revoke),
 installs it, installs Docker if missing, adds you to the `docker` group, checks
 the NVIDIA driver + container runtime (CDI-aware), and prompts for an HF token if
