@@ -82,6 +82,21 @@ class ConfigValidityTests(unittest.TestCase):
                             f"'{a}' pattern '{ap}' is a substring of '{b}' pattern "
                             f"'{bp}' -> they'll cross-match in omw's LIVE detection")
 
+    def test_laguna_rc2_configs_use_checkpoint_sampling_and_validated_limits(self):
+        expected = {
+            "laguna-s-2.1-nvfp4": 229376,
+            "laguna-dflash-s-2.1-nvfp4": 131072,
+        }
+        for name, context in expected.items():
+            with self.subTest(config=name):
+                cfg = _load(CONFIGS / f"{name}.toml")
+                self.assertEqual(cfg["context"]["native"], context)
+                self.assertEqual(cfg["capabilities"]["concurrency"], 1)
+                for preset in REQUIRED_PRESETS:
+                    sampling = cfg["presets"][preset]["sampling"]
+                    self.assertEqual(sampling,
+                                     {"temperature": 1.0, "top_p": 1.0, "top_k": 20})
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

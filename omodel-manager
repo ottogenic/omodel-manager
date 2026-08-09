@@ -867,60 +867,36 @@ DEFAULT_CONFIG = {
             },
         },
         "laguna-s-2.1-nvfp4": {
-            "tok_s": 9,
-            "image": "vllm/vllm-openai:v0.25.1",
+            "tok_s": 17,
+            "image": ("vllm/vllm-openai@sha256:"
+                      "e4f88a835143cd22aee2397a26ec6bb80b3a4a6fe0c882bcbc63822904766089"),
             "model": "poolside/Laguna-S-2.1-NVFP4",
             "port": 8000,
             "usecase": ["Coding", "Agentic", "Reasoning"],
             "notes": [
-                "poolside Laguna-S-2.1 NVFP4: 118B total / ~8.5B active MoE agentic coding model "
-                "(256 experts top-10 + 1 shared, per-head softplus gating; 12 full-attn + 36 "
-                "sliding-window layers). poolside's OWN NVFP4 quant (~72GB) -- the only variant that "
-                "fits 128GB (BF16 235GB, FP8 121GB). FP8 KV baked into the quant (auto-detected -- "
-                "do NOT pass --kv-cache-dtype). OpenMDW-1.1 license, ungated.",
-                "VALIDATED on-box dgx-3 2026-07-23: functional PASS (clean generation, code "
-                "executes, poolside_v1 tool call + reasoning-field separation both work). SPEED IS "
-                "CONTENT-DEPENDENT (DFlash draft acceptance): house benchmark (prose summarize, "
-                "~55k ctx) 8.9 tok/s N=1 = tok_s 9 -- the drafter's worst case; CODE content at "
-                "short ctx measured 53 tok/s. TTFT 18.6s / prefill ~3,000 tok/s @ 55k. 817,498-"
-                "token KV pool. Cold start ~22.5 min, warm restart ~10 min (flashinfer cache).",
-                "IMAGE PINNED v0.25.1: laguna arch + per-head gating + poolside_v1 parsers need "
-                "vLLM >= 0.25.0; v0.25.1 is the community-validated Spark tag. Do NOT pass "
-                "--linear-backend flashinfer_b12x (broken on 0.25.1).",
-                "SECURITY: trust-remote-code is DISABLED for this profile (validated on-box "
-                "2026-07-26: vLLM v0.25.1 loads the arch NATIVELY -- 'Resolved architecture: "
-                "LagunaForCausalLM' with no TRC; functional PASS). The repo's custom .py files "
-                "therefore NEVER execute, so tracking latest (no --revision pin) is safe by "
-                "construction: future pushes can only alter data (safetensors weights, configs, "
-                "jinja template). Original audit 2026-07-23 (all-safetensors, clean .py, verified "
-                "poolside org) stands for the record. If TRC is ever re-enabled, re-audit the .py "
-                "files and re-pin first.",
-                "DFlash speculative decode (poolside/Laguna-S-2.1-DFlash-NVFP4, ~7GB): "
-                "output-identical spec decode, num_speculative_tokens 7 NOT 15 (community: 15 tanks "
-                "acceptance to 2-15%; 7 gives ~40-50 vs ~13-14 tok/s bare). REQUIRES low "
-                "max-num-seqs (crashes at default 256). Do NOT send min_p / logit_bias while spec "
-                "decode is on (400s) -- min_p omitted from the config TOML presets for this reason.",
-                "max-model-len 262144 = poolside's quality ceiling for quantized checkpoints (arch "
-                "supports 1M via YaRN; degrades quantized). Prefix caching ON (v0.25.1 default, "
-                "deliberately kept: normal-attention model -- 12 full + 36 sliding-window layers, "
-                "no Mamba/GDN state -- so the hybrid-cache risks don't apply, and agent loops gain "
-                "big TTFT wins; community Spark configs run it with DFlash). max-num-batched-tokens "
-                "9216 = 8192 + headroom for DFlash draft slots (8192 exactly triggers vLLM's "
-                "max_num_scheduled_tokens warning). First start ~22 min (weights download + "
-                "FlashInfer JIT + CUDA graphs); flashinfer-cache volume makes restarts much faster. "
-                "Sampling (NVFP4 card): temp 0.7 / top_p 0.95 / top_k 20 -- in the config TOML.",
-                "RE-THINKING LOOPS (researched 2026-07-25): 'But wait...' re-verification is the "
-                "model's intended style + a vendor-acknowledged overthinking limitation; HARD loops "
-                "(verbatim repeats to length limit) are a STAFF-CONFIRMED defect, worst in 4-bit "
-                "quants (HF NVFP4 discussions/7, /10). The 07-22 re-quant (current HEAD) is "
-                "poolside's looping fix; staff promised a further 'final checkpoint' -- UNPINNED, "
-                "so a container restart picks it up automatically when it lands. "
-                "Mitigation if a task loops to length: repetition_penalty 1.10-1.15 "
-                "per-request (4/8 rescue in discussions/10; penalizes code tokens -- not a default). "
-                "thinking_token_budget does NOT work for this model (discussions/9). NOTE: the "
-                "07-21 DFlash draft predates the 07-22 re-quant target -- community reports "
-                "collapsed draft acceptance (speed-only; we still measured 53 tok/s on code). "
-                "Check for an updated DFlash checkpoint when bumping the target revision.",
+                "poolside Laguna-S-2.1 NVFP4 RC2: 118B total / ~8.5B active MoE agentic coding "
+                "model (256 experts top-10 + 1 shared; 12 full-attn + 36 sliding-window layers). "
+                "The August checkpoint is a 99.7 GB / 92.85 GiB hybrid: routed experts in layers "
+                "40-47 stay BF16. OpenMDW-1.1, ungated. The card's retained ~71 GB text is stale.",
+                "PINNED RC2 target f8fdfcdc and immutable stock vLLM v0.25.1 image. On-box dgx4 "
+                "2026-08-09: native LagunaForCausalLM, FLASHINFER_CUTLASS NVFP4 MoE (NO Marlin), "
+                "FlashInfer CUTLASS BF16-tail MoE, and automatic FlashInfer attention with FP8 KV. "
+                "Do not force an attention/MoE backend; reject a future launch if it selects Marlin.",
+                "FP8 KV is EXPLICIT because RC2 removed kv_cache_scheme and K/V scales: auto chooses "
+                "BF16, which varied around only 120K max context at 0.85 utilization. FP8 uses "
+                "uncalibrated scale 1.0 (vLLM warns of possible accuracy loss), but 229376 fits and "
+                "passed generation, reasoning separation, 4/4 tools and 4/4 executable code tests. "
+                "Use this capacity tradeoff deliberately; quality-first BF16 requires <=~116K.",
+                "TARGET-ONLY is the reliable default. On dgx4: 16.6 tok/s decode at ~55K context "
+                "(tok_s 17), TTFT 21.0s, prefill 2656 tok/s. Prefix caching is explicit and safe "
+                "for this attention-only hybrid. Cold RC2 load was ~12-16 min from EXT4.",
+                "Sampling changed with RC2: generation_config.json is authoritative at temperature "
+                "1.0 / top_p 1.0 / top_k 20 / min_p 0.0. poolside_v1 tool+reasoning parsers and "
+                "enable_thinking=true remain correct; preserve prior reasoning for agent loops.",
+                "OVERTHINKING remains operationally relevant: a trivial multiplication used 2199 "
+                "tokens with thinking on but terminated correctly; thinking off answered in 65. "
+                "Keep output caps. repetition_penalty 1.10-1.15 is an opt-in loop mitigation, not a "
+                "coding default; thinking_token_budget is ineffective on this model.",
             ],
             "volumes": ["~/.cache/flashinfer:/root/.cache/flashinfer"],
             "env": {
@@ -933,19 +909,50 @@ DEFAULT_CONFIG = {
                 "served-model-name": "laguna-s-2.1-nvfp4",
                 "trust-remote-code": False,   # native vLLM arch; repo .py never executes (see SECURITY note)
                 "tensor-parallel-size": 1,
-                "attention-backend": "FLASHINFER",
+                "revision": "f8fdfcdc4e7b0c474a0102430a8cae0a3a358669",
+                "kv-cache-dtype": "fp8",
                 "gpu-memory-utilization": 0.85,
-                "max-model-len": 262144,
-                "max-num-seqs": 4,
-                "max-num-batched-tokens": 9216,
+                "max-model-len": 229376,
+                "max-num-seqs": 1,
+                "max-num-batched-tokens": 8192,
                 "enable-chunked-prefill": True,
+                "enable-prefix-caching": True,
                 "enable-auto-tool-choice": True,
                 "tool-call-parser": "poolside_v1",
                 "reasoning-parser": "poolside_v1",
                 "default-chat-template-kwargs": '{"enable_thinking": true}',
-                "speculative-config": ('{"method":"dflash","model":"poolside/Laguna-S-2.1-DFlash-NVFP4",'
-                                       '"num_speculative_tokens":7}'),
                 "enable-log-requests": True,
+            },
+        },
+        "laguna-dflash-s-2.1-nvfp4": {
+            "tok_s": 18,
+            "extends": "laguna-s-2.1-nvfp4",
+            "notes": [
+                "Optional DFlash variant of the pinned Laguna RC2 target. The matched 2.08 GiB RC2 "
+                "draft is pinned to b3b5921a; seven proposals is the conservative GB10 setting "
+                "(the target card says 15, the draft card says 7). Target verification preserves "
+                "the target distribution, but keep this separate so spec-runtime regressions cannot "
+                "block the reliable target-only profile.",
+                "ON-BOX dgx4 2026-08-09: READY with stock v0.25.1, 95.63 GiB model+draft load, "
+                "139572-token KV pool, and 131072 max context at one sequence. Quality battery: "
+                "4/4 executable-code cases in both runs; tools 3/4 then 4/4 (one stochastic "
+                "no-tool call).",
+                "DFlash is a modest prose win on RC2: 18.4 tok/s at ~55K versus target-only 16.6 "
+                "(+11%), TTFT 21.8s, prefill 2550 tok/s. Acceptance was workload-dependent: ~38% "
+                "across quality requests and ~18% on the prose benchmark. Disable this variant if "
+                "acceptance approaches zero or it falls behind target-only on your workload.",
+                "max-num-batched-tokens 9216 leaves draft-slot headroom (8192 logs a suboptimal "
+                "max_num_scheduled_tokens=8186 warning). Do not send nonzero min_p or logit_bias "
+                "with vLLM speculative decoding.",
+            ],
+            "vllm_args": {
+                "served-model-name": "laguna-dflash-s-2.1-nvfp4",
+                "max-model-len": 131072,
+                "max-num-batched-tokens": 9216,
+                "speculative-config": ('{"method":"dflash",'
+                                       '"model":"poolside/Laguna-S-2.1-DFlash-NVFP4",'
+                                       '"revision":"b3b5921a900b9e0a1e27e50bdaeb480692a6d19b",'
+                                       '"num_speculative_tokens":7}'),
             },
         },
         "north-mini-code-w4a16": {

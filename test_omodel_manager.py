@@ -446,6 +446,40 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
 
 
+class LagunaProfileTests(unittest.TestCase):
+    """The RC2 target and matched DFlash draft stay pinned and independently usable."""
+
+    def setUp(self):
+        self.cfg = json.loads(json.dumps(mm.DEFAULT_CONFIG))
+
+    def test_target_only_profile(self):
+        profile = mm.merge_model(self.cfg, "laguna-s-2.1-nvfp4")
+        args = profile["vllm_args"]
+        self.assertIn("@sha256:", profile["image"])
+        self.assertEqual(args["revision"], "f8fdfcdc4e7b0c474a0102430a8cae0a3a358669")
+        self.assertFalse(args["trust-remote-code"])
+        self.assertEqual(args["kv-cache-dtype"], "fp8")
+        self.assertEqual(args["max-model-len"], 229376)
+        self.assertEqual(args["max-num-seqs"], 1)
+        self.assertTrue(args["enable-prefix-caching"])
+        self.assertNotIn("attention-backend", args)
+        self.assertNotIn("moe-backend", args)
+        self.assertNotIn("speculative-config", args)
+
+    def test_dflash_profile_pins_matched_draft(self):
+        profile = mm.merge_model(self.cfg, "laguna-dflash-s-2.1-nvfp4")
+        args = profile["vllm_args"]
+        spec = json.loads(args["speculative-config"])
+        self.assertEqual(args["revision"], "f8fdfcdc4e7b0c474a0102430a8cae0a3a358669")
+        self.assertEqual(args["served-model-name"], "laguna-dflash-s-2.1-nvfp4")
+        self.assertEqual(args["max-model-len"], 131072)
+        self.assertEqual(args["max-num-batched-tokens"], 9216)
+        self.assertEqual(spec["method"], "dflash")
+        self.assertEqual(spec["model"], "poolside/Laguna-S-2.1-DFlash-NVFP4")
+        self.assertEqual(spec["revision"], "b3b5921a900b9e0a1e27e50bdaeb480692a6d19b")
+        self.assertEqual(spec["num_speculative_tokens"], 7)
+
+
 class ExtendsTests(unittest.TestCase):
     def setUp(self):
         # Test against the committed source of truth (DEFAULT_CONFIG), NOT load_config()
