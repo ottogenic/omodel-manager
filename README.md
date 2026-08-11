@@ -54,6 +54,7 @@ Optional: `python omodel-manager shell-init` adds an `omm` shell alias.
 | `pull-status <profile\|host>` | Progress of a backgrounded launch/pull |
 | `logs <profile\|host> [-f]` | Show/follow a container's logs (Ctrl-C detaches cleanly) |
 | `health [<profile\|host>]` | `GET /v1/models` on running containers |
+| `cluster <subcommand>` | Register, preflight, prepare, launch, inspect, and stop one model across two DGX Sparks |
 | `ps [--all]` | Running containers **plus** every registered host, each `running`/`idle`/`pulling`/`unreachable` |
 | `stop <profile\|host>` (alias `kill`) | Stop + remove a container (`-y` to skip confirm) |
 | `fetch <profile>` | Pre-download a profile's declared assets |
@@ -82,6 +83,62 @@ Spark / UMA false-OOM-&-freeze guard (vLLM #35313). There's no flag: `install` s
 scoped `NOPASSWD` sudo rule (`/usr/local/sbin/otools-drop-caches`) so it runs unattended,
 and launch uses `sudo -n`, so a host that wasn't installed just warns and skips it rather
 than ever prompting. See [SPARK_NOTES.md](SPARK_NOTES.md) for the hardware background.
+
+## Two-Spark clusters
+
+`cluster` is a separate lifecycle for models that require both Sparks. It never turns a
+normal one-container profile into a distributed deployment. Cluster definitions live in
+`~/.config/otools/clusters.json`; runtime state lives under
+`~/.local/share/otools/clusters/`. Override those paths for automation with
+`$OMODEL_MANAGER_CLUSTERS` and `$OMODEL_MANAGER_CLUSTER_DATA`.
+
+Register the local Spark as the head and a previously installed host alias as the worker.
+The Linux interface and UCX RDMA device are deliberately separate: confirm their mapping
+with `ibdev2netdev` after connecting the approved QSFP112 cable.
+
+```bash
+# Example one-rail CX-7 definition; use the addresses configured on your fabric.
+omm cluster add spark2 local dgx4 \
+  --interface enP7s7 --ucx-device mlx5_0:1 \
+  --head-ip 192.168.177.10 --worker-ip 192.168.177.11
+
+# Safe before the cable is connected: checks SSH, GB10, drivers, Docker, and disk.
+omm cluster preflight spark2 --management-only
+
+# After cable, IP, MTU, and RoCE setup: also requires link, exact route, jumbo ping,
+# and mlx5-to-netdev mapping. A route over Wi-Fi/Ethernet is a hard failure.
+omm cluster preflight spark2
+
+# Stop existing one-node inference first. Heavy preparation refuses busy nodes by default.
+omm cluster prepare spark2 qwen3-235b-a22b-fp4 --build --weights
+omm cluster launch spark2 qwen3-235b-a22b-fp4
+omm cluster status spark2
+omm cluster health spark2 qwen3-235b-a22b-fp4
+omm cluster logs spark2 qwen3-235b-a22b-fp4 -f
+omm cluster stop spark2 -y
+```
+
+The Qwen path uses official NVIDIA checkpoints pinned to exact Hugging Face revisions and
+an ARM64 TensorRT-LLM base pinned by digest. The manager builds the small SSH/MPI derivative
+locally, records image IDs, uses a deployment-specific SSH key, and serves the absolute
+snapshot path. The 2507 Instruct and Thinking profiles are available but explicitly marked
+compatible/unvalidated until they pass on-hardware qualification.
+
+DeepSeek V4 Flash 0731 source staging verifies the reviewed orchestration commit, Git tree,
+and vLLM patch hash while pinning the intended official model revision and official vLLM
+base digest. `cluster prepare ... --weights` downloads the exact official snapshot on both
+nodes with resumable long-timeout transfers. `cluster prepare ... --build` verifies all 12
+official-base preimages, vendors and verifies pinned `b12x` and FlashInfer archives, applies
+the reviewed patch, builds with `--network=none` on both nodes, and records role-specific image
+IDs after copied-context verification and full installed-content smoke hashes. It also hashes
+all 74 model files (166,898,660,330 bytes) on each node and requires parity. Overlay extraction
+must run from an ARM64 control/head host. The operator accepts `b12x`'s Apache-2.0 package
+metadata despite its missing bundled license file. DeepSeek launch is implemented but remains
+physically gated by the QSFP/RoCE preflight; launch waits for API health and `NCCL NET/IB`
+evidence or rolls both ranks back. No community image or quant is substituted.
+
+See [DUAL_SPARK_MODEL_RESEARCH.md](DUAL_SPARK_MODEL_RESEARCH.md) for model selection and
+primary-source links.
 
 ## The config
 

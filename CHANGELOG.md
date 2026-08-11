@@ -7,12 +7,31 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **Laguna `poolside_v1` reasoning-token initialization on vLLM 0.25.1.** Both Laguna profiles
+  now pass explicit `<think>` / `</think>` delimiters through `--reasoning-config`, avoiding the
+  known vLLM #49379 startup warning while preserving request-level thinking-on/off behavior.
 - **`utils/quality_eval.py` now accepts `omm install` aliases** (`dgx-3`), matching its own usage
   text and `benchmark_concurrent.py` — it previously skipped the shared hosts registry and failed
   with a DNS error on aliases. Also handles `alias:port`; raw `user@ip` / `ip` / `host:port`
   unchanged.
 
 ### Added
+- **Two-DGX-Spark cluster lifecycle (v0.3.0 prework).** Added a separate `cluster` registry and
+  `profiles` / `add` / `list` / `show` / `remove` / `preflight` / `prepare` / `launch` / `status` /
+  `logs` / `health` / `stop` command family. The Qwen TensorRT-LLM TP=2 path pins official NVIDIA
+  model revisions and the ARM64 runtime digest, builds a reviewed derivative locally, separates
+  UCX RDMA devices from Linux socket interfaces, refuses busy nodes, and rolls back partial rank
+  startup. Full preflight hard-fails if the selected peer route uses Wi-Fi/Ethernet instead of the
+  configured QSFP/RoCE fabric. DeepSeek V4 Flash pins the official weight revision and reviewed
+  runtime commit/tree/patch, verifies 12 official-base preimages, vendors hash-pinned `b12x` and
+  FlashInfer sources, builds both role images with network disabled, and smoke-tests the installed
+  package/overlay contents. Copied contexts are re-hashed on each host, and all 74 model files are
+  hashed independently with cross-node parity required. The operator accepts `b12x`'s declared
+  Apache-2.0 metadata despite its missing bundled license file. Worker-first launch uses exact
+  offline snapshot paths, waits for health plus `NCCL NET/IB`, rolls back delayed failures, and
+  remains gated on the physical QSFP/RoCE preflight.
+- **Dual Spark model research.** Added `DUAL_SPARK_MODEL_RESEARCH.md` with practical fit analysis,
+  recommended test order, exclusions, networking constraints, and primary sources.
 - **Pinned Laguna-S-2.1 RC2 target-only profile + separately validated DFlash variant.**
   `laguna-s-2.1-nvfp4` now serves Poolside's August 99.7 GB BF16-tail RC2 target pinned at
   `f8fdfcdc`, without speculative decoding; `laguna-dflash-s-2.1-nvfp4` adds the matched draft

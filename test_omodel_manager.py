@@ -462,6 +462,8 @@ class LagunaProfileTests(unittest.TestCase):
         self.assertEqual(args["max-model-len"], 229376)
         self.assertEqual(args["max-num-seqs"], 1)
         self.assertTrue(args["enable-prefix-caching"])
+        self.assertEqual(json.loads(args["reasoning-config"]), {
+            "reasoning_start_str": "<think>", "reasoning_end_str": "</think>"})
         self.assertNotIn("attention-backend", args)
         self.assertNotIn("moe-backend", args)
         self.assertNotIn("speculative-config", args)
@@ -724,6 +726,265 @@ class HttpModelsTests(unittest.TestCase):
         s.close()
         phase, _ = mm.http_models("127.0.0.1", port, timeout=1.0)
         self.assertEqual(phase, "starting")
+
+
+class ClusterProfileTests(unittest.TestCase):
+    def test_qwen_artifacts_are_first_party_and_immutable(self):
+        for profile in mm.CLUSTER_PROFILES.values():
+            if profile["backend"] != "trtllm-mpi":
+                continue
+            self.assertTrue(profile["model"].startswith("nvidia/"))
+            self.assertEqual(len(profile["revision"]), 40)
+            image, digest = profile["image"].split("@sha256:")
+            self.assertEqual(image, "nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc5")
+            self.assertEqual(len(digest), 64)
+
+    def test_deepseek_uses_official_weights_and_reviewed_source_commit(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        self.assertEqual(profile["model"], "deepseek-ai/DeepSeek-V4-Flash-0731")
+        self.assertEqual(profile["revision"], "9e165c30e2704aec5d9d593cce3eebd58bbef1cb")
+        self.assertEqual(profile["runtime_revision"],
+                         "f7299002a0bfb6658ea1bb83c0cfd2be88f5e897")
+        self.assertEqual(profile["runtime_tree"], "a880e225514fe88d5a8d6e69700e4888c17f130d")
+        self.assertEqual(profile["runtime_patch_sha256"],
+                         "4ddf9d519b8b098d0dd3f2fff981e7e726f5fea1c774ef09a8c4ee6314cb82cd")
+        self.assertEqual(profile["b12x_revision"],
+                         "7dc6fb8fcc6446ea093537d1657df81985fa5f43")
+        self.assertEqual(profile["b12x_archive_sha256"],
+                         "18a6b57739a493d5e6cca9f4f7bd91bf11d765905a43fa6dcbfc5b92d42a15a6")
+        self.assertIn("operator accepted", profile["b12x_license_provenance"])
+        self.assertEqual(profile["flashinfer_revision"],
+                         "0472b9b3f2fba11b463f8526f390297d52a8aad7")
+        self.assertEqual(profile["flashinfer_archive_sha256"],
+                         "d6f79757fd97bae845fd4ba763abe9643ad581376de15e161295e4b14e8ae865")
+        self.assertIn("Reederey87/dgx-spark-2x-deepseek-v4-flash", profile["runtime_repo"])
+        self.assertIn("@sha256:", profile["base_image"])
+
+    def test_deepseek_build_uses_only_verified_local_archives(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        dockerfile = mm._deepseek_dockerfile(
+            profile, "/usr/local/lib/python3.12/dist-packages/vllm")
+        self.assertNotIn("github.com/lukealonso/b12x/archive", dockerfile)
+        self.assertNotIn("github.com/flashinfer-ai/flashinfer/archive", dockerfile)
+        self.assertIn("sha256sum -c SHA256SUMS", dockerfile)
+        self.assertIn("BUILD_NVEP=0", dockerfile)
+        self.assertIn("/opt/otools/sources/b12x-", dockerfile)
+        self.assertIn("/opt/otools/sources/flashinfer-", dockerfile)
+        self.assertEqual(len(mm.DEEPSEEK_VLLM_PREIMAGES), 12)
+
+    def test_deepseek_manifest_binds_all_supply_chain_and_model_inputs(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        manifest = mm._deepseek_manifest_inputs(profile)
+        self.assertEqual(manifest["build_schema"], 2)
+        self.assertEqual(manifest["build_network"], "none")
+        self.assertEqual(manifest["preimages"], mm.DEEPSEEK_VLLM_PREIMAGES)
+        self.assertEqual(manifest["model_file_count"], 74)
+        self.assertEqual(manifest["model_shards"], 48)
+        self.assertEqual(manifest["model_size"], 166898660330)
+
+    def test_deepseek_model_hash_script_contains_no_literal_nul(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        payload = json.dumps({"sha256": "a" * 64, "files": 74,
+                              "shards": 48, "size": 166898660330})
+        completed = SimpleNamespace(returncode=0, stdout=payload, stderr="")
+        with mock.patch.object(mm, "remote_home", return_value="/home/user"), \
+                mock.patch.object(mm, "_host_exec", return_value=completed) as execute:
+            signature, detail = mm._deepseek_model_signature("user@worker", profile)
+        script = execute.call_args.args[1][2]
+        self.assertNotIn("\0", script)
+        self.assertIn('aggregate.update(b"\\0")', script)
+        self.assertEqual(signature["sha256"], "a" * 64)
+        self.assertEqual(detail, "")
+
+
+class ClusterRegistryTests(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.old = mm.CLUSTERS_FILE, mm.CLUSTER_DATA_DIR, mm.HOSTS_FILE
+        mm.CLUSTERS_FILE = os.path.join(self.root, "clusters.json")
+        mm.CLUSTER_DATA_DIR = os.path.join(self.root, "data")
+        mm.HOSTS_FILE = os.path.join(self.root, "hosts")
+        mm.save_hosts([("dgx4", "user@192.0.2.104")])
+
+    def tearDown(self):
+        mm.CLUSTERS_FILE, mm.CLUSTER_DATA_DIR, mm.HOSTS_FILE = self.old
+
+    def config(self):
+        return {
+            "name": "spark",
+            "head": "local",
+            "worker": "dgx4",
+            "fabric": {
+                "interfaces": ["enP7s7"],
+                "ucx_devices": ["mlx5_0:1"],
+                "head_ips": ["10.10.10.1"],
+                "worker_ips": ["10.10.10.2"],
+                "mtu": 9000,
+            },
+        }
+
+    def test_roundtrip_and_local_head_resolution(self):
+        cfg = self.config()
+        stored = dict(cfg)
+        stored.pop("name")
+        mm.save_clusters({"spark": stored})
+        self.assertEqual(mm.cluster_config("spark"), cfg)
+        self.assertEqual(mm._cluster_targets(cfg), (None, "user@192.0.2.104"))
+
+    def test_two_local_aliases_are_rejected(self):
+        cfg = self.config()
+        cfg["worker"] = "localhost"
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            mm._cluster_targets(cfg)
+
+    def test_qwen_argv_keeps_rdma_and_socket_devices_separate(self):
+        cfg = self.config()
+        profile = mm.CLUSTER_PROFILES["qwen3-235b-a22b-fp4"]
+        name, argv = mm.build_qwen_cluster_argv(
+            "qwen3-235b-a22b-fp4", profile, cfg, "head", None)
+        self.assertEqual(name, "otools-vllm-qwen3-235b-a22b-fp4-spark-head")
+        self.assertIn("UCX_NET_DEVICES=mlx5_0:1", argv)
+        self.assertIn("NCCL_IB_HCA==mlx5_0:1", argv)
+        self.assertIn("NCCL_SOCKET_IFNAME==enP7s7", argv)
+        self.assertIn("NCCL_NET=IB", argv)
+        self.assertIn("OMPI_MCA_btl_tcp_if_include=enP7s7", argv)
+        self.assertNotIn("UCX_NET_DEVICES=enP7s7", argv)
+        self.assertIn("otools.cluster=spark", argv)
+        self.assertIn(profile["runtime_image"], argv)
+
+    def test_deepseek_argv_is_offline_pinned_and_role_aware(self):
+        cfg = self.config()
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        _, head = mm.build_deepseek_cluster_argv(
+            "deepseek-v4-flash-0731", profile, cfg, "head", None)
+        _, worker = mm.build_deepseek_cluster_argv(
+            "deepseek-v4-flash-0731", profile, cfg, "worker", None)
+        self.assertIn(mm._deepseek_snapshot_path(profile), head)
+        self.assertIn("NCCL_NET=IB", head)
+        self.assertIn("NCCL_IB_HCA==mlx5_0:1", head)
+        self.assertIn("NCCL_SOCKET_IFNAME==enP7s7", head)
+        self.assertIn("HF_HUB_OFFLINE=1", head)
+        self.assertNotIn("--trust-remote-code", head)
+        self.assertEqual(head[head.index("--node-rank") + 1], "0")
+        self.assertEqual(worker[worker.index("--node-rank") + 1], "1")
+        self.assertNotIn("--headless", head)
+        self.assertIn("--headless", worker)
+
+    def test_local_runtime_sync_never_removes_its_source(self):
+        cfg = self.config()
+        local_root = os.path.join(self.root, "staging", "qwen-runtime")
+        os.makedirs(local_root)
+        with open(os.path.join(local_root, "Dockerfile"), "w") as f:
+            f.write("FROM scratch\n")
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with mock.patch.object(mm, "remote_home", return_value="/home/user"), \
+                mock.patch.object(mm, "_host_exec", return_value=completed) as execute, \
+                mock.patch.object(mm.subprocess, "run", return_value=completed) as copy:
+            mm._sync_cluster_files(cfg, local_root, "qwen-runtime")
+        self.assertTrue(os.path.isfile(os.path.join(local_root, "Dockerfile")))
+        copied = os.path.join(mm.CLUSTER_DATA_DIR, "spark", "qwen-runtime", "Dockerfile")
+        self.assertTrue(os.path.isfile(copied))
+        self.assertTrue(all(call.args[0] == "user@192.0.2.104" for call in execute.call_args_list))
+        self.assertEqual(copy.call_args.args[0][-1],
+                         "user@192.0.2.104:/home/user/.local/share/otools/clusters/spark/qwen-runtime")
+
+
+class ClusterSafetyTests(unittest.TestCase):
+    def config(self):
+        return {
+            "name": "spark", "head": "local", "worker": "user@worker",
+            "fabric": {"interfaces": ["enP7s7"], "ucx_devices": ["mlx5_0:1"],
+                       "head_ips": ["10.10.10.1"], "worker_ips": ["10.10.10.2"],
+                       "mtu": 9000},
+        }
+
+    def test_preflight_rejects_management_route_even_if_ping_succeeds(self):
+        calls = []
+
+        def host_text(target, args):
+            calls.append(args)
+            if args[:2] == ["hostnamectl", "--static"]:
+                return True, "head" if target is None else "worker"
+            if args[:2] == ["uname", "-m"]:
+                return True, "aarch64"
+            if args[0] == "nvidia-smi":
+                return True, "NVIDIA GB10, 580.1"
+            if args[:2] == ["docker", "version"]:
+                return True, "29.0"
+            if args[0] == "df":
+                return True, "Avail\n500G"
+            if args[0] == "ibdev2netdev":
+                return True, "mlx5_0 port 1 ==> enP7s7 (Up)"
+            if args[:3] == ["ip", "-o", "link"]:
+                return True, "enP7s7: <UP,LOWER_UP> mtu 9000"
+            if args[:4] == ["ip", "-o", "-4", "addr"]:
+                ip = "10.10.10.1" if target is None else "10.10.10.2"
+                return True, f" enP7s7    inet {ip}/24"
+            if args[0] == "cat":
+                return True, "9000"
+            if args[:3] == ["ip", "route", "get"]:
+                return True, f"{args[3]} via 192.168.1.1 dev wlP9s9"
+            if args[0] == "ping":
+                return True, "ok"
+            raise AssertionError(args)
+
+        with mock.patch.object(mm, "_host_text", side_effect=host_text), \
+                mock.patch.object(mm, "remote_home", return_value="/home/user"):
+            ok, results = mm.cluster_preflight(self.config(), require_fabric=True, quiet=True)
+        self.assertFalse(ok)
+        self.assertTrue(any(name.endswith("-route") and not passed
+                            for name, passed, _ in results))
+        pings = [args for args in calls if args[0] == "ping"]
+        self.assertTrue(all(args[1:3] == ["-I", "enP7s7"] for args in pings))
+
+    def test_preflight_route_match_does_not_accept_interface_prefix(self):
+        route = "10.10.10.2 dev enP7s70 src 10.10.10.1"
+        self.assertFalse(mm._route_uses_interface(route, "enP7s7"))
+        self.assertTrue(mm._route_uses_interface(route, "enP7s70"))
+
+    def test_busy_detection_includes_unmanaged_gpu_containers(self):
+        replies = [
+            (True, "abc\ndef"),
+            (True, "/manual-train\t[{\"Capabilities\":[[\"gpu\"]]}]\t[]\n"
+                   "/web\t[]\t[]"),
+        ]
+        with mock.patch.object(mm, "_host_text", side_effect=replies):
+            self.assertEqual(mm._cluster_busy(None), ["manual-train"])
+
+    def test_busy_detection_includes_native_gpu_processes(self):
+        replies = [(True, ""), (True, "1234, native-trainer")]
+        with mock.patch.object(mm, "_host_text", side_effect=replies):
+            self.assertEqual(mm._cluster_busy(None), ["host-gpu:1234:native-trainer"])
+
+    def test_prepare_refuses_heavy_work_on_busy_nodes(self):
+        args = SimpleNamespace(name="spark", profile="qwen3-235b-a22b-fp4",
+                               build=True, weights=True, allow_busy=False, dry_run=True)
+        with mock.patch.object(mm, "cluster_config", return_value=self.config()), \
+                mock.patch.object(mm, "cluster_preflight", return_value=(True, [])), \
+                mock.patch.object(mm, "_cluster_busy", side_effect=[["model-a"], ["model-b"]]), \
+                mock.patch.object(mm, "_prepare_qwen") as prepare, \
+                contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            mm.cmd_cluster_prepare(args)
+        prepare.assert_not_called()
+
+    def test_prepare_refuses_unknown_busy_state(self):
+        args = SimpleNamespace(name="spark", profile="qwen3-235b-a22b-fp4",
+                               build=False, weights=False, allow_busy=False, dry_run=True)
+        with mock.patch.object(mm, "cluster_config", return_value=self.config()), \
+                mock.patch.object(mm, "cluster_preflight", return_value=(True, [])), \
+                mock.patch.object(mm, "_cluster_busy", side_effect=[[], None]), \
+                mock.patch.object(mm, "_prepare_qwen") as prepare, \
+                contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            mm.cmd_cluster_prepare(args)
+        prepare.assert_not_called()
+
+    def test_stop_fails_when_a_node_is_unreachable(self):
+        args = SimpleNamespace(name="spark", yes=True)
+        with mock.patch.object(mm, "cluster_config", return_value=self.config()), \
+                mock.patch.object(mm, "list_managed", side_effect=[[], None]), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            mm.cmd_cluster_stop(args)
 
 
 if __name__ == "__main__":

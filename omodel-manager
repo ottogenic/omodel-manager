@@ -46,6 +46,8 @@ Stdlib only. Commands:
 """
 
 import argparse
+import hashlib
+import ipaddress
 import json
 import getpass
 import os
@@ -55,11 +57,12 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 
 def _default_config_path():
@@ -77,11 +80,18 @@ CONFIG_PATH = _default_config_path()
 # Secret store -- kept in ~/.config/otools (NOT next to the script / repo).
 HF_TOKEN_FILE = os.path.expanduser("~/.config/otools/hf_token")
 HOSTS_FILE = os.path.expanduser("~/.config/otools/hosts")  # remote hosts `ps` queries (managed by `install`)
+CLUSTERS_FILE = os.path.expanduser(os.environ.get(
+    "OMODEL_MANAGER_CLUSTERS", "~/.config/otools/clusters.json"))
+CLUSTER_DATA_DIR = os.path.expanduser(os.environ.get(
+    "OMODEL_MANAGER_CLUSTER_DATA", "~/.local/share/otools/clusters"))
 HF_TOKENS_URL = "https://huggingface.co/settings/tokens"
 LABEL_MANAGER = "otools.manager"
 LABEL_VALUE = "model_manager"
 LABEL_MODEL = "otools.model"
 LABEL_PORT = "otools.port"
+LABEL_CLUSTER = "otools.cluster"
+LABEL_ROLE = "otools.role"
+LABEL_BACKEND = "otools.backend"
 NAME_PREFIX = "otools-vllm-"
 # Base image: `vllm/vllm-openai:nightly` -- the tag NVIDIA's Qwen3.6-NVFP4 model card
 # recommends. It's MULTI-ARCH (amd64 + arm64), so Docker auto-selects the arm64 build on
@@ -93,6 +103,103 @@ NAME_PREFIX = "otools-vllm-"
 # Known-good fallback (== vLLM 0.23.1rc1.dev552, validated 2026-07-03 for Qwen3.6-NVFP4):
 #     vllm/vllm-openai@sha256:7feb2a09304e3b2d38e224a100316e84fe3205faa7605060609e2c02179cbca6
 DEFAULT_IMAGE = "vllm/vllm-openai:nightly"
+
+# Two-node profiles are deliberately separate from DEFAULT_CONFIG: normal profiles
+# describe one vLLM container, while these require coordinated role-aware lifecycles.
+# Every model source below is first-party (DeepSeek) or NVIDIA-published (Qwen).
+CLUSTER_PROFILES = {
+    "qwen3-235b-a22b-fp4": {
+        "backend": "trtllm-mpi",
+        "model": "nvidia/Qwen3-235B-A22B-FP4",
+        "revision": "21cfa2c9e152032eb60647ee7b46a2bbcd8d76d2",
+        "image": ("nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc5@"
+                  "sha256:fd231812c9cacc3cf41eb159a4ec8efefbd998ec51e43337bb9b3b65e559a944"),
+        "runtime_image": "otools/trtllm-mpi:1.3.0rc5-reviewed",
+        "port": 8355,
+        "max_model_len": 32768,
+        "max_batch_size": 1,
+        "status": "official-playbook",
+        "notes": "Exact model in NVIDIA's two-Spark TensorRT-LLM playbook.",
+    },
+    "qwen3-235b-a22b-instruct-2507-nvfp4": {
+        "backend": "trtllm-mpi",
+        "model": "nvidia/Qwen3-235B-A22B-Instruct-2507-NVFP4",
+        "revision": "1c4ec35802abf3a20672be7e5c51a098796f71d6",
+        "image": ("nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc5@"
+                  "sha256:fd231812c9cacc3cf41eb159a4ec8efefbd998ec51e43337bb9b3b65e559a944"),
+        "runtime_image": "otools/trtllm-mpi:1.3.0rc5-reviewed",
+        "port": 8355,
+        "max_model_len": 32768,
+        "max_batch_size": 1,
+        "status": "compatible-unvalidated",
+        "notes": "Official NVIDIA checkpoint; exact 2507 two-Spark combination needs validation.",
+    },
+    "qwen3-235b-a22b-thinking-2507-nvfp4": {
+        "backend": "trtllm-mpi",
+        "model": "nvidia/Qwen3-235B-A22B-Thinking-2507-NVFP4",
+        "revision": "963445d1b9d3318cae13a4477bdfae4c2c6dab1e",
+        "image": ("nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc5@"
+                  "sha256:fd231812c9cacc3cf41eb159a4ec8efefbd998ec51e43337bb9b3b65e559a944"),
+        "runtime_image": "otools/trtllm-mpi:1.3.0rc5-reviewed",
+        "port": 8355,
+        "max_model_len": 32768,
+        "max_batch_size": 1,
+        "status": "compatible-unvalidated",
+        "notes": "Official NVIDIA checkpoint; exact 2507 two-Spark combination needs validation.",
+    },
+    "deepseek-v4-flash-0731": {
+        "backend": "deepseek-vllm-mp",
+        "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+        # This is the official model revision qualified by the reviewed runtime.
+        "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+        "model_file_count": 74,
+        "model_size": 166898660330,
+        "model_shards": 48,
+        "runtime_repo": "https://github.com/Reederey87/dgx-spark-2x-deepseek-v4-flash.git",
+        "runtime_revision": "f7299002a0bfb6658ea1bb83c0cfd2be88f5e897",
+        "runtime_tree": "a880e225514fe88d5a8d6e69700e4888c17f130d",
+        "runtime_patch_sha256": "4ddf9d519b8b098d0dd3f2fff981e7e726f5fea1c774ef09a8c4ee6314cb82cd",
+        "b12x_revision": "7dc6fb8fcc6446ea093537d1657df81985fa5f43",
+        "b12x_archive_sha256": "18a6b57739a493d5e6cca9f4f7bd91bf11d765905a43fa6dcbfc5b92d42a15a6",
+        "b12x_license_provenance": ("Apache-2.0 declared in pyproject metadata; no bundled "
+                                    "license file; operator accepted 2026-08-10"),
+        "flashinfer_revision": "0472b9b3f2fba11b463f8526f390297d52a8aad7",
+        "flashinfer_archive_sha256": "d6f79757fd97bae845fd4ba763abe9643ad581376de15e161295e4b14e8ae865",
+        "base_image": ("vllm/vllm-openai@sha256:"
+                       "ffb2d59b1c059a5bd8d781320c9f5189de8293693b7d95da54befddaa54abf52"),
+        "download_image": ("nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc5@"
+                           "sha256:fd231812c9cacc3cf41eb159a4ec8efefbd998ec51e43337bb9b3b65e559a944"),
+        "image": "otools/vllm-deepseek-v4-flash-0731:reviewed",
+        "port": 8000,
+        "max_model_len": 32768,
+        "max_num_seqs": 1,
+        "status": "build-ready-fabric-pending",
+        "notes": "Official DeepSeek weights; locally built reviewed vLLM patch, never a community image.",
+    },
+}
+
+DEEPSEEK_VLLM_PREIMAGES = {
+    "vllm/config/cache.py": "ee2c0db3e4e6c9e9cab33d8be566c4b8101159d36c0d3787c30d47931ee2a9a4",
+    "vllm/config/speculative.py": "b0ccd70e399723d3720ed1178242f5becf0fe1bf6e4756972691114435db5bcf",
+    "vllm/config/vllm.py": "d4c31282c664c91bee81267a2134a9609d16c33e88cc40e0f020256346510a87",
+    "vllm/envs.py": "e078b0acb8e658faa6a8144d13a9036e2a82af40b348f419489a2607247cd936",
+    "vllm/model_executor/layers/fused_moe/oracle/mxfp4.py":
+        "665201b189cf7661a7bdf834809d83c66ad1589873cdfb8b4ad693faaefe223b",
+    "vllm/models/deepseek_v4/attention.py":
+        "67eae3f8c0aa621a6adb99b2558a6d3a0148d3bd00c58d1e6001544de00a6159",
+    "vllm/models/deepseek_v4/nvidia/flashinfer_sparse.py":
+        "f6674841a34047a3aa54772c260e24e73c3dc910f57a9b7ecca4fe6a3856745c",
+    "vllm/models/deepseek_v4/sparse_mla.py":
+        "8f62db6340d910734a7ce997dbdac1a9dfa266361612bfff8b2b9f5c9afbe972",
+    "vllm/utils/torch_utils.py":
+        "4b439b2ba954e5b4d9d4f86f9a26135ab995ba7d71f74a4d9f1763168921b406",
+    "vllm/v1/attention/backends/mla/flashmla_sparse.py":
+        "0544c431bbf311d7283fee7f34cd7ad8a2df7961380646f2c12db2e861608ee4",
+    "vllm/v1/attention/backends/mla/sparse_swa.py":
+        "ed27ea7344da151c0eca45a714dcc7126b660f034acbdf7a2d18b2d559c0c222",
+    "vllm/v1/kv_cache_interface.py":
+        "73b5967f23ff2d4526b984cf90c1203e550575e5f329650c8899269b8f78edcf",
+}
 
 # ----------------------------------------------------------------------------
 # Default config -- the committed SOURCE OF TRUTH (curated profiles). `config --init`
@@ -892,7 +999,9 @@ DEFAULT_CONFIG = {
                 "for this attention-only hybrid. Cold RC2 load was ~12-16 min from EXT4.",
                 "Sampling changed with RC2: generation_config.json is authoritative at temperature "
                 "1.0 / top_p 1.0 / top_k 20 / min_p 0.0. poolside_v1 tool+reasoning parsers and "
-                "enable_thinking=true remain correct; preserve prior reasoning for agent loops.",
+                "enable_thinking=true remain correct. Explicit <think>/</think> reasoning delimiters "
+                "work around vLLM 0.25.1 #49379 startup auto-initialization; preserve prior reasoning "
+                "for agent loops.",
                 "OVERTHINKING remains operationally relevant: a trivial multiplication used 2199 "
                 "tokens with thinking on but terminated correctly; thinking off answered in 65. "
                 "Keep output caps. repetition_penalty 1.10-1.15 is an opt-in loop mitigation, not a "
@@ -920,6 +1029,8 @@ DEFAULT_CONFIG = {
                 "enable-auto-tool-choice": True,
                 "tool-call-parser": "poolside_v1",
                 "reasoning-parser": "poolside_v1",
+                "reasoning-config": ('{"reasoning_start_str":"<think>",'
+                                     '"reasoning_end_str":"</think>"}'),
                 "default-chat-template-kwargs": '{"enable_thinking": true}',
                 "enable-log-requests": True,
             },
@@ -1241,7 +1352,9 @@ def run_remote(target, remote_cmd, capture=False, batch=True, tty=False, check=F
 
 
 def remote_home(target):
-    """Absolute $HOME on the remote (cached). Needed to resolve ~ for bind mounts."""
+    """Absolute $HOME on a local or remote target, cached for remote bind mounts."""
+    if target is None:
+        return os.path.expanduser("~")
     if target not in _remote_home_cache:
         res = run_remote(target, 'printf %s "$HOME"', capture=True, batch=True)
         home = res.stdout.strip() if res.returncode == 0 and res.stdout.strip() else ""
@@ -1573,6 +1686,998 @@ def save_hosts(pairs):
             print(target if alias == target else "%s\t%s" % (alias, target), file=f)
 
 
+# ============================================================================
+# Two-node cluster registry and preparation
+# ============================================================================
+def load_clusters(path=None):
+    """Load machine-local cluster definitions. This file contains addresses only,
+    never secrets, but is kept outside the repository with restrictive permissions."""
+    path = path or CLUSTERS_FILE
+    try:
+        with open(path) as f:
+            body = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"ERROR: could not read cluster registry {path}: {e}", file=sys.stderr)
+        sys.exit(1)
+    clusters = body.get("clusters", {}) if isinstance(body, dict) else {}
+    if not isinstance(clusters, dict):
+        print(f"ERROR: malformed cluster registry {path}: 'clusters' must be an object.",
+              file=sys.stderr)
+        sys.exit(1)
+    return clusters
+
+
+def save_clusters(clusters, path=None):
+    path = path or CLUSTERS_FILE
+    parent = os.path.dirname(path)
+    os.makedirs(parent, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".clusters-", dir=parent, text=True)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump({"$otools": "model_clusters", "version": 1,
+                       "clusters": clusters}, f, indent=2)
+            f.write("\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def cluster_profile(key):
+    try:
+        return json.loads(json.dumps(CLUSTER_PROFILES[key]))
+    except KeyError:
+        avail = ", ".join(sorted(CLUSTER_PROFILES))
+        print(f"ERROR: unknown cluster profile '{key}'. Available: {avail}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cluster_config(name):
+    clusters = load_clusters()
+    if name not in clusters:
+        avail = ", ".join(sorted(clusters)) or "(none)"
+        print(f"ERROR: unknown cluster '{name}'. Available: {avail}. "
+              f"Create one with `{_cli_name()} cluster add ...`.", file=sys.stderr)
+        sys.exit(1)
+    cfg = json.loads(json.dumps(clusters[name]))
+    cfg["name"] = name
+    return cfg
+
+
+def _safe_cluster_name(value, label="cluster name"):
+    if not value or not re.fullmatch(r"[A-Za-z0-9_.-]+", value):
+        print(f"ERROR: {label} must contain only letters, digits, dot, underscore, or dash.",
+              file=sys.stderr)
+        sys.exit(1)
+    return value
+
+
+def _safe_net_name(value):
+    if not value or not re.fullmatch(r"[A-Za-z0-9_.:-]+", value):
+        print(f"ERROR: unsafe network interface or address: {value!r}", file=sys.stderr)
+        sys.exit(1)
+    return value
+
+
+def _safe_ip(value):
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        print(f"ERROR: invalid fabric IP address: {value!r}", file=sys.stderr)
+        sys.exit(1)
+    if address.version != 4:
+        print("ERROR: cluster fabric currently requires IPv4 addresses.", file=sys.stderr)
+        sys.exit(1)
+    return value
+
+
+def _safe_ucx_device(value):
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+:[1-9][0-9]*", value or ""):
+        print(f"ERROR: UCX device must use device:port syntax, e.g. mlx5_0:1: {value!r}",
+              file=sys.stderr)
+        sys.exit(1)
+    return value
+
+
+def _route_uses_interface(route, interface):
+    return bool(re.search(r"\bdev\s+" + re.escape(interface) + r"(?:\s|$)", route))
+
+
+def _cluster_targets(cfg):
+    def target(value):
+        return None if value in ("local", "localhost") else resolve_host(value)
+
+    head = target(cfg["head"])
+    worker = target(cfg["worker"])
+    if head == worker:
+        print("ERROR: a cluster requires two distinct registered hosts.", file=sys.stderr)
+        sys.exit(1)
+    return head, worker
+
+
+def _host_exec(target, args, capture=False, check=False, tty=False):
+    """Execute a fixed argv on one cluster host. Local execution stays shell-free;
+    SSH necessarily invokes the remote shell, so every token is quoted independently."""
+    args = [str(a) for a in args]
+    if target:
+        cmd = " ".join(shlex.quote(a) for a in args)
+        return run_remote(target, cmd, capture=capture, batch=True, tty=tty, check=check)
+    return subprocess.run(args, text=True, capture_output=capture, check=check)
+
+
+def _host_text(target, args):
+    try:
+        res = _host_exec(target, args, capture=True)
+    except OSError as e:
+        return False, str(e)
+    text = ((res.stdout or "") + ("\n" + res.stderr if res.stderr else "")).strip()
+    return res.returncode == 0, text
+
+
+def _cluster_state_dir(name, target=None):
+    local = os.path.join(CLUSTER_DATA_DIR, _safe_cluster_name(name))
+    if not target:
+        return local
+    return os.path.join(remote_home(target), ".local", "share", "otools", "clusters",
+                        _safe_cluster_name(name))
+
+
+def _cluster_busy(target):
+    ok, body = _host_text(target, ["docker", "ps", "-q"])
+    if not ok:
+        return None
+    container_ids = body.split()
+    busy = []
+    if container_ids:
+        ok, details = _host_text(target, ["docker", "inspect", "--format",
+                                          "{{.Name}}\t{{json .HostConfig.DeviceRequests}}\t"
+                                          "{{json .HostConfig.Devices}}\t{{.HostConfig.Runtime}}\t"
+                                          "{{json .Config.Env}}"] + container_ids)
+        if not ok:
+            return None
+        for line in details.splitlines():
+            name, _, devices = line.partition("\t")
+            hardware = devices.lower()
+            if "gpu" in hardware or "nvidia" in hardware:
+                busy.append(name.lstrip("/"))
+    if busy:
+        return busy
+    ok, processes = _host_text(target, ["nvidia-smi", "--query-compute-apps=pid,process_name",
+                                        "--format=csv,noheader"])
+    if not ok:
+        return None
+    return ["host-gpu:" + line.strip().replace(", ", ":")
+            for line in processes.splitlines()
+            if line.strip() and "no running processes" not in line.lower()]
+
+
+def cluster_preflight(cfg, require_fabric=True, quiet=False):
+    """Validate two management hosts and, when requested, the exact QSFP/RoCE fabric.
+    Never falls back to the management LAN for distributed traffic."""
+    head, worker = _cluster_targets(cfg)
+    roles = (("head", head), ("worker", worker))
+    results, facts = [], {}
+
+    def record(role, check, ok, detail):
+        results.append((f"{role}:{check}", ok, detail))
+
+    for role, target in roles:
+        ok, hostname = _host_text(target, ["hostnamectl", "--static"])
+        record(role, "ssh", ok, hostname or target)
+        if not ok:
+            continue
+        facts[(role, "hostname")] = hostname
+        ok, arch = _host_text(target, ["uname", "-m"])
+        record(role, "arch", ok and arch == "aarch64", arch or "unknown")
+        ok, gpu = _host_text(target, ["nvidia-smi", "--query-gpu=name,driver_version",
+                                     "--format=csv,noheader"])
+        record(role, "gpu", ok and "GB10" in gpu, gpu or "nvidia-smi failed")
+        if ok:
+            facts[(role, "driver")] = gpu.split(",")[-1].strip()
+        ok, docker_ver = _host_text(target, ["docker", "version", "--format",
+                                                "{{.Server.Version}}"])
+        record(role, "docker", ok, docker_ver or "docker unavailable")
+        ok, disk = _host_text(target, ["df", "-BG", "--output=avail", remote_home(target)])
+        available = disk.splitlines()[-1].strip() if disk else "unknown"
+        match = re.search(r"(\d+)G", available)
+        record(role, "disk", ok and bool(match) and int(match.group(1)) >= 200,
+               available + " available (200G required)")
+
+    hostnames = [facts.get((r, "hostname")) for r, _ in roles]
+    if all(hostnames) and hostnames[0] == hostnames[1]:
+        record("pair", "identity", False, "both entries resolve to the same hostname")
+    drivers = [facts.get((r, "driver")) for r, _ in roles]
+    if all(drivers):
+        record("pair", "driver-parity", drivers[0] == drivers[1], " / ".join(drivers))
+
+    fabric = cfg.get("fabric", {})
+    interfaces = fabric.get("interfaces", [])
+    ucx_devices = fabric.get("ucx_devices", [])
+    head_ips = fabric.get("head_ips", [])
+    worker_ips = fabric.get("worker_ips", [])
+    mtu = int(fabric.get("mtu", 9000))
+    if require_fabric:
+        if not (len(interfaces) == len(ucx_devices) == len(head_ips) == len(worker_ips)
+                and interfaces):
+            record("pair", "fabric-config", False,
+                   "interfaces/ucx_devices/head_ips/worker_ips must be non-empty equal-length lists")
+        else:
+            for role, target, own_ips, peer_ips in (
+                    ("head", head, head_ips, worker_ips),
+                    ("worker", worker, worker_ips, head_ips)):
+                roce_ok, roce = _host_text(target, ["ibdev2netdev"])
+                for iface, ucx_device, own_ip, peer_ip in zip(
+                        interfaces, ucx_devices, own_ips, peer_ips):
+                    _safe_net_name(iface); _safe_ucx_device(ucx_device)
+                    _safe_ip(own_ip); _safe_ip(peer_ip)
+                    ok, link = _host_text(target, ["ip", "-o", "link", "show", "dev", iface])
+                    link_ok = ok and "UP" in link and "LOWER_UP" in link
+                    record(role, iface, link_ok, link or "interface missing/down")
+                    ok, addr = _host_text(target, ["ip", "-o", "-4", "addr", "show", "dev", iface])
+                    record(role, iface + "-ip", ok and f" {own_ip}/" in addr,
+                           addr or f"expected {own_ip}")
+                    ok, mtu_body = _host_text(target, ["cat", f"/sys/class/net/{iface}/mtu"])
+                    record(role, iface + "-mtu", ok and mtu_body == str(mtu),
+                           mtu_body or f"expected {mtu}")
+                    ok, route = _host_text(target, ["ip", "route", "get", peer_ip])
+                    exact_route = _route_uses_interface(route, iface)
+                    record(role, iface + "-route", ok and exact_route,
+                           route or f"expected route over {iface}")
+                    ok, ping = _host_text(target, ["ping", "-I", iface, "-c", "1", "-W", "2", "-M", "do",
+                                                           "-s", str(mtu - 28), peer_ip])
+                    record(role, iface + "-peer", ok, "jumbo ping ok" if ok else "peer unreachable")
+                    device, port = ucx_device.rsplit(":", 1)
+                    mapping = f"{device} port {port} ==> {iface} (Up)"
+                    record(role, iface + "-roce", roce_ok and mapping in roce,
+                           roce or f"expected active {mapping}")
+
+    hard_fail = any(ok is False for _, ok, _ in results)
+    if not quiet:
+        print(f"Cluster preflight: {cfg['name']} ({'fabric required' if require_fabric else 'management only'})")
+        _print_results(results)
+        if hard_fail and require_fabric:
+            print("\nNOT READY: launch is blocked. The manager will not fall back to Wi-Fi, "
+                  "Ethernet, or Tailscale for model traffic.")
+        elif hard_fail:
+            print("\nNOT READY: fix management/host parity failures before preparation.")
+        else:
+            print("\nREADY: all requested preflight gates passed.")
+    return not hard_fail, results
+
+
+def _sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _qwen_expected_manifest(profile):
+    asset_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cluster")
+    entrypoint = os.path.join(asset_dir, "trtllm-mn-entrypoint.sh")
+    license_path = os.path.join(asset_dir, "LICENSE.Apache-2.0")
+    if not os.path.isfile(entrypoint):
+        print(f"ERROR: missing pinned NVIDIA entrypoint asset: {entrypoint}", file=sys.stderr)
+        sys.exit(1)
+    if not os.path.isfile(license_path):
+        print(f"ERROR: missing NVIDIA asset license: {license_path}", file=sys.stderr)
+        sys.exit(1)
+    return {
+        "base_image": profile["image"],
+        "runtime_image": profile["runtime_image"],
+        "entrypoint_sha256": _sha256_file(entrypoint),
+        "license_sha256": _sha256_file(license_path),
+        "source": ("NVIDIA/dgx-spark-playbooks@"
+                   "1fb66f059ee427c5a3678b3117ef73aab042b458"),
+    }
+
+
+def _prepare_cluster_key(cfg, dry=False):
+    root = _cluster_state_dir(cfg["name"])
+    ssh_dir = os.path.join(root, "ssh")
+    key = os.path.join(ssh_dir, "id_ed25519")
+    if dry:
+        print(f"  would create deployment-specific MPI key: {key}")
+        return
+    os.makedirs(ssh_dir, exist_ok=True)
+    if not os.path.exists(key):
+        subprocess.run(["ssh-keygen", "-t", "ed25519", "-N", "", "-f", key,
+                        "-C", f"omodel-cluster-{cfg['name']}"], check=True)
+    pub = open(key + ".pub").read().strip()
+    auth = os.path.join(ssh_dir, "authorized_keys")
+    with open(auth, "w") as f:
+        f.write(pub + "\n")
+    for path, mode in ((key, 0o600), (key + ".pub", 0o644), (auth, 0o600)):
+        os.chmod(path, mode)
+
+
+def _clone_reviewed_runtime(profile, dry=False):
+    commit = profile["runtime_revision"]
+    root = os.path.join(CLUSTER_DATA_DIR, "sources", f"deepseek-v4-flash-{commit}")
+    if dry:
+        print(f"  would clone {profile['runtime_repo']} at {commit} -> {root}")
+        return root
+    os.makedirs(os.path.dirname(root), exist_ok=True)
+    if not os.path.isdir(os.path.join(root, ".git")):
+        subprocess.run(["git", "clone", "--no-checkout", profile["runtime_repo"], root],
+                       check=True)
+    subprocess.run(["git", "-C", root, "fetch", "--depth=1", "origin", commit], check=True)
+    subprocess.run(["git", "-C", root, "checkout", "--detach", commit], check=True)
+    head = subprocess.run(["git", "-C", root, "rev-parse", "HEAD"], text=True,
+                          capture_output=True, check=True).stdout.strip()
+    tree = subprocess.run(["git", "-C", root, "rev-parse", "HEAD^{tree}"], text=True,
+                          capture_output=True, check=True).stdout.strip()
+    dirty = subprocess.run(["git", "-C", root, "status", "--porcelain"], text=True,
+                           capture_output=True, check=True).stdout.strip()
+    if head != commit or tree != profile["runtime_tree"] or dirty:
+        print("ERROR: reviewed DeepSeek runtime checkout is not the expected clean commit.",
+              file=sys.stderr)
+        sys.exit(1)
+    patch = os.path.join(root, "patches", "vllm-026-rebase", "gx10-overlay-026.patch")
+    if _sha256_file(patch) != profile["runtime_patch_sha256"]:
+        print("ERROR: reviewed DeepSeek vLLM patch does not match its pinned digest.",
+              file=sys.stderr)
+        sys.exit(1)
+    manifest = {
+        "repository": profile["runtime_repo"],
+        "commit": commit,
+        "tree": tree,
+        "patch_sha256": profile["runtime_patch_sha256"],
+        "base_image": profile["base_image"],
+        "model": profile["model"],
+        "model_revision": profile["revision"],
+        "model_file_count": profile["model_file_count"],
+        "model_size": profile["model_size"],
+        "model_shards": profile["model_shards"],
+        "audit": "source reviewed; build and hardware qualification still required",
+    }
+    manifest_path = root + "-manifest.json"
+    with open(manifest_path, "w") as f:
+        json.dump(manifest, f, indent=2); f.write("\n")
+    return root
+
+
+def _download_verified_source(url, path, expected_sha256):
+    if os.path.isfile(path) and _sha256_file(path) == expected_sha256:
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    error = None
+    for attempt in range(3):
+        fd, tmp = tempfile.mkstemp(prefix=".source-", dir=os.path.dirname(path))
+        os.close(fd)
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "omodel-manager/0.3"})
+            with urllib.request.urlopen(request, timeout=120) as response, open(tmp, "wb") as out:
+                shutil.copyfileobj(response, out)
+            actual = _sha256_file(tmp)
+            if actual != expected_sha256:
+                raise RuntimeError(f"source archive hash mismatch: expected {expected_sha256}, got {actual}")
+            os.replace(tmp, path)
+            return
+        except (OSError, urllib.error.URLError, RuntimeError) as exc:
+            error = exc
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+    raise RuntimeError(f"failed to acquire reviewed source {url}: {error}")
+
+
+def _deepseek_dockerfile(profile, package_dir):
+    return f'''ARG VLLM_BASE={profile["base_image"]}
+FROM ${{VLLM_BASE}}
+ARG VLLM_PKG_DIR={package_dir}
+LABEL org.opencontainers.image.source="{profile["runtime_repo"]}"
+LABEL org.opencontainers.image.revision="{profile["runtime_revision"]}"
+LABEL org.opencontainers.image.description="Reviewed DeepSeek V4 Flash GB10 overlay"
+ENV FLASHINFER_DISABLE_VERSION_CHECK=1 BUILD_NVEP=0
+COPY overlay/ ${{VLLM_PKG_DIR}}/
+COPY artifacts/ /opt/otools/sources/
+COPY licenses/ /usr/share/doc/otools-deepseek/
+COPY gx10-overlay-026.patch /usr/share/doc/otools-deepseek/gx10-overlay-026.patch
+RUN cd /opt/otools/sources && sha256sum -c SHA256SUMS && \
+    BUILD_NVEP=0 python3 -m pip install --no-cache-dir --no-deps --no-build-isolation \
+      /opt/otools/sources/b12x-{profile["b12x_revision"]}.tar.gz && \
+    BUILD_NVEP=0 python3 -m pip install --no-cache-dir --no-deps --no-build-isolation \
+      --force-reinstall \
+      /opt/otools/sources/flashinfer-{profile["flashinfer_revision"]}.tar.gz
+ENTRYPOINT ["vllm", "serve"]
+'''
+
+
+def _tree_manifest(root, excluded=()):
+    excluded = set(excluded)
+    files = {}
+    for parent, dirs, names in os.walk(root):
+        dirs.sort()
+        for name in sorted(names):
+            path = os.path.join(parent, name)
+            relative = os.path.relpath(path, root)
+            if relative in excluded:
+                continue
+            files[relative] = {"sha256": _sha256_file(path), "size": os.path.getsize(path)}
+    return files
+
+
+def _verify_deepseek_context(target, root):
+    script = '''
+import hashlib, json, os, sys
+root = sys.argv[1]
+with open(os.path.join(root, "manifest.json")) as f:
+    manifest = json.load(f)
+files = {}
+for parent, dirs, names in os.walk(root):
+    dirs.sort()
+    for name in sorted(names):
+        path = os.path.join(parent, name)
+        relative = os.path.relpath(path, root)
+        if relative == "manifest.json":
+            continue
+        h = hashlib.sha256()
+        with open(path, "rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                h.update(block)
+        files[relative] = {"sha256": h.hexdigest(), "size": os.path.getsize(path)}
+if files != manifest.get("files"):
+    raise SystemExit("context file manifest mismatch")
+base = {k: v for k, v in manifest.items()
+        if k not in ("context_sha256", "built_images", "runtime_signatures", "model_signatures")}
+digest = hashlib.sha256(json.dumps(base, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+if digest != manifest.get("context_sha256"):
+    raise SystemExit("context digest mismatch")
+print(digest)
+'''
+    result = _host_exec(target, ["python3", "-c", script, root], capture=True)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _deepseek_runtime_context(profile, dry=False):
+    source = _clone_reviewed_runtime(profile, dry=dry)
+    root = os.path.join(CLUSTER_DATA_DIR, "builds", "deepseek-v4-flash-0731")
+    if dry:
+        print(f"  would stage hash-verified DeepSeek build context: {root}")
+        return root
+    if os.uname().machine not in ("aarch64", "arm64"):
+        raise RuntimeError("DeepSeek overlay extraction must run on an ARM64 control/head host")
+
+    print(f"Pulling official vLLM base for reviewed overlay extraction: {profile['base_image']} ...")
+    if _host_exec(None, ["docker", "pull", profile["base_image"]]).returncode != 0:
+        raise RuntimeError("failed to pull the official DeepSeek vLLM base")
+    arch = _host_exec(None, ["docker", "image", "inspect", "--format", "{{.Architecture}}",
+                              profile["base_image"]], capture=True)
+    if arch.returncode != 0 or arch.stdout.strip() != "arm64":
+        raise RuntimeError("official DeepSeek vLLM base is not the expected ARM64 image")
+
+    located = _host_exec(None, ["docker", "run", "--rm", "--entrypoint", "python3",
+                                  profile["base_image"], "-c",
+                                  "import os,vllm; print(os.path.dirname(vllm.__file__))"],
+                         capture=True)
+    if located.returncode != 0 or not located.stdout.strip():
+        raise RuntimeError("cannot locate vLLM package in the official base")
+    package_dir = located.stdout.strip().splitlines()[-1]
+
+    if os.path.isdir(root):
+        shutil.rmtree(root)
+    artifacts = os.path.join(root, "artifacts")
+    licenses = os.path.join(root, "licenses")
+    work = os.path.join(root, ".overlay-work")
+    os.makedirs(artifacts)
+    os.makedirs(licenses)
+    os.makedirs(work)
+
+    b12x_name = f"b12x-{profile['b12x_revision']}.tar.gz"
+    flashinfer_name = f"flashinfer-{profile['flashinfer_revision']}.tar.gz"
+    _download_verified_source(
+        f"https://github.com/lukealonso/b12x/archive/{profile['b12x_revision']}.tar.gz",
+        os.path.join(artifacts, b12x_name), profile["b12x_archive_sha256"])
+    _download_verified_source(
+        f"https://github.com/flashinfer-ai/flashinfer/archive/{profile['flashinfer_revision']}.tar.gz",
+        os.path.join(artifacts, flashinfer_name), profile["flashinfer_archive_sha256"])
+    with open(os.path.join(artifacts, "SHA256SUMS"), "w") as f:
+        f.write(f"{profile['b12x_archive_sha256']}  {b12x_name}\n")
+        f.write(f"{profile['flashinfer_archive_sha256']}  {flashinfer_name}\n")
+
+    patch_source = os.path.join(source, "patches", "vllm-026-rebase", "gx10-overlay-026.patch")
+    patch = os.path.join(root, "gx10-overlay-026.patch")
+    shutil.copyfile(patch_source, patch)
+    if _sha256_file(patch) != profile["runtime_patch_sha256"]:
+        raise RuntimeError("staged DeepSeek patch digest changed")
+    shutil.copyfile(os.path.join(source, "LICENSE"), os.path.join(licenses, "LICENSE.Apache-2.0"))
+    shutil.copyfile(os.path.join(source, "NOTICE"), os.path.join(licenses, "NOTICE"))
+    with open(os.path.join(licenses, "B12X-PROVENANCE.txt"), "w") as f:
+        f.write(profile["b12x_license_provenance"] + "\n")
+        f.write(f"source: https://github.com/lukealonso/b12x/tree/{profile['b12x_revision']}\n")
+        f.write(f"archive-sha256: {profile['b12x_archive_sha256']}\n")
+
+    created = _host_exec(None, ["docker", "create", profile["base_image"]], capture=True)
+    if created.returncode != 0 or not created.stdout.strip():
+        raise RuntimeError("cannot create extraction container from official vLLM base")
+    container_id = created.stdout.strip()
+    try:
+        for relative, expected in DEEPSEEK_VLLM_PREIMAGES.items():
+            destination = os.path.join(work, relative)
+            os.makedirs(os.path.dirname(destination), exist_ok=True)
+            source_in_image = package_dir + "/" + relative[len("vllm/"):]
+            copied = _host_exec(None, ["docker", "cp", f"{container_id}:{source_in_image}",
+                                       destination])
+            if copied.returncode != 0:
+                raise RuntimeError(f"failed to extract reviewed preimage {relative}")
+            actual = _sha256_file(destination)
+            if actual != expected:
+                raise RuntimeError(f"official base preimage mismatch for {relative}: {actual}")
+    finally:
+        _host_exec(None, ["docker", "rm", "-f", container_id], capture=True)
+
+    subprocess.run(["git", "-C", work, "init", "-q"], check=True)
+    subprocess.run(["git", "-C", work, "apply", "--check", patch], check=True)
+    subprocess.run(["git", "-C", work, "apply", patch], check=True)
+    overlay = os.path.join(root, "overlay")
+    shutil.move(os.path.join(work, "vllm"), overlay)
+    shutil.rmtree(work)
+
+    dockerfile_path = os.path.join(root, "Dockerfile")
+    with open(dockerfile_path, "w") as f:
+        f.write(_deepseek_dockerfile(profile, package_dir))
+    manifest = {
+        "build_schema": 2,
+        "runtime_repository": profile["runtime_repo"],
+        "runtime_commit": profile["runtime_revision"],
+        "runtime_tree": profile["runtime_tree"],
+        "patch_sha256": profile["runtime_patch_sha256"],
+        "base_image": profile["base_image"],
+        "vllm_package_dir": package_dir,
+        "b12x_revision": profile["b12x_revision"],
+        "b12x_archive_sha256": profile["b12x_archive_sha256"],
+        "b12x_license_provenance": profile["b12x_license_provenance"],
+        "flashinfer_revision": profile["flashinfer_revision"],
+        "flashinfer_archive_sha256": profile["flashinfer_archive_sha256"],
+        "model": profile["model"],
+        "model_revision": profile["revision"],
+        "build_network": "none",
+        "preimages": DEEPSEEK_VLLM_PREIMAGES,
+        "dockerfile_sha256": _sha256_file(dockerfile_path),
+    }
+    manifest["files"] = _tree_manifest(root, excluded=("manifest.json",))
+    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    manifest["context_sha256"] = hashlib.sha256(canonical).hexdigest()
+    with open(os.path.join(root, "manifest.json"), "w") as f:
+        json.dump(manifest, f, indent=2); f.write("\n")
+    return root
+
+
+def _deepseek_runtime_signature(target, image):
+    overlay_files = [path[len("vllm/"):] for path in sorted(DEEPSEEK_VLLM_PREIMAGES)]
+    overlay_files.append("model_executor/layers/fused_moe/experts/b12x_mxfp4_moe.py")
+    smoke = (
+        "import hashlib,pathlib,vllm,b12x,flashinfer; "
+        "p=pathlib.Path(vllm.__file__).parent; "
+        "assert vllm.__version__.startswith('0.26.0'); "
+        "assert 'upstream guard downgraded' in (p/'config/speculative.py').read_text(); "
+        "assert '\"nvfp4_ds_mla\",' in (p/'config/cache.py').read_text(); "
+        "assert 'Skipping zero-token sparse prefill chunk' in "
+        "(p/'models/deepseek_v4/nvidia/flashinfer_sparse.py').read_text(); "
+        "assert 'active_topk_width' in (p/'models/deepseek_v4/sparse_mla.py').read_text(); "
+        "assert 'skip_k_cache_insert' in (p/'models/deepseek_v4/attention.py').read_text(); "
+        "h=hashlib.sha256(); "
+        "roots=[pathlib.Path(b12x.__file__).parent,pathlib.Path(flashinfer.__file__).parent]; "
+        "files=sorted((root,f) for root in roots for f in root.rglob('*') if f.is_file() "
+        "and '__pycache__' not in f.parts and f.suffix != '.pyc'); "
+        "[(h.update(str(f.relative_to(root)).encode()),h.update(f.read_bytes())) "
+        "for root,f in files]; "
+        f"overlay={json.dumps(overlay_files)}; "
+        "[(h.update(rel.encode()),h.update((p/rel).read_bytes())) for rel in overlay]; "
+        "print(vllm.__version__,h.hexdigest())")
+    result = _host_exec(target, ["docker", "run", "--rm", "--entrypoint", "python3",
+                                 image, "-c", smoke], capture=True)
+    if result.returncode != 0:
+        return None, ((result.stdout or "") + (result.stderr or "")).strip()
+    return result.stdout.strip(), ""
+
+
+def _deepseek_model_signature(target, profile):
+    repo = profile["model"].replace("/", "--")
+    snapshot = os.path.join(remote_home(target), ".cache", "huggingface", "hub",
+                            f"models--{repo}", "snapshots", profile["revision"])
+    script = '''
+import hashlib, json, os, pathlib, sys
+snapshot = pathlib.Path(sys.argv[1])
+expected_files, expected_size, expected_shards = map(int, sys.argv[2:5])
+repo = snapshot.parent.parent.resolve()
+files = sorted(path for path in snapshot.rglob("*") if path.is_file())
+if len(files) != expected_files:
+    raise SystemExit(f"expected {expected_files} files, found {len(files)}")
+shards = [path for path in files if path.name.startswith("model-") and path.suffix == ".safetensors"]
+if len(shards) != expected_shards:
+    raise SystemExit(f"expected {expected_shards} shards, found {len(shards)}")
+aggregate = hashlib.sha256()
+total = 0
+for path in files:
+    resolved = path.resolve()
+    if os.path.commonpath((str(repo), str(resolved))) != str(repo):
+        raise SystemExit(f"snapshot link escapes model repository: {path}")
+    digest = hashlib.sha256()
+    with open(resolved, "rb") as stream:
+        for block in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+            digest.update(block)
+    size = resolved.stat().st_size
+    total += size
+    aggregate.update(str(path.relative_to(snapshot)).encode())
+    aggregate.update(b"\\0")
+    aggregate.update(digest.digest())
+if total != expected_size:
+    raise SystemExit(f"expected {expected_size} bytes, found {total}")
+print(json.dumps({"sha256": aggregate.hexdigest(), "files": len(files),
+                  "shards": len(shards), "size": total}, sort_keys=True))
+'''
+    result = _host_exec(target, ["python3", "-c", script, snapshot,
+                                 profile["model_file_count"], profile["model_size"],
+                                 profile["model_shards"]], capture=True)
+    detail = ((result.stdout or "") + ("\n" + result.stderr if result.stderr else "")).strip()
+    if result.returncode != 0:
+        return None, detail
+    try:
+        return json.loads(result.stdout), ""
+    except json.JSONDecodeError:
+        return None, detail
+
+
+def _prepare_deepseek(cfg, profile, build=False, weights=False, dry=False):
+    context = _deepseek_runtime_context(profile, dry=dry) if build else _clone_reviewed_runtime(
+        profile, dry=dry)
+    if not dry:
+        print(f"  reviewed source ready: {context}")
+    if weights:
+        _download_cluster_snapshot(cfg, profile, profile["download_image"], "DeepSeek", dry=dry)
+    if not build:
+        return
+    if dry:
+        print(f"  would build {profile['image']} with --network=none on both nodes")
+        return
+
+    _sync_cluster_files(cfg, context, "deepseek-runtime")
+    head, worker = _cluster_targets(cfg)
+    with open(os.path.join(context, "manifest.json")) as f:
+        staged_manifest = json.load(f)
+    for role, target in (("head", head), ("worker", worker)):
+        remote_context = os.path.join(_cluster_state_dir(cfg["name"], target),
+                                      "deepseek-runtime")
+        verified = _verify_deepseek_context(target, remote_context)
+        if verified != staged_manifest["context_sha256"]:
+            raise RuntimeError(f"DeepSeek build context verification failed on {role}")
+    built_images, runtime_signatures = {}, {}
+    for role, target in (("head", head), ("worker", worker)):
+        print(f"Pulling official DeepSeek base on {role} ({target or 'local'}) ...")
+        if _host_exec(target, ["docker", "pull", profile["base_image"]]).returncode != 0:
+            raise RuntimeError(f"official DeepSeek base pull failed on {role}")
+        architecture = _host_exec(target, ["docker", "image", "inspect", "--format",
+                                           "{{.Architecture}}", profile["base_image"]], capture=True)
+        if architecture.returncode != 0 or architecture.stdout.strip() != "arm64":
+            raise RuntimeError(f"official DeepSeek base architecture mismatch on {role}")
+        remote_context = os.path.join(_cluster_state_dir(cfg["name"], target),
+                                      "deepseek-runtime")
+        print(f"Building reviewed DeepSeek runtime on {role} with network disabled ...")
+        command = ["docker", "build", "--network=none", "--build-arg",
+                   f"VLLM_BASE={profile['base_image']}", "-t", profile["image"], remote_context]
+        if _host_exec(target, command).returncode != 0:
+            raise RuntimeError(f"DeepSeek runtime build failed on {role}")
+        inspected = _host_exec(target, ["docker", "image", "inspect", "--format", "{{.Id}}",
+                                        profile["image"]], capture=True)
+        if inspected.returncode != 0:
+            raise RuntimeError(f"cannot record DeepSeek runtime identity on {role}")
+        signature, detail = _deepseek_runtime_signature(target, profile["image"])
+        if not signature:
+            raise RuntimeError(f"DeepSeek runtime smoke failed on {role}: {detail}")
+        built_images[role] = inspected.stdout.strip()
+        runtime_signatures[role] = signature
+
+    if len(set(runtime_signatures.values())) != 1:
+        raise RuntimeError("DeepSeek installed runtime contents differ between head and worker")
+    model_signatures = {}
+    for role, target in (("head", head), ("worker", worker)):
+        print(f"Hashing exact DeepSeek snapshot on {role} ...")
+        signature, detail = _deepseek_model_signature(target, profile)
+        if not signature:
+            raise RuntimeError(f"DeepSeek model verification failed on {role}: {detail}")
+        model_signatures[role] = signature
+    if len({json.dumps(value, sort_keys=True) for value in model_signatures.values()}) != 1:
+        raise RuntimeError("DeepSeek model snapshots differ between head and worker")
+
+    manifest_path = os.path.join(context, "manifest.json")
+    with open(manifest_path) as f:
+        manifest = json.load(f)
+    manifest["built_images"] = built_images
+    manifest["runtime_signatures"] = runtime_signatures
+    manifest["model_signatures"] = model_signatures
+    with open(manifest_path, "w") as f:
+        json.dump(manifest, f, indent=2); f.write("\n")
+    print("DeepSeek runtime built and smoke-tested on both nodes; launch still requires fabric.")
+
+
+def _copy_to_host(target, local, remote):
+    if target is None:
+        if os.path.abspath(local) != os.path.abspath(remote):
+            os.makedirs(os.path.dirname(remote), exist_ok=True)
+            shutil.copyfile(local, remote)
+        return
+    parent = os.path.dirname(remote)
+    _host_exec(target, ["mkdir", "-p", parent], check=True)
+    res = subprocess.run(["scp"] + ssh_opts() + [local, f"{target}:{remote}"], text=True)
+    if res.returncode != 0:
+        raise RuntimeError(f"failed to copy {local} to {target}:{remote}")
+
+
+def _qwen_runtime_context(cfg, profile):
+    root = os.path.join(_cluster_state_dir(cfg["name"]), "qwen-runtime")
+    os.makedirs(root, exist_ok=True)
+    entrypoint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cluster",
+                              "trtllm-mn-entrypoint.sh")
+    license_path = os.path.join(os.path.dirname(entrypoint), "LICENSE.Apache-2.0")
+    manifest = _qwen_expected_manifest(profile)
+    shutil.copyfile(entrypoint, os.path.join(root, "trtllm-mn-entrypoint.sh"))
+    shutil.copyfile(license_path, os.path.join(root, "LICENSE.Apache-2.0"))
+    dockerfile = (
+        "ARG BASE\n"
+        "FROM ${BASE}\n"
+        "LABEL org.opencontainers.image.source=\"https://github.com/NVIDIA/dgx-spark-playbooks\"\n"
+        "LABEL org.opencontainers.image.revision=\"1fb66f059ee427c5a3678b3117ef73aab042b458\"\n"
+        "RUN apt-get update && apt-get install -y --no-install-recommends openssh-server "
+        "&& rm -rf /var/lib/apt/lists/*\n"
+        "COPY trtllm-mn-entrypoint.sh /opt/otools/trtllm-mn-entrypoint.sh\n"
+        "COPY LICENSE.Apache-2.0 /usr/share/doc/otools-cluster/LICENSE.Apache-2.0\n"
+        "RUN chmod 0755 /opt/otools/trtllm-mn-entrypoint.sh\n"
+    )
+    with open(os.path.join(root, "Dockerfile"), "w") as f:
+        f.write(dockerfile)
+    manifest_path = os.path.join(root, "manifest.json")
+    try:
+        with open(manifest_path) as f:
+            previous = json.load(f)
+        if all(previous.get(key) == value for key, value in manifest.items()):
+            manifest["built_images"] = previous.get("built_images", {})
+            manifest["runtime_signatures"] = previous.get("runtime_signatures", {})
+    except (OSError, json.JSONDecodeError):
+        pass
+    with open(manifest_path, "w") as f:
+        json.dump(manifest, f, indent=2); f.write("\n")
+    return root
+
+
+def _sync_cluster_files(cfg, local_root, remote_leaf):
+    head, worker = _cluster_targets(cfg)
+    for _, target in (("head", head), ("worker", worker)):
+        remote_root = os.path.join(_cluster_state_dir(cfg["name"], target), remote_leaf)
+        if target is None and os.path.abspath(local_root) == os.path.abspath(remote_root):
+            continue
+        if target is None:
+            if os.path.isdir(remote_root):
+                shutil.rmtree(remote_root)
+            os.makedirs(os.path.dirname(remote_root), exist_ok=True)
+            shutil.copytree(local_root, remote_root)
+            continue
+        _host_exec(target, ["rm", "-rf", remote_root], check=True)
+        _host_exec(target, ["mkdir", "-p", os.path.dirname(remote_root)], check=True)
+        res = subprocess.run(["scp"] + ssh_opts() + ["-r", local_root,
+                             f"{target}:{remote_root}"], text=True)
+        if res.returncode != 0:
+            print(f"ERROR: failed to copy cluster runtime to {target}", file=sys.stderr)
+            sys.exit(res.returncode)
+
+
+def _sync_cluster_key(cfg):
+    head, worker = _cluster_targets(cfg)
+    local = os.path.join(_cluster_state_dir(cfg["name"]), "ssh")
+    for target in (head, worker):
+        remote = os.path.join(_cluster_state_dir(cfg["name"], target), "ssh")
+        if target is None and os.path.abspath(local) == os.path.abspath(remote):
+            continue
+        _host_exec(target, ["rm", "-rf", remote], check=True)
+        _host_exec(target, ["mkdir", "-p", os.path.dirname(remote)], check=True)
+        res = subprocess.run(["scp"] + ssh_opts() + ["-r", local,
+                             f"{target}:{os.path.dirname(remote)}/"], text=True)
+        if res.returncode != 0:
+            print(f"ERROR: failed to copy deployment key to {target}", file=sys.stderr)
+            sys.exit(res.returncode)
+        _host_exec(target, ["chmod", "700", remote], check=True)
+        _host_exec(target, ["chmod", "600", os.path.join(remote, "id_ed25519"),
+                            os.path.join(remote, "authorized_keys")], check=True)
+
+
+def _download_cluster_snapshot(cfg, profile, image, family, dry=False):
+    head, worker = _cluster_targets(cfg)
+    if dry:
+        print(f"  would download {profile['model']} at {profile['revision']} on both nodes")
+        return
+    for role, target in (("head", head), ("worker", worker)):
+        cache = os.path.join(remote_home(target), ".cache", "huggingface")
+        _host_exec(target, ["mkdir", "-p", cache], check=True)
+        print(f"Downloading official {family} snapshot on {role} ({target or 'local'}) ...")
+        cmd = ["docker", "run", "--rm", "--network", "host", "--entrypoint", "hf",
+               "-e", "HF_HUB_DISABLE_XET=1", "-e", "HF_HUB_DOWNLOAD_TIMEOUT=600",
+               "-e", "HF_HUB_ETAG_TIMEOUT=60",
+               "-v", f"{cache}:/root/.cache/huggingface"]
+        token = os.path.join(remote_home(target), ".config", "otools", "hf_token")
+        if _host_exec(target, ["test", "-s", token], capture=True).returncode == 0:
+            cmd += ["-e", "HF_TOKEN_PATH=/run/secrets/hf_token",
+                    "-v", f"{token}:/run/secrets/hf_token:ro"]
+        cmd += [image, "download", profile["model"], "--revision", profile["revision"],
+                "--max-workers", "4"]
+        if _host_exec(target, cmd).returncode != 0:
+            print(f"ERROR: model download failed on {role}; rerun to resume.", file=sys.stderr)
+            sys.exit(1)
+        repo = profile["model"].replace("/", "--")
+        snapshot = os.path.join(cache, "hub", f"models--{repo}", "snapshots",
+                                profile["revision"])
+        if _host_exec(target, ["test", "-d", snapshot], capture=True).returncode != 0:
+            print(f"ERROR: exact snapshot {profile['revision']} missing on {role} after download.",
+                  file=sys.stderr)
+            sys.exit(1)
+
+
+def _prepare_qwen(cfg, profile, build=False, weights=False, dry=False):
+    _prepare_cluster_key(cfg, dry=dry)
+    if dry:
+        print("  would stage the pinned NVIDIA entrypoint and local Docker build context")
+        if build:
+            print(f"  would build {profile['runtime_image']} from {profile['image']} on both nodes")
+        if weights:
+            _download_cluster_snapshot(cfg, profile, profile["image"], "Qwen", dry=True)
+        return
+    context = _qwen_runtime_context(cfg, profile)
+    _sync_cluster_key(cfg)
+    _sync_cluster_files(cfg, context, "qwen-runtime")
+    head, worker = _cluster_targets(cfg)
+    if build:
+        built_images, runtime_signatures = {}, {}
+        for role, target in (("head", head), ("worker", worker)):
+            remote_context = os.path.join(_cluster_state_dir(cfg["name"], target),
+                                          "qwen-runtime")
+            print(f"Building reviewed TRT-LLM runtime on {role} ({target}) ...")
+            cmd = ["docker", "build", "--pull", "--build-arg", f"BASE={profile['image']}",
+                   "-t", profile["runtime_image"], remote_context]
+            if _host_exec(target, cmd).returncode != 0:
+                print(f"ERROR: TRT-LLM runtime build failed on {role}.", file=sys.stderr)
+                sys.exit(1)
+            inspected = _host_exec(target, ["docker", "image", "inspect", "--format",
+                                             "{{.Id}}", profile["runtime_image"]], capture=True)
+            if inspected.returncode != 0:
+                print(f"ERROR: cannot record built runtime identity on {role}.", file=sys.stderr)
+                sys.exit(1)
+            built_images[role] = inspected.stdout.strip()
+            runtime_signatures[role] = _qwen_runtime_signature(target, profile["runtime_image"])
+            if not runtime_signatures[role]:
+                print(f"ERROR: cannot record built runtime contents on {role}.", file=sys.stderr)
+                sys.exit(1)
+        manifest_path = os.path.join(context, "manifest.json")
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+        manifest["built_images"] = built_images
+        manifest["runtime_signatures"] = runtime_signatures
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f, indent=2); f.write("\n")
+    if weights:
+        image = profile["runtime_image"] if build else profile["image"]
+        _download_cluster_snapshot(cfg, profile, image, "Qwen")
+
+
+def _cluster_container_name(profile_key, cluster_name, role):
+    raw = f"{profile_key}-{cluster_name}-{role}"
+    safe = re.sub(r"[^a-zA-Z0-9_.-]", "-", raw)
+    return NAME_PREFIX + safe
+
+
+def _cluster_docker_labels(profile_key, cfg, role, backend, port=None):
+    labels = ["--label", f"{LABEL_MANAGER}={LABEL_VALUE}",
+              "--label", f"{LABEL_MODEL}={profile_key}",
+              "--label", f"{LABEL_CLUSTER}={cfg['name']}",
+              "--label", f"{LABEL_ROLE}={role}",
+              "--label", f"{LABEL_BACKEND}={backend}"]
+    if port:
+        labels += ["--label", f"{LABEL_PORT}={port}"]
+    return labels
+
+
+def build_qwen_cluster_argv(profile_key, profile, cfg, role, target):
+    fabric = cfg["fabric"]
+    interfaces = ",".join(fabric["interfaces"])
+    ucx_devices = ",".join(fabric["ucx_devices"])
+    state = _cluster_state_dir(cfg["name"], target)
+    name = _cluster_container_name(profile_key, cfg["name"], role)
+    argv = ["run", "-d", "--rm", "--name", name]
+    argv += _cluster_docker_labels(profile_key, cfg, role, profile["backend"],
+                                   profile["port"] if role == "head" else None)
+    argv += ["--gpus", "all", "--network", "host", "--ipc=host",
+             "--ulimit", "memlock=-1", "--ulimit", "stack=67108864",
+             "--device", "/dev/infiniband:/dev/infiniband",
+             "-e", f"UCX_NET_DEVICES={ucx_devices}",
+             "-e", f"NCCL_IB_HCA=={ucx_devices}",
+             "-e", "NCCL_IB_DISABLE=0",
+             "-e", "NCCL_NET=IB",
+             "-e", f"NCCL_SOCKET_IFNAME=={interfaces}",
+             "-e", f"OMPI_MCA_btl_tcp_if_include={interfaces}",
+             "-e", "OMPI_MCA_orte_default_hostfile=/etc/openmpi-hostfile",
+             "-e", "OMPI_MCA_rmaps_ppr_n_pernode=1",
+             "-e", "OMPI_ALLOW_RUN_AS_ROOT=1",
+             "-e", "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1",
+             "-e", "CPATH=/usr/local/cuda/include",
+             "-e", "TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas",
+             "-v", f"{os.path.join(state, 'ssh')}:/tmp/.ssh:ro",
+             "-v", f"{os.path.join(remote_home(target), '.cache', 'huggingface')}"
+                   ":/root/.cache/huggingface",
+             profile["runtime_image"], "sh", "/opt/otools/trtllm-mn-entrypoint.sh"]
+    return name, argv
+
+
+def _deepseek_snapshot_path(profile):
+    repo = profile["model"].replace("/", "--")
+    return f"/cache/huggingface/hub/models--{repo}/snapshots/{profile['revision']}"
+
+
+def build_deepseek_cluster_argv(profile_key, profile, cfg, role, target):
+    fabric = cfg["fabric"]
+    interfaces = ",".join(fabric["interfaces"])
+    hcas = ",".join(fabric["ucx_devices"])
+    role_ips = fabric["head_ips"] if role == "head" else fabric["worker_ips"]
+    name = _cluster_container_name(profile_key, cfg["name"], role)
+    home = remote_home(target)
+    runtime_cache = os.path.join(home, ".cache", "otools", "deepseek-v4-flash-0731")
+    argv = ["run", "-d", "--rm", "--name", name]
+    argv += _cluster_docker_labels(profile_key, cfg, role, profile["backend"],
+                                   profile["port"] if role == "head" else None)
+    argv += ["--gpus", "all", "--network", "host", "--ipc=host", "--shm-size", "64g",
+             "--ulimit", "memlock=-1", "--ulimit", "stack=67108864",
+             "--device", "/dev/infiniband:/dev/infiniband",
+             "-v", f"{os.path.join(home, '.cache', 'huggingface')}:/cache/huggingface:ro",
+             "-v", f"{runtime_cache}:/cache/runtime",
+             "-e", "HF_HOME=/cache/huggingface", "-e", "HF_HUB_OFFLINE=1",
+             "-e", "TRANSFORMERS_OFFLINE=1", "-e", "HF_HUB_DISABLE_XET=1",
+             "-e", "VLLM_CACHE_ROOT=/cache/runtime/vllm", "-e", "TRITON_CACHE_DIR=/cache/runtime/triton",
+             "-e", "TILELANG_CACHE_DIR=/cache/runtime/tilelang",
+             "-e", "FLASHINFER_DISABLE_VERSION_CHECK=1",
+             "-e", "VLLM_USE_FLASHINFER_SAMPLER=1", "-e", "VLLM_USE_BREAKABLE_CUDAGRAPH=1",
+             "-e", "TORCH_CUDA_ARCH_LIST=12.1a", "-e", "FLASHINFER_CUDA_ARCH_LIST=12.1a",
+             "-e", "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True",
+             "-e", "NCCL_NET=IB", "-e", "NCCL_IB_DISABLE=0", "-e", f"NCCL_IB_HCA=={hcas}",
+             "-e", f"NCCL_SOCKET_IFNAME=={interfaces}",
+             "-e", f"GLOO_SOCKET_IFNAME={fabric['interfaces'][0]}",
+             "-e", "NCCL_CROSS_NIC=1", "-e", "NCCL_IB_MERGE_NICS=1",
+             "-e", "NCCL_CUMEM_ENABLE=0", "-e", "NCCL_IGNORE_CPU_AFFINITY=1",
+             "-e", "NCCL_NVLS_ENABLE=0", "-e", "NCCL_DEBUG=INFO",
+             "-e", f"VLLM_HOST_IP={role_ips[0]}", profile["image"],
+             _deepseek_snapshot_path(profile), "--served-model-name", "deepseek-v4-flash-dspark",
+             "--host", "127.0.0.1", "--port", str(profile["port"]),
+             "--tensor-parallel-size", "2", "--pipeline-parallel-size", "1",
+             "--kv-cache-dtype", "nvfp4_ds_mla", "--block-size", "256",
+             "--max-model-len", str(profile["max_model_len"]),
+             "--max-num-seqs", str(profile["max_num_seqs"]),
+             "--max-num-batched-tokens", "8192", "--long-prefill-token-threshold", "4096",
+             "--gpu-memory-utilization", "0.85", "--enable-prefix-caching",
+             "--no-async-scheduling", "--enable-chunked-prefill",
+             "--speculative-config",
+             '{"method":"dspark","num_speculative_tokens":2,"draft_sample_method":"probabilistic"}',
+             "--tokenizer-mode", "deepseek_v4", "--attention-config",
+             '{"backend":"FLASHINFER_MLA_SPARSE_DSV4"}',
+             "--distributed-executor-backend", "mp", "--tool-call-parser", "deepseek_v4",
+             "--enable-auto-tool-choice", "--reasoning-parser", "deepseek_v4",
+             "--reasoning-config",
+             '{"reasoning_parser":"deepseek_v4","reasoning_start_str":"<think>","reasoning_end_str":"</think>"}',
+             "--default-chat-template-kwargs", '{"thinking":true,"reasoning_effort":"high"}',
+             "--generation-config", "vllm", "--override-generation-config",
+             '{"temperature":1.0,"top_p":1.0}', "--enable-flashinfer-autotune",
+             "--nnodes", "2", "--node-rank", "0" if role == "head" else "1",
+             "--master-addr", fabric["head_ips"][0], "--master-port", "25000"]
+    if role == "worker":
+        argv.append("--headless")
+    return name, argv
+
+
 def _pulling_keys(target):
     """Profile keys with a background launch still in progress on `target` -- a
     launch-<key>.log that exists but hasn't recorded a terminal marker yet. Lets
@@ -1728,6 +2833,537 @@ def cmd_ps(args):
             ("Launch on a free host", f"{p} launch <profile> {idle[0] if idle else '<host>'}"),
             ("List available models", f"{p} list"),
         ])
+
+
+def cmd_cluster_profiles(args):
+    print(f"{'PROFILE':<46} {'BACKEND':<20} {'PORT':<6} STATUS")
+    for key in sorted(CLUSTER_PROFILES):
+        p = CLUSTER_PROFILES[key]
+        print(f"{key:<46} {p['backend']:<20} {p['port']:<6} {p['status']}")
+
+
+def cmd_cluster_add(args):
+    name = _safe_cluster_name(args.name)
+    if args.head not in ("local", "localhost") and not host_of(args.head):
+        print(f"ERROR: head '{args.head}' is not a registered host alias/user@host/IP.",
+              file=sys.stderr)
+        sys.exit(1)
+    if args.worker not in ("local", "localhost") and not host_of(args.worker):
+        print(f"ERROR: worker '{args.worker}' is not a registered host alias/user@host/IP.",
+              file=sys.stderr)
+        sys.exit(1)
+    interfaces = args.interface
+    for value in interfaces:
+        _safe_net_name(value)
+    for value in args.ucx_device:
+        _safe_ucx_device(value)
+    for value in args.head_ip + args.worker_ip:
+        _safe_ip(value)
+    if not (len(interfaces) == len(args.ucx_device) == len(args.head_ip) == len(args.worker_ip)):
+        print("ERROR: repeat --interface, --ucx-device, --head-ip, and --worker-ip "
+              "the same number of times.",
+              file=sys.stderr)
+        sys.exit(1)
+    clusters = load_clusters()
+    if name in clusters and not args.force:
+        print(f"ERROR: cluster '{name}' already exists; use --force to replace it.",
+              file=sys.stderr)
+        sys.exit(1)
+    candidate = {
+        "head": args.head,
+        "worker": args.worker,
+        "fabric": {
+            "interfaces": interfaces,
+            "ucx_devices": args.ucx_device,
+            "head_ips": args.head_ip,
+            "worker_ips": args.worker_ip,
+            "mtu": args.mtu,
+        },
+    }
+    head, worker = _cluster_targets(dict(candidate, name=name))
+    clusters[name] = candidate
+    save_clusters(clusters)
+    print(f"Saved cluster '{name}' to {CLUSTERS_FILE}.")
+    print(f"  head   : {args.head} -> {head or 'local'}")
+    print(f"  worker : {args.worker} -> {worker or 'local'}")
+    print(f"  fabric : {', '.join(interfaces)} (MTU {args.mtu})")
+    print(f"  UCX    : {', '.join(args.ucx_device)}")
+    print(f"  rails  : {', '.join(args.head_ip)} <-> {', '.join(args.worker_ip)}")
+
+
+def cmd_cluster_list(args):
+    clusters = load_clusters()
+    if not clusters:
+        print(f"No clusters configured. Add one with `{_cli_name()} cluster add ...`.")
+        return
+    print(f"{'NAME':<20} {'HEAD':<18} {'WORKER':<18} FABRIC")
+    for name, cfg in sorted(clusters.items()):
+        fabric = cfg.get("fabric", {})
+        print(f"{name:<20} {cfg.get('head','?'):<18} {cfg.get('worker','?'):<18} "
+              f"{','.join(fabric.get('interfaces', [])) or '?'}")
+
+
+def cmd_cluster_show(args):
+    cfg = cluster_config(args.name)
+    print(json.dumps(cfg, indent=2))
+
+
+def cmd_cluster_remove(args):
+    clusters = load_clusters()
+    if args.name not in clusters:
+        print(f"ERROR: cluster '{args.name}' does not exist.", file=sys.stderr)
+        sys.exit(1)
+    del clusters[args.name]
+    save_clusters(clusters)
+    print(f"Removed cluster '{args.name}'. Cached runtimes and weights were preserved.")
+
+
+def cmd_cluster_preflight(args):
+    cfg = cluster_config(args.name)
+    ok, _ = cluster_preflight(cfg, require_fabric=not args.management_only)
+    if not ok:
+        sys.exit(1)
+
+
+def cmd_cluster_prepare(args):
+    cfg = cluster_config(args.name)
+    profile = cluster_profile(args.profile)
+    ok, _ = cluster_preflight(cfg, require_fabric=False)
+    if not ok:
+        sys.exit(1)
+    head, worker = _cluster_targets(cfg)
+    busy = {"head": _cluster_busy(head), "worker": _cluster_busy(worker)}
+    heavy = args.build or args.weights
+    if any(names is None for names in busy.values()):
+        print("ERROR: cannot determine whether both nodes are idle; preparation is blocked.",
+              file=sys.stderr)
+        sys.exit(1)
+    if heavy and not args.allow_busy and any(busy.values()):
+        details = "; ".join(f"{role}: {', '.join(names)}" for role, names in busy.items() if names)
+        print(f"ERROR: refusing heavy image/model preparation while inference is active ({details}). "
+              "Stop those models or pass --allow-busy after assessing UMA/page-cache risk.",
+              file=sys.stderr)
+        sys.exit(1)
+    print(f"Preparing '{args.profile}' for cluster '{args.name}' ...")
+    if profile["backend"] == "trtllm-mpi":
+        _prepare_qwen(cfg, profile, build=args.build, weights=args.weights, dry=args.dry_run)
+    else:
+        try:
+            _prepare_deepseek(cfg, profile, build=args.build, weights=args.weights,
+                              dry=args.dry_run)
+        except (RuntimeError, subprocess.CalledProcessError, OSError) as e:
+            print(f"ERROR: DeepSeek preparation failed: {e}", file=sys.stderr)
+            sys.exit(1)
+    print("Preparation stage complete.")
+
+
+def _ensure_cluster_idle(cfg):
+    head, worker = _cluster_targets(cfg)
+    for role, target in (("head", head), ("worker", worker)):
+        conflicts = _cluster_busy(target)
+        if conflicts is None:
+            print(f"ERROR: cannot query {role} {target}.", file=sys.stderr); sys.exit(1)
+        if conflicts:
+            print(f"ERROR: {role} is already serving {', '.join(conflicts)}. "
+                  "A two-node model requires both Sparks exclusively.", file=sys.stderr)
+            sys.exit(1)
+
+
+def _qwen_snapshot_path(profile):
+    repo = profile["model"].replace("/", "--")
+    return f"/root/.cache/huggingface/hub/models--{repo}/snapshots/{profile['revision']}"
+
+
+def _qwen_runtime_signature(target, image):
+    command = ("sha256sum /opt/otools/trtllm-mn-entrypoint.sh; "
+               "dpkg-query -W -f='${Version}\\n' openssh-server")
+    result = _host_exec(target, ["docker", "run", "--rm", "--entrypoint", "sh",
+                                 image, "-c", command], capture=True)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _launch_qwen_cluster(profile_key, profile, cfg, dry=False):
+    head, worker = _cluster_targets(cfg)
+    if not dry:
+        if not cluster_preflight(cfg, require_fabric=True)[0]:
+            sys.exit(1)
+        _ensure_cluster_idle(cfg)
+    nodes = (("worker", worker), ("head", head))
+    commands = []
+    for role, target in nodes:
+        name, argv = build_qwen_cluster_argv(profile_key, profile, cfg, role, target)
+        commands.append((role, target, name, argv))
+    if dry:
+        print("--- DRY RUN: worker starts before head; live fabric preflight not performed ---")
+        for role, target, _, argv in commands:
+            print(f"\n# {role}")
+            print(format_run(argv, target))
+        return
+    manifest_path = os.path.join(_cluster_state_dir(cfg["name"]), "qwen-runtime",
+                                 "manifest.json")
+    try:
+        with open(manifest_path) as f:
+            build_manifest = json.load(f)
+            built_images = build_manifest.get("built_images", {})
+            expected_signatures = build_manifest.get("runtime_signatures", {})
+    except (OSError, json.JSONDecodeError):
+        built_images, expected_signatures = {}, {}
+        build_manifest = {}
+    current_inputs = _qwen_expected_manifest(profile)
+    if any(build_manifest.get(key) != value for key, value in current_inputs.items()):
+        print("ERROR: Qwen build manifest does not match the current reviewed inputs; rebuild "
+              "both nodes before launch.", file=sys.stderr)
+        sys.exit(1)
+    if set(built_images) != {"head", "worker"} or set(expected_signatures) != {"head", "worker"}:
+        print("ERROR: reviewed Qwen build manifest is missing; rebuild both nodes before launch.",
+              file=sys.stderr)
+        sys.exit(1)
+    signatures = {}
+    for role, target, _, _ in commands:
+        present = _host_exec(target, ["docker", "image", "inspect", "--format", "{{.Id}}",
+                                      profile["runtime_image"]], capture=True)
+        if present.returncode != 0:
+            print(f"ERROR: prepared runtime image missing on {role}; run `omm cluster prepare "
+                  f"{cfg['name']} {profile_key} --build --weights` while both nodes are idle.",
+                  file=sys.stderr)
+            sys.exit(1)
+        image_id = present.stdout.strip()
+        if image_id != built_images[role]:
+            print(f"ERROR: {role} runtime image ID does not match the reviewed build manifest; "
+                  "rebuild before launch.", file=sys.stderr)
+            sys.exit(1)
+        signatures[role] = _qwen_runtime_signature(target, profile["runtime_image"])
+        if not signatures[role]:
+            print(f"ERROR: cannot verify prepared runtime contents on {role}.", file=sys.stderr)
+            sys.exit(1)
+        if signatures[role] != expected_signatures[role]:
+            print(f"ERROR: {role} runtime contents do not match the reviewed build manifest; "
+                  "rebuild before launch.", file=sys.stderr)
+            sys.exit(1)
+    if len(set(signatures.values())) != 1:
+        print("ERROR: Qwen runtime contents differ between head and worker; rebuild both from "
+              "the same pinned context before launch.", file=sys.stderr)
+        sys.exit(1)
+    for role, target, _, _ in commands:
+        _drop_caches(target)
+    started = []
+    try:
+        for role, target, name, argv in commands:
+            print(f"Starting {role} container {name} on {target} ...")
+            res = _host_exec(target, ["docker"] + argv)
+            if res.returncode != 0:
+                raise RuntimeError(f"{role} container failed")
+            started.append((target, name))
+        time.sleep(3)
+        hostfile = os.path.join(_cluster_state_dir(cfg["name"]), "openmpi-hostfile")
+        with open(hostfile, "w") as f:
+            f.write(cfg["fabric"]["head_ips"][0] + "\n" + cfg["fabric"]["worker_ips"][0] + "\n")
+        remote_hostfile = os.path.join(_cluster_state_dir(cfg["name"], head), "openmpi-hostfile")
+        _copy_to_host(head, hostfile, remote_hostfile)
+        head_name = _cluster_container_name(profile_key, cfg["name"], "head")
+        _host_exec(head, ["docker", "cp", remote_hostfile,
+                          f"{head_name}:/etc/openmpi-hostfile"], check=True)
+        config_body = ("print_iter_log: false\nkv_cache_config:\n  dtype: auto\n"
+                       "  free_gpu_memory_fraction: 0.85\ncuda_graph_config:\n"
+                       "  enable_padding: true\n")
+        config_local = os.path.join(_cluster_state_dir(cfg["name"]), "trtllm.yml")
+        with open(config_local, "w") as f:
+            f.write(config_body)
+        config_remote = os.path.join(_cluster_state_dir(cfg["name"], head), "trtllm.yml")
+        _copy_to_host(head, config_local, config_remote)
+        _host_exec(head, ["docker", "cp", config_remote, f"{head_name}:/tmp/trtllm.yml"],
+                   check=True)
+        worker_ip = cfg["fabric"]["worker_ips"][0]
+        for _ in range(15):
+            ssh_ready = _host_exec(head, ["docker", "exec", head_name, "ssh",
+                                           "-o", "BatchMode=yes", worker_ip, "true"],
+                                   capture=True)
+            if ssh_ready.returncode == 0:
+                break
+            time.sleep(2)
+        else:
+            raise RuntimeError("head container cannot reach worker SSH over the fabric")
+        model = _qwen_snapshot_path(profile)
+        serve = ("mpirun trtllm-llmapi-launch trtllm-serve " + shlex.quote(model) +
+                 " --tp_size 2 --backend pytorch" +
+                 f" --max_num_tokens {int(profile['max_model_len'])}" +
+                 f" --max_batch_size {int(profile['max_batch_size'])}" +
+                 " --extra_llm_api_options /tmp/trtllm.yml" +
+                 f" --port {int(profile['port'])} > /tmp/otools-serve.log 2>&1")
+        res = _host_exec(head, ["docker", "exec", "-d", head_name, "sh", "-c", serve])
+        if res.returncode != 0:
+            raise RuntimeError("TRT-LLM MPI launch failed")
+        time.sleep(5)
+        alive = _host_exec(head, ["docker", "exec", head_name, "pgrep", "-f",
+                                    "trtllm-serve"], capture=True)
+        if alive.returncode != 0:
+            raise RuntimeError("TRT-LLM serve process exited during startup")
+    except (RuntimeError, subprocess.CalledProcessError, OSError, KeyboardInterrupt) as e:
+        reason = "launch interrupted" if isinstance(e, KeyboardInterrupt) else str(e)
+        print(f"ERROR: {reason}; rolling back rank containers.", file=sys.stderr)
+        cleanup_failures = []
+        for target, name in reversed(started):
+            try:
+                removed = _host_exec(target, ["docker", "rm", "-f", name], capture=True)
+                if removed.returncode != 0:
+                    cleanup_failures.append(name)
+            except OSError:
+                cleanup_failures.append(name)
+        if cleanup_failures:
+            print("ERROR: rollback could not remove: " + ", ".join(cleanup_failures),
+                  file=sys.stderr)
+        if isinstance(e, KeyboardInterrupt):
+            raise
+        sys.exit(1)
+    print(f"Started '{profile_key}' across '{cfg['name']}'. API will initialize on head port "
+          f"{profile['port']}.")
+
+
+def _deepseek_manifest_inputs(profile):
+    return {
+        "build_schema": 2,
+        "runtime_repository": profile["runtime_repo"],
+        "runtime_commit": profile["runtime_revision"],
+        "runtime_tree": profile["runtime_tree"],
+        "patch_sha256": profile["runtime_patch_sha256"],
+        "base_image": profile["base_image"],
+        "b12x_revision": profile["b12x_revision"],
+        "b12x_archive_sha256": profile["b12x_archive_sha256"],
+        "b12x_license_provenance": profile["b12x_license_provenance"],
+        "flashinfer_revision": profile["flashinfer_revision"],
+        "flashinfer_archive_sha256": profile["flashinfer_archive_sha256"],
+        "model": profile["model"],
+        "model_revision": profile["revision"],
+        "model_file_count": profile["model_file_count"],
+        "model_size": profile["model_size"],
+        "model_shards": profile["model_shards"],
+        "build_network": "none",
+        "preimages": DEEPSEEK_VLLM_PREIMAGES,
+    }
+
+
+def _launch_deepseek_cluster(profile_key, profile, cfg, dry=False, startup_timeout=900):
+    head, worker = _cluster_targets(cfg)
+    if not dry:
+        if not cluster_preflight(cfg, require_fabric=True)[0]:
+            sys.exit(1)
+        _ensure_cluster_idle(cfg)
+    nodes = (("worker", worker), ("head", head))
+    commands = []
+    for role, target in nodes:
+        name, argv = build_deepseek_cluster_argv(profile_key, profile, cfg, role, target)
+        commands.append((role, target, name, argv))
+    if dry:
+        print("--- DRY RUN: worker starts before head; live fabric preflight not performed ---")
+        for role, target, _, argv in commands:
+            print(f"\n# {role}")
+            print(format_run(argv, target))
+        return
+
+    manifest_path = os.path.join(CLUSTER_DATA_DIR, "builds", "deepseek-v4-flash-0731",
+                                 "manifest.json")
+    try:
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"ERROR: reviewed DeepSeek build manifest unavailable: {e}", file=sys.stderr)
+        sys.exit(1)
+    expected = _deepseek_manifest_inputs(profile)
+    if any(manifest.get(key) != value for key, value in expected.items()):
+        print("ERROR: DeepSeek build manifest does not match current reviewed inputs; rebuild.",
+              file=sys.stderr)
+        sys.exit(1)
+    context_root = os.path.dirname(manifest_path)
+    if _verify_deepseek_context(None, context_root) != manifest.get("context_sha256"):
+        print("ERROR: staged DeepSeek build context no longer matches its manifest; rebuild.",
+              file=sys.stderr)
+        sys.exit(1)
+    package_dir = manifest.get("vllm_package_dir", "")
+    generated_dockerfile = _deepseek_dockerfile(profile, package_dir).encode()
+    if hashlib.sha256(generated_dockerfile).hexdigest() != manifest.get("dockerfile_sha256"):
+        print("ERROR: DeepSeek Dockerfile generator changed since the recorded build; rebuild.",
+              file=sys.stderr)
+        sys.exit(1)
+    built_images = manifest.get("built_images", {})
+    expected_signatures = manifest.get("runtime_signatures", {})
+    expected_models = manifest.get("model_signatures", {})
+    if (set(built_images) != {"head", "worker"}
+            or set(expected_signatures) != {"head", "worker"}
+            or set(expected_models) != {"head", "worker"}):
+        print("ERROR: DeepSeek build manifest lacks both role identities; rebuild.", file=sys.stderr)
+        sys.exit(1)
+    if len(set(expected_signatures.values())) != 1:
+        print("ERROR: recorded DeepSeek runtime contents differ between roles; rebuild.",
+              file=sys.stderr)
+        sys.exit(1)
+
+    for role, target, _, _ in commands:
+        inspected = _host_exec(target, ["docker", "image", "inspect", "--format", "{{.Id}}",
+                                        profile["image"]], capture=True)
+        if inspected.returncode != 0 or inspected.stdout.strip() != built_images[role]:
+            print(f"ERROR: {role} DeepSeek image does not match its reviewed build ID.",
+                  file=sys.stderr)
+            sys.exit(1)
+        signature, detail = _deepseek_runtime_signature(target, profile["image"])
+        if signature != expected_signatures[role]:
+            print(f"ERROR: {role} DeepSeek runtime signature mismatch: {detail}", file=sys.stderr)
+            sys.exit(1)
+        model_signature, detail = _deepseek_model_signature(target, profile)
+        if model_signature != expected_models[role]:
+            print(f"ERROR: {role} DeepSeek model snapshot mismatch: {detail}", file=sys.stderr)
+            sys.exit(1)
+        runtime_cache = os.path.join(remote_home(target), ".cache", "otools",
+                                     "deepseek-v4-flash-0731")
+        _host_exec(target, ["mkdir", "-p", runtime_cache], check=True)
+
+    for _, target, _, _ in commands:
+        _drop_caches(target)
+    started = []
+    try:
+        for role, target, name, argv in commands:
+            print(f"Starting DeepSeek {role} container {name} on {target or 'local'} ...")
+            result = _host_exec(target, ["docker"] + argv)
+            if result.returncode != 0:
+                raise RuntimeError(f"DeepSeek {role} container failed to start")
+            started.append((target, name))
+            time.sleep(3)
+            running = _host_exec(target, ["docker", "inspect", "--format", "{{.State.Running}}",
+                                          name], capture=True)
+            if running.returncode != 0 or running.stdout.strip() != "true":
+                raise RuntimeError(f"DeepSeek {role} container exited during rendezvous")
+        deadline = time.monotonic() + startup_timeout
+        while time.monotonic() < deadline:
+            for role, target, name, _ in commands:
+                running = _host_exec(target, ["docker", "inspect", "--format",
+                                              "{{.State.Running}}", name], capture=True)
+                if running.returncode != 0 or running.stdout.strip() != "true":
+                    raise RuntimeError(f"DeepSeek {role} container exited during model loading")
+            healthy, _ = _host_text(head, ["curl", "-fsS", "--max-time", "5",
+                                                  f"http://127.0.0.1:{profile['port']}/v1/models"])
+            if healthy:
+                ib_ready = True
+                for role, target, name, _ in commands:
+                    logs = _host_exec(target, ["docker", "logs", "--since", "30m", name],
+                                      capture=True)
+                    body = (logs.stdout or "") + (logs.stderr or "")
+                    if logs.returncode != 0 or "NET/IB" not in body:
+                        ib_ready = False
+                        break
+                if ib_ready:
+                    break
+            time.sleep(10)
+        else:
+            raise RuntimeError(f"DeepSeek did not become healthy on NET/IB within {startup_timeout}s")
+    except (RuntimeError, subprocess.CalledProcessError, OSError, KeyboardInterrupt) as e:
+        reason = "launch interrupted" if isinstance(e, KeyboardInterrupt) else str(e)
+        print(f"ERROR: {reason}; rolling back DeepSeek rank containers.", file=sys.stderr)
+        failures = []
+        for target, name in reversed(started):
+            try:
+                removed = _host_exec(target, ["docker", "rm", "-f", name], capture=True)
+                if removed.returncode != 0:
+                    failures.append(name)
+            except OSError:
+                failures.append(name)
+        if failures:
+            print("ERROR: rollback could not remove: " + ", ".join(failures), file=sys.stderr)
+        if isinstance(e, KeyboardInterrupt):
+            raise
+        sys.exit(1)
+    print(f"READY: '{profile_key}' is healthy across '{cfg['name']}' on NCCL NET/IB; "
+          f"head API port {profile['port']}.")
+
+
+def cmd_cluster_launch(args):
+    cfg = cluster_config(args.name)
+    profile = cluster_profile(args.profile)
+    if profile["backend"] == "trtllm-mpi":
+        _launch_qwen_cluster(args.profile, profile, cfg, dry=args.dry_run)
+        return
+    _launch_deepseek_cluster(args.profile, profile, cfg, dry=args.dry_run,
+                             startup_timeout=args.startup_timeout)
+
+
+def cmd_cluster_status(args):
+    cfg = cluster_config(args.name)
+    head, worker = _cluster_targets(cfg)
+    print(f"{'ROLE':<8} {'HOST':<18} {'CONTAINER':<55} STATUS")
+    for role, target in (("head", head), ("worker", worker)):
+        label = _host_label(target) or "localhost"
+        rows = list_managed(remote=target)
+        if rows is None:
+            print(f"{role:<8} {label:<18} {'—':<55} unreachable")
+            continue
+        matched = [r for r in rows if _label(r.get("Labels", ""), LABEL_CLUSTER) == args.name]
+        if not matched:
+            busy = _cluster_busy(target)
+            if busy is None:
+                print(f"{role:<8} {label:<18} {'—':<55} unreachable")
+                continue
+            occupied = ", ".join(busy)
+            status = "busy (other model)" if occupied else "idle"
+            print(f"{role:<8} {label:<18} {(occupied or '—'):<55} {status}")
+        for row in matched:
+            print(f"{role:<8} {label:<18} {row.get('Names',''):<55} "
+                  f"{row.get('Status','')}")
+
+
+def cmd_cluster_stop(args):
+    cfg = cluster_config(args.name)
+    head, worker = _cluster_targets(cfg)
+    if not args.yes:
+        reply = input(f"Stop all managed ranks in cluster '{args.name}'? [y/N] ").strip().lower()
+        if reply not in ("y", "yes"):
+            print("Aborted."); return
+    stopped, failures = 0, []
+    for role, target in (("head", head), ("worker", worker)):
+        rows = list_managed(remote=target)
+        if rows is None:
+            failures.append(f"{role} unreachable")
+            continue
+        for row in rows:
+            if _label(row.get("Labels", ""), LABEL_CLUSTER) != args.name:
+                continue
+            name = row.get("Names")
+            if not name:
+                continue
+            if _host_exec(target, ["docker", "rm", "-f", name]).returncode == 0:
+                print(f"Stopped {role}: {name}"); stopped += 1
+            else:
+                failures.append(f"{role} failed to stop {name}")
+    print(f"Stopped {stopped} rank container(s).")
+    if failures:
+        print("ERROR: " + "; ".join(failures), file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_cluster_logs(args):
+    cfg = cluster_config(args.name)
+    profile = cluster_profile(args.profile)
+    head, worker = _cluster_targets(cfg)
+    role, target = ("worker", worker) if args.role == "worker" else ("head", head)
+    name = _cluster_container_name(args.profile, args.name, role)
+    if profile["backend"] == "trtllm-mpi" and role == "head":
+        cmd = ["docker", "exec", name, "sh", "-c",
+               ("tail " + ("-f " if args.follow else "") +
+                f"-n {int(args.tail)} /tmp/otools-serve.log")]
+    else:
+        cmd = ["docker", "logs", "--tail", str(args.tail)]
+        if args.follow:
+            cmd.append("-f")
+        cmd.append(name)
+    sys.exit(_host_exec(target, cmd).returncode)
+
+
+def cmd_cluster_health(args):
+    cfg = cluster_config(args.name)
+    profile = cluster_profile(args.profile)
+    head, _ = _cluster_targets(cfg)
+    ok, body = _host_text(head, ["curl", "-fsS", "--max-time", "5",
+                                  f"http://127.0.0.1:{profile['port']}/v1/models"])
+    print("READY  " + body if ok else "STARTING/DOWN  head API not ready")
+    if not ok:
+        sys.exit(1)
 
 
 def _label(labels_str, key):
@@ -2657,6 +4293,85 @@ def main():
                    help="profile key, container name, or a host (default: all running)")
     p.add_argument("--all", action="store_true", help="include unmanaged vllm containers")
     p.set_defaults(func=cmd_health)
+
+    cluster = sub.add_parser("cluster", help="manage one model across two DGX Sparks")
+    cluster_sub = cluster.add_subparsers(dest="cluster_cmd", required=True)
+
+    p = cluster_sub.add_parser("profiles", help="list audited two-node model profiles")
+    p.set_defaults(func=cmd_cluster_profiles)
+
+    p = cluster_sub.add_parser("add", help="register a two-Spark cluster and its RoCE rails")
+    p.add_argument("name", help="short cluster name")
+    p.add_argument("head", help="registered head host alias, user@host, or IP")
+    p.add_argument("worker", help="registered worker host alias, user@host, or IP")
+    p.add_argument("--interface", action="append", required=True, metavar="IFACE",
+                   help="RoCE interface present on both hosts (repeat per rail)")
+    p.add_argument("--ucx-device", action="append", required=True, metavar="MLX5:PORT",
+                   help="UCX RDMA device mapped to the interface, e.g. mlx5_0:1 (repeat per rail)")
+    p.add_argument("--head-ip", action="append", required=True, metavar="IP",
+                   help="head fabric IP for the corresponding rail (repeat per rail)")
+    p.add_argument("--worker-ip", action="append", required=True, metavar="IP",
+                   help="worker fabric IP for the corresponding rail (repeat per rail)")
+    p.add_argument("--mtu", type=int, default=9000, choices=range(1500, 9001), metavar="1500..9000")
+    p.add_argument("--force", action="store_true", help="replace an existing cluster definition")
+    p.set_defaults(func=cmd_cluster_add)
+
+    p = cluster_sub.add_parser("list", help="list configured clusters")
+    p.set_defaults(func=cmd_cluster_list)
+
+    p = cluster_sub.add_parser("show", help="show one cluster definition as JSON")
+    p.add_argument("name")
+    p.set_defaults(func=cmd_cluster_show)
+
+    p = cluster_sub.add_parser("remove", help="remove a cluster definition, preserving caches")
+    p.add_argument("name")
+    p.set_defaults(func=cmd_cluster_remove)
+
+    p = cluster_sub.add_parser("preflight", help="validate management hosts and the exact RoCE fabric")
+    p.add_argument("name")
+    p.add_argument("--management-only", action="store_true",
+                   help="skip cable/interface/RoCE gates; launch always requires them")
+    p.set_defaults(func=cmd_cluster_preflight)
+
+    p = cluster_sub.add_parser("prepare", help="stage reviewed runtime source, image, and weights")
+    p.add_argument("name")
+    p.add_argument("profile", choices=sorted(CLUSTER_PROFILES))
+    p.add_argument("--build", action="store_true", help="build the pinned local runtime on both nodes")
+    p.add_argument("--weights", action="store_true", help="download the exact official snapshot on both nodes")
+    p.add_argument("--allow-busy", action="store_true",
+                   help="permit heavy build/download while inference is active")
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=cmd_cluster_prepare)
+
+    p = cluster_sub.add_parser("launch", help="launch one profile across both exclusive nodes")
+    p.add_argument("name")
+    p.add_argument("profile", choices=sorted(CLUSTER_PROFILES))
+    p.add_argument("--dry-run", action="store_true", help="print rank commands without host changes")
+    p.add_argument("--startup-timeout", type=int, default=900, metavar="SECONDS",
+                   help="DeepSeek health + NET/IB deadline (default: 900)")
+    p.set_defaults(func=cmd_cluster_launch)
+
+    p = cluster_sub.add_parser("status", help="show managed rank containers on both nodes")
+    p.add_argument("name")
+    p.set_defaults(func=cmd_cluster_status)
+
+    p = cluster_sub.add_parser("stop", help="stop all managed rank containers in a cluster")
+    p.add_argument("name")
+    p.add_argument("--yes", "-y", action="store_true")
+    p.set_defaults(func=cmd_cluster_stop)
+
+    p = cluster_sub.add_parser("logs", help="show one cluster rank's logs")
+    p.add_argument("name")
+    p.add_argument("profile", choices=sorted(CLUSTER_PROFILES))
+    p.add_argument("--role", choices=("head", "worker"), default="head")
+    p.add_argument("--follow", "-f", action="store_true")
+    p.add_argument("--tail", type=int, default=200)
+    p.set_defaults(func=cmd_cluster_logs)
+
+    p = cluster_sub.add_parser("health", help="GET /v1/models from the cluster head API")
+    p.add_argument("name")
+    p.add_argument("profile", choices=sorted(CLUSTER_PROFILES))
+    p.set_defaults(func=cmd_cluster_health)
 
     p = sub.add_parser("install", aliases=["setup"],
                        help="bootstrap this machine, or bootstrap + register a remote host")
