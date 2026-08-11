@@ -7,6 +7,18 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **Qwen Thinking-2507 no longer hits the DGX Spark CUTLASS illegal-instruction failure.** Its
+  runtime is pinned to the rc8 ARM64 manifest containing TensorRT-LLM PR #11956, with an explicit
+  pinned tokenizer, FlashInfer sampling disabled, and KV fraction 0.60. The final two-node profile
+  passed reasoning separation, a complete tool loop, repeated 12,515-token streams, post-run
+  generation health, and clean kernel logs on both nodes.
+- **Qwen readiness now rejects malformed tool calls and preserves every reviewed runtime.** The
+  launch gate requires exactly one expected function with valid JSON arguments, uses recommended
+  Thinking sampling, and stores build manifests by immutable base/runtime pair so rc5 Base/Instruct
+  and rc8 Thinking can be selected without rebuilding.
+- **DeepSeek cand7 long-agent stability.** The promoted runtime now forces eager execution after
+  both cand4 and cand7 reproduced a CUDA-graph replay stall near 13.8K computed tokens. Three
+  repeated 13,781-token agent streams completed cleanly in eager mode.
 - **DeepSeek build manifests now include every launch-time model invariant.** The context writer
   derives its metadata from the same source as launch validation, preventing a freshly prepared
   two-Spark runtime from being rejected for missing file-count, size, or shard-count fields.
@@ -19,6 +31,10 @@ All notable changes to this project are documented here. The format follows
   unchanged.
 
 ### Added
+- **Physical qualification for all four two-Spark profiles.** DeepSeek V4 Flash 0731, Qwen3
+  235B Base, Instruct-2507, and Thinking-2507 now carry validated status from dual-GB10 testing on
+  Beebo, including structured tools, tool-result continuation, long streaming, health, and
+  `NCCL NET/IB` checks.
 - **Two-DGX-Spark cluster lifecycle (v0.3.0 prework).** Added a separate `cluster` registry and
   `profiles` / `add` / `list` / `show` / `remove` / `preflight` / `prepare` / `launch` / `status` /
   `logs` / `health` / `stop` command family. The Qwen TensorRT-LLM TP=2 path pins official NVIDIA

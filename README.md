@@ -119,10 +119,12 @@ omm cluster stop spark2 -y
 ```
 
 The Qwen path uses official NVIDIA checkpoints pinned to exact Hugging Face revisions and
-an ARM64 TensorRT-LLM base pinned by digest. The manager builds the small SSH/MPI derivative
-locally, records image IDs, uses a deployment-specific SSH key, and serves the absolute
-snapshot path. The 2507 Instruct and Thinking profiles are available but explicitly marked
-compatible/unvalidated until they pass on-hardware qualification.
+ARM64 TensorRT-LLM bases pinned by digest. The manager builds the small SSH/MPI derivatives
+locally, records separate immutable build manifests per runtime, uses a deployment-specific
+SSH key, and serves absolute snapshot paths. Base, Instruct-2507, and Thinking-2507 were all
+physically validated on two GB10 Sparks on 2026-08-11 with tool loops and 12,515-token streams.
+Base and Instruct retain rc5; Thinking uses rc8 for NVIDIA's Blackwell CUTLASS TMA fix, an
+explicit pinned tokenizer, torch sampling, and a conservative 0.60 KV fraction.
 
 DeepSeek V4 Flash 0731 source staging verifies the reviewed orchestration commit, Git tree,
 and vLLM patch hash while pinning the intended official model revision and official vLLM
@@ -136,7 +138,9 @@ must run from an ARM64 control/head host. The operator accepts `b12x`'s Apache-2
 metadata despite its missing bundled license file. The deployment was validated on two GB10
 Sparks over dual-rail RoCE on 2026-08-11. Launch still requires the QSFP/RoCE preflight, API
 health, and `NCCL NET/IB` evidence or rolls both ranks back. No community image or quant is
-substituted.
+substituted. The promoted cand7 runtime must use eager execution: both cand4 and cand7 hung
+during CUDA-graph replay around 13.8K computed tokens, while repeated eager 13,781-token agent
+streams completed cleanly.
 
 See [DUAL_SPARK_MODEL_RESEARCH.md](DUAL_SPARK_MODEL_RESEARCH.md) for model selection and
 primary-source links.

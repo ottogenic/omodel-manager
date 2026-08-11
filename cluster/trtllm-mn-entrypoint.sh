@@ -20,6 +20,7 @@
 set -eu
 
 SSH_PORT="${SSH_PORT:-2233}"
+SSH_LISTEN_ADDRESS="${SSH_LISTEN_ADDRESS:?SSH_LISTEN_ADDRESS must be set}"
 mkdir -p /var/run/sshd /root/.ssh
 cp -R /tmp/.ssh/. /root/.ssh/
 chown -R root:root /root/.ssh
@@ -32,6 +33,7 @@ sed -i.bak \
     -e 's/^#\?\s*PubkeyAuthentication\s.*/PubkeyAuthentication yes/' \
     -e "s/^#\?\s*Port\s\+22\s*$/Port ${SSH_PORT}/" \
     /etc/ssh/sshd_config
+printf '\nListenAddress %s\n' "$SSH_LISTEN_ADDRESS" >> /etc/ssh/sshd_config
 printf '\nHost *\n    StrictHostKeyChecking no\n    Port %s\n    UserKnownHostsFile=/dev/null\n' \
     "$SSH_PORT" > /etc/ssh/ssh_config.d/trt-llm.conf
 chmod 600 /etc/ssh/ssh_config.d/trt-llm.conf

@@ -736,18 +736,25 @@ class ClusterProfileTests(unittest.TestCase):
             self.assertTrue(profile["model"].startswith("nvidia/"))
             self.assertEqual(len(profile["revision"]), 40)
             image, digest = profile["image"].split("@sha256:")
-            self.assertEqual(image, "nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc5")
+            self.assertIn(image, {
+                "nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc5",
+                "nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc8",
+            })
             self.assertEqual(len(digest), 64)
+        thinking = mm.CLUSTER_PROFILES["qwen3-235b-a22b-thinking-2507-nvfp4"]
+        self.assertIn("release:1.3.0rc8@sha256:", thinking["image"])
 
     def test_deepseek_uses_official_weights_and_reviewed_source_commit(self):
         profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
         self.assertEqual(profile["model"], "deepseek-ai/DeepSeek-V4-Flash-0731")
+        self.assertEqual(profile["served_model_name"], "deepseek-v4-flash-dspark")
+        self.assertEqual(profile["status"], "validated")
         self.assertEqual(profile["revision"], "9e165c30e2704aec5d9d593cce3eebd58bbef1cb")
         self.assertEqual(profile["runtime_revision"],
-                         "f7299002a0bfb6658ea1bb83c0cfd2be88f5e897")
-        self.assertEqual(profile["runtime_tree"], "a880e225514fe88d5a8d6e69700e4888c17f130d")
+                         "15f29b7bd91d45a1678b3b8600a56512c36f13f2")
+        self.assertEqual(profile["runtime_tree"], "9b1dc28c17818434d40d06e14762ea9cebf3bedf")
         self.assertEqual(profile["runtime_patch_sha256"],
-                         "4ddf9d519b8b098d0dd3f2fff981e7e726f5fea1c774ef09a8c4ee6314cb82cd")
+                         "3c22304cd06135e617cf09705f28092eb4ef86c0d0f65942e1fa52239c14d4e6")
         self.assertEqual(profile["b12x_revision"],
                          "7dc6fb8fcc6446ea093537d1657df81985fa5f43")
         self.assertEqual(profile["b12x_archive_sha256"],
@@ -770,12 +777,12 @@ class ClusterProfileTests(unittest.TestCase):
         self.assertIn("BUILD_NVEP=0", dockerfile)
         self.assertIn("/opt/otools/sources/b12x-", dockerfile)
         self.assertIn("/opt/otools/sources/flashinfer-", dockerfile)
-        self.assertEqual(len(mm.DEEPSEEK_VLLM_PREIMAGES), 12)
+        self.assertEqual(len(mm.DEEPSEEK_VLLM_PREIMAGES), 14)
 
     def test_deepseek_manifest_binds_all_supply_chain_and_model_inputs(self):
         profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
         manifest = mm._deepseek_manifest_inputs(profile)
-        self.assertEqual(manifest["build_schema"], 2)
+        self.assertEqual(manifest["build_schema"], 3)
         self.assertEqual(manifest["build_network"], "none")
         self.assertEqual(manifest["preimages"], mm.DEEPSEEK_VLLM_PREIMAGES)
         self.assertEqual(manifest["model_file_count"], 74)
@@ -848,9 +855,61 @@ class ClusterRegistryTests(unittest.TestCase):
         self.assertIn("NCCL_SOCKET_IFNAME==enP7s7", argv)
         self.assertIn("NCCL_NET=IB", argv)
         self.assertIn("OMPI_MCA_btl_tcp_if_include=enP7s7", argv)
+        self.assertIn("OMPI_MCA_oob_tcp_if_include=enP7s7", argv)
+        self.assertIn("HF_HUB_OFFLINE=1", argv)
+        self.assertIn("NCCL_IB_ADDR_FAMILY=AF_INET", argv)
+        self.assertIn("SSH_LISTEN_ADDRESS=10.10.10.1", argv)
         self.assertNotIn("UCX_NET_DEVICES=enP7s7", argv)
         self.assertIn("otools.cluster=spark", argv)
         self.assertIn(profile["runtime_image"], argv)
+
+    def test_qwen_warmups_cover_chat_tools_and_streaming(self):
+        profile = mm.CLUSTER_PROFILES["qwen3-235b-a22b-fp4"]
+        requests = mm._qwen_warmup_requests(profile)
+        self.assertEqual([label for label, _, _ in requests],
+                         ["plain chat", "tool parser", "streaming"])
+        payloads = {label: payload for label, _, payload in requests}
+        self.assertEqual(payloads["tool parser"]["model"], profile["model"])
+        self.assertTrue(payloads["streaming"]["stream"])
+
+    def test_qwen_warmup_rejects_malformed_tool_arguments(self):
+        profile = mm.CLUSTER_PROFILES["qwen3-235b-a22b-thinking-2507-nvfp4"]
+        body = json.dumps({"choices": [{"message": {"tool_calls": [{
+            "function": {"name": "get_weather", "arguments": "<tool_call>{}"},
+        }]}}]})
+        with mock.patch.object(mm, "_qwen_warmup_requests", return_value=[
+                ("tool parser", 10, {})]), \
+                mock.patch.object(mm, "_host_text", return_value=(True, body)), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
+            mm._warm_qwen_cluster(None, profile)
+
+    def test_qwen_2507_profiles_use_conservative_fp4_startup(self):
+        base = mm._qwen_extra_config(mm.CLUSTER_PROFILES["qwen3-235b-a22b-fp4"])
+        instruct = mm._qwen_extra_config(
+            mm.CLUSTER_PROFILES["qwen3-235b-a22b-instruct-2507-nvfp4"])
+        self.assertIn("enable_padding: true", base)
+        self.assertNotIn("enable_autotuner: false", base)
+        self.assertIn("allowed_backends:\n    - cublaslt", instruct)
+        self.assertIn("enable_autotuner: false", instruct)
+        self.assertIn("cuda_graph_config: null", instruct)
+        self.assertIn("free_gpu_memory_fraction: 0.75", instruct)
+        thinking = mm._qwen_extra_config(
+            mm.CLUSTER_PROFILES["qwen3-235b-a22b-thinking-2507-nvfp4"])
+        self.assertIn("disable_flashinfer_sampling: true", thinking)
+        self.assertNotIn("disable_flashinfer_sampling: true", instruct)
+        self.assertEqual(
+            mm.CLUSTER_PROFILES["qwen3-235b-a22b-instruct-2507-nvfp4"]["max_num_tokens"],
+            8192)
+
+    def test_qwen_manifests_are_separate_per_runtime(self):
+        root = "/tmp/qwen-runtime"
+        base = mm.CLUSTER_PROFILES["qwen3-235b-a22b-fp4"]
+        instruct = mm.CLUSTER_PROFILES["qwen3-235b-a22b-instruct-2507-nvfp4"]
+        thinking = mm.CLUSTER_PROFILES["qwen3-235b-a22b-thinking-2507-nvfp4"]
+        self.assertEqual(mm._qwen_manifest_path(root, base),
+                         mm._qwen_manifest_path(root, instruct))
+        self.assertNotEqual(mm._qwen_manifest_path(root, base),
+                            mm._qwen_manifest_path(root, thinking))
 
     def test_deepseek_argv_is_offline_pinned_and_role_aware(self):
         cfg = self.config()
@@ -864,11 +923,46 @@ class ClusterRegistryTests(unittest.TestCase):
         self.assertIn("NCCL_IB_HCA==mlx5_0:1", head)
         self.assertIn("NCCL_SOCKET_IFNAME==enP7s7", head)
         self.assertIn("HF_HUB_OFFLINE=1", head)
+        self.assertIn("VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=600", head)
+        self.assertIn("VLLM_USE_FLASHINFER_SAMPLER=1", head)
+        self.assertIn("VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=256", head)
+        self.assertIn("TILELANG_CLEANUP_TEMP_FILES=1", head)
         self.assertNotIn("--trust-remote-code", head)
+        spec = json.loads(head[head.index("--speculative-config") + 1])
+        self.assertEqual(spec, {"method": "dspark", "num_speculative_tokens": 2,
+                                "draft_sample_method": "probabilistic"})
+        self.assertEqual(head[head.index("--served-model-name") + 1],
+                         profile["served_model_name"])
+        self.assertEqual(head[head.index("--kv-cache-memory-bytes") + 1], "17179869184")
+        self.assertIn("VLLM_CACHE_ROOT=/cache/runtime/vllm-cache-cand7", head)
+        self.assertIn("NCCL_IB_ADDR_FAMILY=AF_INET", head)
+        self.assertIn("--distributed-timeout-seconds", head)
+        self.assertIn("--enforce-eager", head)
         self.assertEqual(head[head.index("--node-rank") + 1], "0")
         self.assertEqual(worker[worker.index("--node-rank") + 1], "1")
         self.assertNotIn("--headless", head)
         self.assertIn("--headless", worker)
+
+    def test_deepseek_warmups_cover_agent_paths(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        requests = mm._deepseek_warmup_requests(profile)
+        labels = [label for label, _, _ in requests]
+        self.assertEqual(labels, ["plain decode", "tool parser", "tool result",
+                                  "long prefill", "sampled streaming", "long agent streaming"])
+        payloads = {label: payload for label, _, payload in requests}
+        self.assertGreater(len(payloads["long prefill"]["messages"][0]["content"]), 30000)
+        self.assertTrue(payloads["sampled streaming"]["stream"])
+        self.assertTrue(payloads["long agent streaming"]["stream"])
+        self.assertEqual(payloads["tool result"]["messages"][2]["role"], "tool")
+
+    def test_deepseek_warmup_rejects_incomplete_stream(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        response = SimpleNamespace(returncode=0, stdout="data: {}\n", stderr="")
+        with mock.patch.object(mm, "_deepseek_warmup_requests", return_value=[
+                ("sampled streaming", 10, {"stream": True})]), \
+                mock.patch.object(mm, "_host_exec", return_value=response), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
+            mm._warm_deepseek_cluster(None, profile)
 
     def test_local_runtime_sync_never_removes_its_source(self):
         cfg = self.config()

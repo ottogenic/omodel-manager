@@ -169,26 +169,35 @@ heavy preparation while either Spark is serving another model and refuses launch
 the configured peer route, jumbo ping, and active `mlx5` mapping all use the selected
 QSFP/RoCE interface.
 
-The Qwen TensorRT-LLM path is staged for physical qualification. Its official NVIDIA
-weights are pinned to exact revisions, and its official ARM64 TensorRT-LLM base is pinned
-to `sha256:fd231812c9cacc3cf41eb159a4ec8efefbd998ec51e43337bb9b3b65e559a944`.
-The manager builds and records its own reviewed MPI derivative rather than trusting an
-opaque image.
+All three Qwen TensorRT-LLM profiles were physically qualified on Beebo on 2026-08-11.
+Their official NVIDIA weights are pinned to exact revisions. Base and Instruct-2507 retain
+the rc5 ARM64 digest
+`sha256:fd231812c9cacc3cf41eb159a4ec8efefbd998ec51e43337bb9b3b65e559a944`;
+Thinking-2507 uses the rc8 ARM64 digest
+`sha256:c7297fdfb2e947296a4b29c8bdf8f5122e565179d65f806f85ff8fb4a478606e`,
+which includes TensorRT-LLM PR #11956's Blackwell CUTLASS TMA fix. The manager builds and
+records reviewed MPI derivatives separately for each immutable runtime. Base and Instruct
+passed structured tool calls, tool-result continuation, and 12,515-token coding streams.
+Thinking passed reasoning/content separation, an automatic tool call and result loop, two
+12,515-token sampled streams, post-run generation health, and clean kernel logs on both nodes.
+Its final profile uses an explicit pinned tokenizer, disables FlashInfer sampling, reserves
+KV at 0.60, and retains a 32K sequence limit with 8K chunked prefill.
 
 DeepSeek V4 Flash 0731 was physically validated on the two-node Beebo cluster on 2026-08-11.
-The reviewed runtime source is pinned to commit `f7299002a0bfb6658ea1bb83c0cfd2be88f5e897`, tree
-`a880e225514fe88d5a8d6e69700e4888c17f130d`, and patch SHA-256
-`4ddf9d519b8b098d0dd3f2fff981e7e726f5fea1c774ef09a8c4ee6314cb82cd`.
+The promoted cand7 runtime source is pinned to commit
+`15f29b7bd91d45a1678b3b8600a56512c36f13f2`, tree
+`9b1dc28c17818434d40d06e14762ea9cebf3bedf`, and patch SHA-256
+`3c22304cd06135e617cf09705f28092eb4ef86c0d0f65942e1fa52239c14d4e6`.
 The operator accepts the pinned `b12x` package's Apache-2.0 metadata despite its missing
 bundled license text. The manager verifies the exact `b12x` and FlashInfer archives, builds
 with network access disabled, re-hashes each copied context, records role-specific image IDs,
 and verifies identical installed content. Both 74-file model snapshots hash to the same
 166,898,660,330-byte manifest. Worker-first launch refuses to run until the QSFP/RoCE route,
 MTU-sized ping, and active HCA mapping pass; it then requires API health and `NCCL NET/IB`
-evidence. Basic generation, tool-call emission, and tool-result continuation passed. The first
-cold tool-result continuation exposed a worker TileLang JIT timeout; restarting after the
-persistent caches populated resolved it, and repeated tool loops remained healthy. No community
-image or quant is used as a fallback.
+evidence. Generation, tool-call emission, tool-result continuation, and three repeated
+13,781-token warm-cache agent streams passed with eager execution. CUDA-graph mode on both
+cand4 and cand7 stalled around 13.8K computed tokens, so `--enforce-eager` is a required
+stability control rather than optional tuning. No community image or quant is used as a fallback.
 
 ## Primary Sources
 

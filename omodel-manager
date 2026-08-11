@@ -117,9 +117,15 @@ CLUSTER_PROFILES = {
         "runtime_image": "otools/trtllm-mpi:1.3.0rc5-reviewed",
         "port": 8355,
         "max_model_len": 32768,
+        "max_num_tokens": 32768,
         "max_batch_size": 1,
-        "status": "official-playbook",
-        "notes": "Exact model in NVIDIA's two-Spark TensorRT-LLM playbook.",
+        "kv_free_fraction": 0.85,
+        "enable_chunked_prefill": False,
+        "tool_parser": "qwen3",
+        "reasoning_parser": "qwen3",
+        "conservative_fp4_startup": False,
+        "status": "validated",
+        "notes": "NVIDIA playbook model; physically qualified on two GB10 Sparks.",
     },
     "qwen3-235b-a22b-instruct-2507-nvfp4": {
         "backend": "trtllm-mpi",
@@ -130,22 +136,38 @@ CLUSTER_PROFILES = {
         "runtime_image": "otools/trtllm-mpi:1.3.0rc5-reviewed",
         "port": 8355,
         "max_model_len": 32768,
+        "max_num_tokens": 8192,
         "max_batch_size": 1,
-        "status": "compatible-unvalidated",
-        "notes": "Official NVIDIA checkpoint; exact 2507 two-Spark combination needs validation.",
+        "kv_free_fraction": 0.75,
+        "enable_chunked_prefill": True,
+        "tool_parser": "qwen3",
+        "reasoning_parser": None,
+        "conservative_fp4_startup": True,
+        "status": "validated",
+        "notes": "Official NVIDIA checkpoint; physically qualified on two GB10 Sparks.",
     },
     "qwen3-235b-a22b-thinking-2507-nvfp4": {
         "backend": "trtllm-mpi",
         "model": "nvidia/Qwen3-235B-A22B-Thinking-2507-NVFP4",
         "revision": "963445d1b9d3318cae13a4477bdfae4c2c6dab1e",
-        "image": ("nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc5@"
-                  "sha256:fd231812c9cacc3cf41eb159a4ec8efefbd998ec51e43337bb9b3b65e559a944"),
-        "runtime_image": "otools/trtllm-mpi:1.3.0rc5-reviewed",
+        # rc8 includes CUTLASS's Blackwell TMA fix (TensorRT-LLM #11956).
+        "image": ("nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc8@"
+                  "sha256:c7297fdfb2e947296a4b29c8bdf8f5122e565179d65f806f85ff8fb4a478606e"),
+        "runtime_image": "otools/trtllm-mpi:1.3.0rc8-reviewed",
         "port": 8355,
         "max_model_len": 32768,
+        "max_num_tokens": 8192,
         "max_batch_size": 1,
-        "status": "compatible-unvalidated",
-        "notes": "Official NVIDIA checkpoint; exact 2507 two-Spark combination needs validation.",
+        "kv_free_fraction": 0.60,
+        "enable_chunked_prefill": True,
+        "tool_parser": "qwen3",
+        "reasoning_parser": "deepseek-r1",
+        "explicit_tokenizer": True,
+        "conservative_fp4_startup": True,
+        "disable_flashinfer_sampling": True,
+        "status": "validated",
+        "notes": ("Official NVIDIA checkpoint; rc8 CUTLASS fix and conservative memory profile "
+                  "physically qualified on two GB10 Sparks."),
     },
     "deepseek-v4-flash-0731": {
         "backend": "deepseek-vllm-mp",
@@ -156,9 +178,9 @@ CLUSTER_PROFILES = {
         "model_size": 166898660330,
         "model_shards": 48,
         "runtime_repo": "https://github.com/Reederey87/dgx-spark-2x-deepseek-v4-flash.git",
-        "runtime_revision": "f7299002a0bfb6658ea1bb83c0cfd2be88f5e897",
-        "runtime_tree": "a880e225514fe88d5a8d6e69700e4888c17f130d",
-        "runtime_patch_sha256": "4ddf9d519b8b098d0dd3f2fff981e7e726f5fea1c774ef09a8c4ee6314cb82cd",
+        "runtime_revision": "15f29b7bd91d45a1678b3b8600a56512c36f13f2",
+        "runtime_tree": "9b1dc28c17818434d40d06e14762ea9cebf3bedf",
+        "runtime_patch_sha256": "3c22304cd06135e617cf09705f28092eb4ef86c0d0f65942e1fa52239c14d4e6",
         "b12x_revision": "7dc6fb8fcc6446ea093537d1657df81985fa5f43",
         "b12x_archive_sha256": "18a6b57739a493d5e6cca9f4f7bd91bf11d765905a43fa6dcbfc5b92d42a15a6",
         "b12x_license_provenance": ("Apache-2.0 declared in pyproject metadata; no bundled "
@@ -169,12 +191,16 @@ CLUSTER_PROFILES = {
                        "ffb2d59b1c059a5bd8d781320c9f5189de8293693b7d95da54befddaa54abf52"),
         "download_image": ("nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc5@"
                            "sha256:fd231812c9cacc3cf41eb159a4ec8efefbd998ec51e43337bb9b3b65e559a944"),
-        "image": "otools/vllm-deepseek-v4-flash-0731:reviewed",
+        "image": "otools/vllm-deepseek-v4-flash-0731:cand7-reviewed",
+        # "dspark" follows the upstream DGX Spark deployment name; it is only
+        # an API alias and does not select the speculative-decoding method.
+        "served_model_name": "deepseek-v4-flash-dspark",
         "port": 8000,
         "max_model_len": 32768,
         "max_num_seqs": 1,
-        "status": "validated-two-spark",
-        "notes": "Official DeepSeek weights; reviewed vLLM patch validated on two GB10 Sparks.",
+        "status": "validated",
+        "notes": ("Official DeepSeek weights and promoted cand7 overlay; eager DSpark "
+                  "speculative serving physically qualified on two GB10 Sparks."),
     },
 }
 
@@ -187,6 +213,8 @@ DEEPSEEK_VLLM_PREIMAGES = {
         "665201b189cf7661a7bdf834809d83c66ad1589873cdfb8b4ad693faaefe223b",
     "vllm/models/deepseek_v4/attention.py":
         "67eae3f8c0aa621a6adb99b2558a6d3a0148d3bd00c58d1e6001544de00a6159",
+    "vllm/models/deepseek_v4/compressor.py":
+        "adbfa58fbe0adc78dd93cec6c252dc49dc35398a95e96d533eba5bbe4f7f0963",
     "vllm/models/deepseek_v4/nvidia/flashinfer_sparse.py":
         "f6674841a34047a3aa54772c260e24e73c3dc910f57a9b7ecca4fe6a3856745c",
     "vllm/models/deepseek_v4/sparse_mla.py":
@@ -199,6 +227,8 @@ DEEPSEEK_VLLM_PREIMAGES = {
         "ed27ea7344da151c0eca45a714dcc7126b660f034acbdf7a2d18b2d559c0c222",
     "vllm/v1/kv_cache_interface.py":
         "73b5967f23ff2d4526b984cf90c1203e550575e5f329650c8899269b8f78edcf",
+    "vllm/v1/worker/gpu/spec_decode/dspark/utils.py":
+        "ccd826fab38aad7fb4fad227cb2127625c254d87381edaa98e2253a85ba89dd4",
 }
 
 # ----------------------------------------------------------------------------
@@ -1978,6 +2008,12 @@ def _qwen_expected_manifest(profile):
     }
 
 
+def _qwen_manifest_path(root, profile):
+    runtime_key = hashlib.sha256(
+        (profile["image"] + "\0" + profile["runtime_image"]).encode()).hexdigest()[:16]
+    return os.path.join(root, "manifests", f"{runtime_key}.json")
+
+
 def _prepare_cluster_key(cfg, dry=False):
     root = _cluster_state_dir(cfg["name"])
     ssh_dir = os.path.join(root, "ssh")
@@ -2129,7 +2165,8 @@ for parent, dirs, names in os.walk(root):
 if files != manifest.get("files"):
     raise SystemExit("context file manifest mismatch")
 base = {k: v for k, v in manifest.items()
-        if k not in ("context_sha256", "built_images", "runtime_signatures", "model_signatures")}
+    if k not in ("context_sha256", "built_images", "image_signatures",
+                 "runtime_signatures", "model_signatures")}
 digest = hashlib.sha256(json.dumps(base, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 if digest != manifest.get("context_sha256"):
     raise SystemExit("context digest mismatch")
@@ -2250,6 +2287,11 @@ def _deepseek_runtime_signature(target, image):
         "(p/'models/deepseek_v4/nvidia/flashinfer_sparse.py').read_text(); "
         "assert 'active_topk_width' in (p/'models/deepseek_v4/sparse_mla.py').read_text(); "
         "assert 'skip_k_cache_insert' in (p/'models/deepseek_v4/attention.py').read_text(); "
+        "assert '_get_c128_boundary' in (p/'models/deepseek_v4/compressor.py').read_text(); "
+        "assert '_pad_to_supported_q_heads' in "
+        "(p/'models/deepseek_v4/nvidia/flashinfer_sparse.py').read_text(); "
+        "assert 'get_draft_quant_config' in "
+        "(p/'v1/worker/gpu/spec_decode/dspark/utils.py').read_text(); "
         "h=hashlib.sha256(); "
         "roots=[pathlib.Path(b12x.__file__).parent,pathlib.Path(flashinfer.__file__).parent]; "
         "files=sorted((root,f) for root in roots for f in root.rglob('*') if f.is_file() "
@@ -2264,6 +2306,27 @@ def _deepseek_runtime_signature(target, image):
     if result.returncode != 0:
         return None, ((result.stdout or "") + (result.stderr or "")).strip()
     return result.stdout.strip(), ""
+
+
+def _deepseek_image_signature(target, image):
+    image_format = "{{json .RootFS.Layers}}\n{{json .Config}}\n{{.Os}}/{{.Architecture}}"
+    result = _host_exec(target, ["docker", "image", "inspect", "--format", image_format,
+                                 image], capture=True)
+    if result.returncode != 0:
+        return None
+    lines = result.stdout.splitlines()
+    if len(lines) != 3:
+        return None
+    try:
+        identity = {
+            "layers": json.loads(lines[0]),
+            "config": json.loads(lines[1]),
+            "platform": lines[2],
+        }
+    except json.JSONDecodeError:
+        return None
+    canonical = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def _deepseek_model_signature(target, profile):
@@ -2336,7 +2399,7 @@ def _prepare_deepseek(cfg, profile, build=False, weights=False, dry=False):
         verified = _verify_deepseek_context(target, remote_context)
         if verified != staged_manifest["context_sha256"]:
             raise RuntimeError(f"DeepSeek build context verification failed on {role}")
-    built_images, runtime_signatures = {}, {}
+    remote_contexts = {}
     for role, target in (("head", head), ("worker", worker)):
         print(f"Pulling official DeepSeek base on {role} ({target or 'local'}) ...")
         if _host_exec(target, ["docker", "pull", profile["base_image"]]).returncode != 0:
@@ -2345,13 +2408,56 @@ def _prepare_deepseek(cfg, profile, build=False, weights=False, dry=False):
                                            "{{.Architecture}}", profile["base_image"]], capture=True)
         if architecture.returncode != 0 or architecture.stdout.strip() != "arm64":
             raise RuntimeError(f"official DeepSeek base architecture mismatch on {role}")
-        remote_context = os.path.join(_cluster_state_dir(cfg["name"], target),
-                                      "deepseek-runtime")
-        print(f"Building reviewed DeepSeek runtime on {role} with network disabled ...")
-        command = ["docker", "build", "--network=none", "--build-arg",
-                   f"VLLM_BASE={profile['base_image']}", "-t", profile["image"], remote_context]
-        if _host_exec(target, command).returncode != 0:
-            raise RuntimeError(f"DeepSeek runtime build failed on {role}")
+        remote_contexts[role] = os.path.join(_cluster_state_dir(cfg["name"], target),
+                                             "deepseek-runtime")
+
+    print(f"Building reviewed DeepSeek runtime once on head with network disabled ...")
+    command = ["docker", "build", "--network=none", "--build-arg",
+               f"VLLM_BASE={profile['base_image']}", "-t", profile["image"],
+               remote_contexts["head"]]
+    if _host_exec(head, command).returncode != 0:
+        raise RuntimeError("DeepSeek runtime build failed on head")
+
+    head_signature = _deepseek_image_signature(head, profile["image"])
+    worker_signature = _deepseek_image_signature(worker, profile["image"])
+    if not head_signature:
+        raise RuntimeError("cannot record the head DeepSeek image signature")
+    if worker_signature != head_signature:
+        archive_name = "deepseek-cand7-image.tar.zst"
+        head_archive = os.path.join(remote_contexts["head"], archive_name)
+        worker_archive = os.path.join(remote_contexts["worker"], archive_name)
+        for role, target in (("head", head), ("worker", worker)):
+            if _host_exec(target, ["zstd", "--version"], capture=True).returncode != 0:
+                raise RuntimeError(f"zstd is required to distribute the reviewed image to {role}")
+        print("Distributing the exact head image to worker ...")
+        save_script = (f"docker save {shlex.quote(profile['image'])} | "
+                       f"zstd -T0 -3 -f -o {shlex.quote(head_archive)}")
+        if _host_exec(head, ["bash", "-o", "pipefail", "-c", save_script]).returncode != 0:
+            raise RuntimeError("failed to archive the reviewed DeepSeek image")
+        try:
+            if head is None:
+                copied = subprocess.run(["scp"] + ssh_opts() +
+                                        [head_archive, f"{worker}:{worker_archive}"], text=True)
+            elif worker is None:
+                copied = subprocess.run(["scp"] + ssh_opts() +
+                                        [f"{head}:{head_archive}", worker_archive], text=True)
+            else:
+                copied = subprocess.run(["scp", "-3"] + ssh_opts() +
+                                        [f"{head}:{head_archive}",
+                                         f"{worker}:{worker_archive}"], text=True)
+            if copied.returncode != 0:
+                raise RuntimeError("failed to copy the reviewed DeepSeek image to worker")
+            load_script = f"zstd -dc {shlex.quote(worker_archive)} | docker load"
+            if _host_exec(worker, ["bash", "-o", "pipefail", "-c", load_script]).returncode != 0:
+                raise RuntimeError("failed to load the reviewed DeepSeek image on worker")
+        finally:
+            _host_exec(head, ["rm", "-f", head_archive], capture=True)
+            _host_exec(worker, ["rm", "-f", worker_archive], capture=True)
+    else:
+        print("Worker already has the head image's exact runtime layers and configuration.")
+
+    built_images, image_signatures, runtime_signatures = {}, {}, {}
+    for role, target in (("head", head), ("worker", worker)):
         inspected = _host_exec(target, ["docker", "image", "inspect", "--format", "{{.Id}}",
                                         profile["image"]], capture=True)
         if inspected.returncode != 0:
@@ -2360,8 +2466,11 @@ def _prepare_deepseek(cfg, profile, build=False, weights=False, dry=False):
         if not signature:
             raise RuntimeError(f"DeepSeek runtime smoke failed on {role}: {detail}")
         built_images[role] = inspected.stdout.strip()
+        image_signatures[role] = _deepseek_image_signature(target, profile["image"])
         runtime_signatures[role] = signature
 
+    if None in image_signatures.values() or len(set(image_signatures.values())) != 1:
+        raise RuntimeError("DeepSeek runtime layers or image configuration differ between roles")
     if len(set(runtime_signatures.values())) != 1:
         raise RuntimeError("DeepSeek installed runtime contents differ between head and worker")
     model_signatures = {}
@@ -2378,6 +2487,7 @@ def _prepare_deepseek(cfg, profile, build=False, weights=False, dry=False):
     with open(manifest_path) as f:
         manifest = json.load(f)
     manifest["built_images"] = built_images
+    manifest["image_signatures"] = image_signatures
     manifest["runtime_signatures"] = runtime_signatures
     manifest["model_signatures"] = model_signatures
     with open(manifest_path, "w") as f:
@@ -2420,15 +2530,18 @@ def _qwen_runtime_context(cfg, profile):
     )
     with open(os.path.join(root, "Dockerfile"), "w") as f:
         f.write(dockerfile)
-    manifest_path = os.path.join(root, "manifest.json")
-    try:
-        with open(manifest_path) as f:
-            previous = json.load(f)
+    manifest_path = _qwen_manifest_path(root, profile)
+    os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
+    for previous_path in (manifest_path, os.path.join(root, "manifest.json")):
+        try:
+            with open(previous_path) as f:
+                previous = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
         if all(previous.get(key) == value for key, value in manifest.items()):
             manifest["built_images"] = previous.get("built_images", {})
             manifest["runtime_signatures"] = previous.get("runtime_signatures", {})
-    except (OSError, json.JSONDecodeError):
-        pass
+            break
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2); f.write("\n")
     return root
@@ -2503,6 +2616,18 @@ def _download_cluster_snapshot(cfg, profile, image, family, dry=False):
             print(f"ERROR: exact snapshot {profile['revision']} missing on {role} after download.",
                   file=sys.stderr)
             sys.exit(1)
+        if family == "Qwen":
+            # TRT-LLM probes the default revision before applying --revision.
+            # Point that offline-only probe at the same immutable commit.
+            ref = os.path.join("/root/.cache/huggingface", "hub", f"models--{repo}",
+                               "refs", "main")
+            script = ("import pathlib,sys; p=pathlib.Path(sys.argv[1]); "
+                      "p.parent.mkdir(parents=True,exist_ok=True); "
+                      "p.write_text(sys.argv[2])")
+            _host_exec(target, ["docker", "run", "--rm", "--network", "none",
+                                "--entrypoint", "python3", "-v",
+                                f"{cache}:/root/.cache/huggingface", image,
+                                "-c", script, ref, profile["revision"]], check=True)
 
 
 def _prepare_qwen(cfg, profile, build=False, weights=False, dry=False):
@@ -2539,7 +2664,7 @@ def _prepare_qwen(cfg, profile, build=False, weights=False, dry=False):
             if not runtime_signatures[role]:
                 print(f"ERROR: cannot record built runtime contents on {role}.", file=sys.stderr)
                 sys.exit(1)
-        manifest_path = os.path.join(context, "manifest.json")
+        manifest_path = _qwen_manifest_path(context, profile)
         with open(manifest_path) as f:
             manifest = json.load(f)
         manifest["built_images"] = built_images
@@ -2572,6 +2697,7 @@ def build_qwen_cluster_argv(profile_key, profile, cfg, role, target):
     fabric = cfg["fabric"]
     interfaces = ",".join(fabric["interfaces"])
     ucx_devices = ",".join(fabric["ucx_devices"])
+    role_ips = fabric["head_ips"] if role == "head" else fabric["worker_ips"]
     state = _cluster_state_dir(cfg["name"], target)
     name = _cluster_container_name(profile_key, cfg["name"], role)
     argv = ["run", "-d", "--rm", "--name", name]
@@ -2584,14 +2710,19 @@ def build_qwen_cluster_argv(profile_key, profile, cfg, role, target):
              "-e", f"NCCL_IB_HCA=={ucx_devices}",
              "-e", "NCCL_IB_DISABLE=0",
              "-e", "NCCL_NET=IB",
-             "-e", f"NCCL_SOCKET_IFNAME=={interfaces}",
-             "-e", f"OMPI_MCA_btl_tcp_if_include={interfaces}",
-             "-e", "OMPI_MCA_orte_default_hostfile=/etc/openmpi-hostfile",
+              "-e", f"NCCL_SOCKET_IFNAME=={interfaces}",
+              "-e", f"OMPI_MCA_btl_tcp_if_include={interfaces}",
+              "-e", f"OMPI_MCA_oob_tcp_if_include={fabric['interfaces'][0]}",
+              "-e", "OMPI_MCA_orte_default_hostfile=/etc/openmpi-hostfile",
              "-e", "OMPI_MCA_rmaps_ppr_n_pernode=1",
              "-e", "OMPI_ALLOW_RUN_AS_ROOT=1",
              "-e", "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1",
-             "-e", "CPATH=/usr/local/cuda/include",
-             "-e", "TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas",
+              "-e", "CPATH=/usr/local/cuda/include",
+              "-e", "TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas",
+              "-e", "HF_HUB_OFFLINE=1", "-e", "TRANSFORMERS_OFFLINE=1",
+              "-e", "NCCL_DEBUG=INFO", "-e", "NCCL_IB_ADDR_FAMILY=AF_INET",
+              "-e", "NCCL_IB_ROCE_VERSION_NUM=2",
+              "-e", f"SSH_LISTEN_ADDRESS={role_ips[0]}",
              "-v", f"{os.path.join(state, 'ssh')}:/tmp/.ssh:ro",
              "-v", f"{os.path.join(remote_home(target), '.cache', 'huggingface')}"
                    ":/root/.cache/huggingface",
@@ -2611,7 +2742,7 @@ def build_deepseek_cluster_argv(profile_key, profile, cfg, role, target):
     role_ips = fabric["head_ips"] if role == "head" else fabric["worker_ips"]
     name = _cluster_container_name(profile_key, cfg["name"], role)
     home = remote_home(target)
-    runtime_cache = os.path.join(home, ".cache", "otools", "deepseek-v4-flash-0731")
+    runtime_cache = os.path.join(home, ".cache", "otools", "deepseek-v4-flash-0731-cand7")
     argv = ["run", "-d", "--rm", "--name", name]
     argv += _cluster_docker_labels(profile_key, cfg, role, profile["backend"],
                                    profile["port"] if role == "head" else None)
@@ -2620,42 +2751,55 @@ def build_deepseek_cluster_argv(profile_key, profile, cfg, role, target):
              "--device", "/dev/infiniband:/dev/infiniband",
              "-v", f"{os.path.join(home, '.cache', 'huggingface')}:/cache/huggingface:ro",
              "-v", f"{runtime_cache}:/cache/runtime",
-             "-e", "HF_HOME=/cache/huggingface", "-e", "HF_HUB_OFFLINE=1",
-             "-e", "TRANSFORMERS_OFFLINE=1", "-e", "HF_HUB_DISABLE_XET=1",
-             "-e", "VLLM_CACHE_ROOT=/cache/runtime/vllm", "-e", "TRITON_CACHE_DIR=/cache/runtime/triton",
-             "-e", "TILELANG_CACHE_DIR=/cache/runtime/tilelang",
-             "-e", "FLASHINFER_DISABLE_VERSION_CHECK=1",
-             "-e", "VLLM_USE_FLASHINFER_SAMPLER=1", "-e", "VLLM_USE_BREAKABLE_CUDAGRAPH=1",
-             "-e", "TORCH_CUDA_ARCH_LIST=12.1a", "-e", "FLASHINFER_CUDA_ARCH_LIST=12.1a",
-             "-e", "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True",
-             "-e", "NCCL_NET=IB", "-e", "NCCL_IB_DISABLE=0", "-e", f"NCCL_IB_HCA=={hcas}",
-             "-e", f"NCCL_SOCKET_IFNAME=={interfaces}",
-             "-e", f"GLOO_SOCKET_IFNAME={fabric['interfaces'][0]}",
-             "-e", "NCCL_CROSS_NIC=1", "-e", "NCCL_IB_MERGE_NICS=1",
-             "-e", "NCCL_CUMEM_ENABLE=0", "-e", "NCCL_IGNORE_CPU_AFFINITY=1",
-             "-e", "NCCL_NVLS_ENABLE=0", "-e", "NCCL_DEBUG=INFO",
-             "-e", f"VLLM_HOST_IP={role_ips[0]}", profile["image"],
-             _deepseek_snapshot_path(profile), "--served-model-name", "deepseek-v4-flash-dspark",
-             "--host", "127.0.0.1", "--port", str(profile["port"]),
-             "--tensor-parallel-size", "2", "--pipeline-parallel-size", "1",
-             "--kv-cache-dtype", "nvfp4_ds_mla", "--block-size", "256",
-             "--max-model-len", str(profile["max_model_len"]),
-             "--max-num-seqs", str(profile["max_num_seqs"]),
-             "--max-num-batched-tokens", "8192", "--long-prefill-token-threshold", "4096",
-             "--gpu-memory-utilization", "0.85", "--enable-prefix-caching",
-             "--no-async-scheduling", "--enable-chunked-prefill",
-             "--speculative-config",
-             '{"method":"dspark","num_speculative_tokens":2,"draft_sample_method":"probabilistic"}',
-             "--tokenizer-mode", "deepseek_v4", "--attention-config",
+              "-e", "HF_HOME=/cache/huggingface", "-e", "HF_HUB_OFFLINE=1",
+              "-e", "TRANSFORMERS_OFFLINE=1", "-e", "HF_HUB_DISABLE_XET=1",
+              "-e", "VLLM_CACHE_ROOT=/cache/runtime/vllm-cache-cand7",
+              "-e", "TRITON_CACHE_DIR=/cache/runtime/triton-cache-cand7",
+              "-e", "TILELANG_CACHE_DIR=/cache/runtime/tilelang-cand7",
+              "-e", "FLASHINFER_WORKSPACE_BASE=/cache/runtime/flashinfer",
+              "-e", "DSPARK_SLOT_CLAMP=1", "-e", "VLLM_ALLOW_LONG_MAX_MODEL_LEN=0",
+              "-e", "TILELANG_CLEANUP_TEMP_FILES=1", "-e", "DG_JIT_USE_NVRTC=0",
+              "-e", "DG_JIT_NVCC_COMPILER=/usr/local/cuda/bin/nvcc",
+              "-e", "FLASHINFER_DISABLE_VERSION_CHECK=1",
+              "-e", "VLLM_USE_FLASHINFER_SAMPLER=1", "-e", "VLLM_USE_BREAKABLE_CUDAGRAPH=1",
+              "-e", "VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=256",
+              "-e", "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0",
+              "-e", "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=600", "-e", "DO_NOT_TRACK=1",
+              "-e", "TORCH_CUDA_ARCH_LIST=12.1a", "-e", "FLASHINFER_CUDA_ARCH_LIST=12.1a",
+              "-e", "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True",
+              "-e", "NCCL_NET=IB", "-e", "NCCL_IB_DISABLE=0", "-e", f"NCCL_IB_HCA=={hcas}",
+              "-e", f"NCCL_SOCKET_IFNAME=={interfaces}",
+              "-e", f"TP_SOCKET_IFNAME={fabric['interfaces'][0]}",
+              "-e", f"GLOO_SOCKET_IFNAME={fabric['interfaces'][0]}",
+              "-e", "NCCL_IB_ADDR_FAMILY=AF_INET", "-e", "NCCL_IB_ROCE_VERSION_NUM=2",
+              "-e", "NCCL_CROSS_NIC=1", "-e", "NCCL_IB_MERGE_NICS=1",
+              "-e", "NCCL_CUMEM_ENABLE=0", "-e", "NCCL_IGNORE_CPU_AFFINITY=1",
+              "-e", "NCCL_NVLS_ENABLE=0", "-e", "NCCL_DEBUG=INFO",
+              "-e", f"VLLM_HOST_IP={role_ips[0]}", profile["image"],
+              _deepseek_snapshot_path(profile), "--served-model-name", profile["served_model_name"],
+              "--host", "127.0.0.1", "--port", str(profile["port"]),
+              "--tensor-parallel-size", "2", "--pipeline-parallel-size", "1",
+              "--kv-cache-dtype", "nvfp4_ds_mla", "--block-size", "256",
+              "--max-model-len", str(profile["max_model_len"]),
+              "--max-num-seqs", str(profile["max_num_seqs"]),
+              "--max-num-batched-tokens", "8192", "--long-prefill-token-threshold", "4096",
+              "--shutdown-timeout", "30", "--max-cudagraph-capture-size", "6",
+              "--gpu-memory-utilization", "0.80", "--kv-cache-memory-bytes", "17179869184",
+              "--enable-prefix-caching", "--no-async-scheduling", "--enable-chunked-prefill",
+              "--enforce-eager",
+              "--speculative-config",
+              '{"method":"dspark","num_speculative_tokens":2,"draft_sample_method":"probabilistic"}',
+              "--tokenizer-mode", "deepseek_v4", "--attention-config",
              '{"backend":"FLASHINFER_MLA_SPARSE_DSV4"}',
              "--distributed-executor-backend", "mp", "--tool-call-parser", "deepseek_v4",
              "--enable-auto-tool-choice", "--reasoning-parser", "deepseek_v4",
              "--reasoning-config",
              '{"reasoning_parser":"deepseek_v4","reasoning_start_str":"<think>","reasoning_end_str":"</think>"}',
              "--default-chat-template-kwargs", '{"thinking":true,"reasoning_effort":"high"}',
-             "--generation-config", "vllm", "--override-generation-config",
-             '{"temperature":1.0,"top_p":1.0}', "--enable-flashinfer-autotune",
-             "--nnodes", "2", "--node-rank", "0" if role == "head" else "1",
+              "--generation-config", "vllm", "--override-generation-config",
+              '{"temperature":1.0,"top_p":1.0}', "--enable-flashinfer-autotune",
+              "--distributed-timeout-seconds", "900", "--cpu-distributed-timeout-seconds", "900",
+              "--nnodes", "2", "--node-rank", "0" if role == "head" else "1",
              "--master-addr", fabric["head_ips"][0], "--master-port", "25000"]
     if role == "worker":
         argv.append("--headless")
@@ -2966,7 +3110,117 @@ def _qwen_runtime_signature(target, image):
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def _launch_qwen_cluster(profile_key, profile, cfg, dry=False):
+def _qwen_extra_config(profile):
+    body = ("print_iter_log: false\nkv_cache_config:\n  dtype: auto\n"
+            f"  free_gpu_memory_fraction: {profile['kv_free_fraction']}\n")
+    if profile.get("disable_flashinfer_sampling"):
+        body += "disable_flashinfer_sampling: true\n"
+    if profile.get("conservative_fp4_startup"):
+        return (body + "nvfp4_gemm_config:\n  allowed_backends:\n    - cublaslt\n"
+                "enable_autotuner: false\ncuda_graph_config: null\n")
+    return body + "cuda_graph_config:\n  enable_padding: true\n"
+
+
+def _qwen_warmup_requests(profile):
+    thinking = profile.get("reasoning_parser") == "deepseek-r1"
+    temperature = 0.6 if thinking else 0
+    max_tokens = 2048 if thinking else 512
+    tool = {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get current weather for a location",
+            "parameters": {
+                "type": "object",
+                "properties": {"location": {"type": "string"}},
+                "required": ["location"],
+            },
+        },
+    }
+    return [
+        ("plain chat", 300, {
+            "model": profile["model"],
+            "messages": [{"role": "user", "content": "Reply with the single word ok."}],
+            "max_tokens": 512 if thinking else 128,
+            "temperature": temperature,
+            **({"top_p": 0.95, "top_k": 20} if thinking else {}),
+        }),
+        ("tool parser", 600, {
+            "model": profile["model"],
+            "messages": [{"role": "user", "content": (
+                "Call the function get_weather exactly once with location Tokyo. "
+                "Do not call any other function and do not answer directly.")}],
+            "tools": [tool],
+            "tool_choice": "auto",
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            **({"top_p": 0.95, "top_k": 20} if thinking else {}),
+        }),
+        ("streaming", 300, {
+            "model": profile["model"],
+            "messages": [{"role": "user", "content": "Write three short words."}],
+            "max_tokens": 512 if thinking else 128,
+            "temperature": temperature,
+            **({"top_p": 0.95, "top_k": 20} if thinking else {}),
+            "stream": True,
+        }),
+    ]
+
+
+def _warm_qwen_cluster(head, profile):
+    endpoint = f"http://127.0.0.1:{profile['port']}/v1/chat/completions"
+    for label, timeout, payload in _qwen_warmup_requests(profile):
+        print(f"Warming Qwen {label} path ...")
+        ok, body = _host_text(head, [
+            "curl", "--fail-with-body", "-sS", "--max-time", str(timeout),
+            "-H", "Content-Type: application/json", "--data-binary",
+            json.dumps(payload, separators=(",", ":")), endpoint,
+        ])
+        if not ok:
+            raise RuntimeError(f"Qwen {label} warmup failed: {body[-500:].replace(chr(10), ' ')}")
+        if payload.get("stream"):
+            finish_seen = False
+            done_seen = False
+            for line in body.splitlines():
+                if not line.startswith("data: "):
+                    continue
+                if line == "data: [DONE]":
+                    done_seen = True
+                    continue
+                try:
+                    event = json.loads(line[6:])
+                except json.JSONDecodeError as e:
+                    raise RuntimeError(f"Qwen {label} warmup returned invalid SSE: {e}") from e
+                if event.get("error"):
+                    raise RuntimeError(f"Qwen {label} warmup returned an error event")
+                finish_seen = finish_seen or any(
+                    choice.get("finish_reason") for choice in event.get("choices", []))
+            if not done_seen or not finish_seen:
+                raise RuntimeError(f"Qwen {label} warmup returned an incomplete stream")
+            continue
+        try:
+            response = json.loads(body)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Qwen {label} warmup returned invalid JSON: {e}") from e
+        choices = response.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise RuntimeError(f"Qwen {label} warmup returned no choices")
+        if label == "tool parser":
+            calls = choices[0].get("message", {}).get("tool_calls")
+            if not isinstance(calls, list) or len(calls) != 1:
+                raise RuntimeError("Qwen tool parser warmup did not emit exactly one tool call")
+            function = calls[0].get("function", {})
+            if function.get("name") != "get_weather":
+                raise RuntimeError("Qwen tool parser warmup called the wrong function")
+            try:
+                arguments = json.loads(function.get("arguments", ""))
+            except (TypeError, json.JSONDecodeError) as e:
+                raise RuntimeError("Qwen tool parser warmup emitted invalid JSON arguments") from e
+            if not isinstance(arguments, dict) or arguments.get("location") != "Tokyo":
+                raise RuntimeError("Qwen tool parser warmup emitted incorrect arguments")
+
+
+def _launch_qwen_cluster(profile_key, profile, cfg, dry=False, startup_timeout=1800):
     head, worker = _cluster_targets(cfg)
     if not dry:
         if not cluster_preflight(cfg, require_fabric=True)[0]:
@@ -2983,17 +3237,21 @@ def _launch_qwen_cluster(profile_key, profile, cfg, dry=False):
             print(f"\n# {role}")
             print(format_run(argv, target))
         return
-    manifest_path = os.path.join(_cluster_state_dir(cfg["name"]), "qwen-runtime",
-                                 "manifest.json")
-    try:
-        with open(manifest_path) as f:
-            build_manifest = json.load(f)
-            built_images = build_manifest.get("built_images", {})
-            expected_signatures = build_manifest.get("runtime_signatures", {})
-    except (OSError, json.JSONDecodeError):
-        built_images, expected_signatures = {}, {}
-        build_manifest = {}
+    runtime_root = os.path.join(_cluster_state_dir(cfg["name"]), "qwen-runtime")
     current_inputs = _qwen_expected_manifest(profile)
+    build_manifest = {}
+    for manifest_path in (_qwen_manifest_path(runtime_root, profile),
+                          os.path.join(runtime_root, "manifest.json")):
+        try:
+            with open(manifest_path) as f:
+                candidate = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if all(candidate.get(key) == value for key, value in current_inputs.items()):
+            build_manifest = candidate
+            break
+    built_images = build_manifest.get("built_images", {})
+    expected_signatures = build_manifest.get("runtime_signatures", {})
     if any(build_manifest.get(key) != value for key, value in current_inputs.items()):
         print("ERROR: Qwen build manifest does not match the current reviewed inputs; rebuild "
               "both nodes before launch.", file=sys.stderr)
@@ -3047,9 +3305,7 @@ def _launch_qwen_cluster(profile_key, profile, cfg, dry=False):
         head_name = _cluster_container_name(profile_key, cfg["name"], "head")
         _host_exec(head, ["docker", "cp", remote_hostfile,
                           f"{head_name}:/etc/openmpi-hostfile"], check=True)
-        config_body = ("print_iter_log: false\nkv_cache_config:\n  dtype: auto\n"
-                       "  free_gpu_memory_fraction: 0.85\ncuda_graph_config:\n"
-                       "  enable_padding: true\n")
+        config_body = _qwen_extra_config(profile)
         config_local = os.path.join(_cluster_state_dir(cfg["name"]), "trtllm.yml")
         with open(config_local, "w") as f:
             f.write(config_body)
@@ -3067,12 +3323,22 @@ def _launch_qwen_cluster(profile_key, profile, cfg, dry=False):
             time.sleep(2)
         else:
             raise RuntimeError("head container cannot reach worker SSH over the fabric")
-        model = _qwen_snapshot_path(profile)
-        serve = ("mpirun trtllm-llmapi-launch trtllm-serve " + shlex.quote(model) +
+        parser_args = f" --tool_parser {shlex.quote(profile['tool_parser'])}"
+        if profile.get("reasoning_parser"):
+            parser_args += f" --reasoning_parser {shlex.quote(profile['reasoning_parser'])}"
+        if profile.get("explicit_tokenizer"):
+            parser_args += f" --tokenizer {shlex.quote(_qwen_snapshot_path(profile))}"
+        serve = ("mpirun trtllm-llmapi-launch trtllm-serve serve " +
+                 shlex.quote(profile["model"]) +
+                 f" --revision {shlex.quote(profile['revision'])}" +
                  " --tp_size 2 --backend pytorch" +
-                 f" --max_num_tokens {int(profile['max_model_len'])}" +
+                 f" --max_seq_len {int(profile['max_model_len'])}" +
+                 f" --max_num_tokens {int(profile['max_num_tokens'])}" +
                  f" --max_batch_size {int(profile['max_batch_size'])}" +
+                 (" --enable_chunked_prefill" if profile["enable_chunked_prefill"] else "") +
+                 parser_args +
                  " --extra_llm_api_options /tmp/trtllm.yml" +
+                 " --host 127.0.0.1" +
                  f" --port {int(profile['port'])} > /tmp/otools-serve.log 2>&1")
         res = _host_exec(head, ["docker", "exec", "-d", head_name, "sh", "-c", serve])
         if res.returncode != 0:
@@ -3082,9 +3348,37 @@ def _launch_qwen_cluster(profile_key, profile, cfg, dry=False):
                                     "trtllm-serve"], capture=True)
         if alive.returncode != 0:
             raise RuntimeError("TRT-LLM serve process exited during startup")
+        deadline = time.monotonic() + startup_timeout
+        while time.monotonic() < deadline:
+            alive = _host_exec(head, ["docker", "exec", head_name, "pgrep", "-f",
+                                      "trtllm-serve"], capture=True)
+            if alive.returncode != 0:
+                raise RuntimeError("TRT-LLM serve process exited during model loading")
+            healthy, _ = _host_text(head, ["curl", "-fsS", "--max-time", "5",
+                                           f"http://127.0.0.1:{profile['port']}/health"])
+            if healthy:
+                break
+            time.sleep(10)
+        else:
+            raise RuntimeError(f"TRT-LLM API did not become healthy within {startup_timeout}s")
+        generated, detail = _host_text(head, ["curl", "-fsS", "--max-time", "300",
+                                               f"http://127.0.0.1:{profile['port']}/health_generate"])
+        if not generated:
+            raise RuntimeError(f"TRT-LLM generation health check failed: {detail[-300:]}")
+        serve_log = _host_exec(head, ["docker", "exec", head_name, "sh", "-c",
+                                      "grep -q 'NET/IB' /tmp/otools-serve.log"], capture=True)
+        if serve_log.returncode != 0:
+            raise RuntimeError("TRT-LLM launch has no NCCL NET/IB evidence")
+        _warm_qwen_cluster(head, profile)
     except (RuntimeError, subprocess.CalledProcessError, OSError, KeyboardInterrupt) as e:
         reason = "launch interrupted" if isinstance(e, KeyboardInterrupt) else str(e)
         print(f"ERROR: {reason}; rolling back rank containers.", file=sys.stderr)
+        diagnostic_name = _cluster_container_name(profile_key, cfg["name"], "head")
+        diagnostic = _host_exec(head, ["docker", "exec", diagnostic_name, "sh", "-c",
+                                      "tail -n 120 /tmp/otools-serve.log"], capture=True)
+        diagnostic_body = ((diagnostic.stdout or "") + (diagnostic.stderr or "")).strip()
+        if diagnostic_body:
+            print("--- TRT-LLM launch diagnostics ---\n" + diagnostic_body, file=sys.stderr)
         cleanup_failures = []
         for target, name in reversed(started):
             try:
@@ -3099,13 +3393,13 @@ def _launch_qwen_cluster(profile_key, profile, cfg, dry=False):
         if isinstance(e, KeyboardInterrupt):
             raise
         sys.exit(1)
-    print(f"Started '{profile_key}' across '{cfg['name']}'. API will initialize on head port "
-          f"{profile['port']}.")
+    print(f"READY: '{profile_key}' passed generation, parser, streaming, and NCCL NET/IB "
+          f"checks across '{cfg['name']}'; head API port {profile['port']}.")
 
 
 def _deepseek_manifest_inputs(profile):
     return {
-        "build_schema": 2,
+        "build_schema": 3,
         "runtime_repository": profile["runtime_repo"],
         "runtime_commit": profile["runtime_revision"],
         "runtime_tree": profile["runtime_tree"],
@@ -3124,6 +3418,138 @@ def _deepseek_manifest_inputs(profile):
         "build_network": "none",
         "preimages": DEEPSEEK_VLLM_PREIMAGES,
     }
+
+
+def _deepseek_warmup_requests(profile):
+    model = profile["served_model_name"]
+    tool = {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get current weather for a location",
+            "parameters": {
+                "type": "object",
+                "properties": {"location": {"type": "string"}},
+                "required": ["location"],
+            },
+        },
+    }
+    tool_call = {
+        "id": "warmup_call",
+        "type": "function",
+        "function": {"name": "get_weather", "arguments": '{"location":"Tokyo"}'},
+    }
+    long_prompt = "Reply with the single word ok. " + " ".join(
+        f"lorem ipsum filler segment {i}." for i in range(1200))
+    return [
+        ("plain decode", 120, {
+            "model": model,
+            "messages": [{"role": "user", "content": "Reply with the single word ok."}],
+            "max_tokens": 8,
+            "temperature": 0,
+            "user": "omodel-manager-warmup",
+        }),
+        ("tool parser", 180, {
+            "model": model,
+            "messages": [{"role": "user", "content": "What is the weather in Tokyo? Use the tool."}],
+            "tools": [tool],
+            "tool_choice": "auto",
+            "max_tokens": 128,
+            "temperature": 0,
+            "user": "omodel-manager-warmup",
+        }),
+        ("tool result", 180, {
+            "model": model,
+            "messages": [
+                {"role": "user", "content": "What is the weather in Tokyo? Use the tool."},
+                {"role": "assistant", "content": None, "tool_calls": [tool_call]},
+                {"role": "tool", "tool_call_id": "warmup_call",
+                 "content": '{"temperature_c":24,"conditions":"clear"}'},
+            ],
+            "tools": [tool],
+            "tool_choice": "auto",
+            "max_tokens": 128,
+            "temperature": 0,
+            "user": "omodel-manager-warmup",
+        }),
+        ("long prefill", 360, {
+            "model": model,
+            "messages": [{"role": "user", "content": long_prompt}],
+            "max_tokens": 8,
+            "temperature": 0,
+            "user": "omodel-manager-warmup",
+        }),
+        ("sampled streaming", 180, {
+            "model": model,
+            "messages": [{"role": "user", "content": "Write three short words."}],
+            "max_tokens": 64,
+            "temperature": 1.0,
+            "top_p": 1.0,
+            "stream": True,
+            "user": "omodel-manager-warmup",
+        }),
+        ("long agent streaming", 720, {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": "You are a coding agent. Use tools when needed."},
+                {"role": "user", "content": long_prompt + " Read src/main.py."},
+                {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": "warmup_call", "type": "function", "function": {
+                        "name": "get_weather", "arguments": '{"location":"Tokyo"}'}}]},
+                {"role": "tool", "tool_call_id": "warmup_call",
+                 "content": '{"temperature_c":24,"conditions":"clear"}'},
+                {"role": "user", "content": "Continue with a concise analysis."},
+            ],
+            "tools": [tool],
+            "tool_choice": "auto",
+            "max_tokens": 128,
+            "temperature": 1.0,
+            "top_p": 1.0,
+            "stream": True,
+            "user": "omodel-manager-warmup",
+        }),
+    ]
+
+
+def _warm_deepseek_cluster(head, profile):
+    endpoint = f"http://127.0.0.1:{profile['port']}/v1/chat/completions"
+    for label, timeout, payload in _deepseek_warmup_requests(profile):
+        print(f"Warming DeepSeek {label} path ...")
+        ok, body = _host_text(head, [
+            "curl", "--fail-with-body", "-sS", "--max-time", str(timeout),
+            "-H", "Content-Type: application/json", "--data-binary",
+            json.dumps(payload, separators=(",", ":")), endpoint,
+        ])
+        if not ok:
+            detail = body[-500:].replace("\n", " ")
+            raise RuntimeError(f"DeepSeek {label} warmup failed: {detail}")
+        if payload.get("stream"):
+            if "data: [DONE]" not in body:
+                raise RuntimeError(f"DeepSeek {label} warmup returned an incomplete stream")
+            finish_seen = False
+            for line in body.splitlines():
+                if not line.startswith("data: ") or line == "data: [DONE]":
+                    continue
+                try:
+                    event = json.loads(line[6:])
+                except json.JSONDecodeError as e:
+                    raise RuntimeError(f"DeepSeek {label} warmup returned invalid SSE: {e}") from e
+                if event.get("error"):
+                    raise RuntimeError(f"DeepSeek {label} warmup returned an error event")
+                finish_seen = finish_seen or any(
+                    choice.get("finish_reason") for choice in event.get("choices", []))
+            if not finish_seen:
+                raise RuntimeError(f"DeepSeek {label} warmup ended without a finish reason")
+            continue
+        try:
+            response = json.loads(body)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"DeepSeek {label} warmup returned invalid JSON: {e}") from e
+        choices = response.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise RuntimeError(f"DeepSeek {label} warmup returned no choices")
+        if label == "tool parser" and not choices[0].get("message", {}).get("tool_calls"):
+            raise RuntimeError("DeepSeek tool parser warmup emitted no tool call")
 
 
 def _launch_deepseek_cluster(profile_key, profile, cfg, dry=False, startup_timeout=900):
@@ -3169,15 +3595,21 @@ def _launch_deepseek_cluster(profile_key, profile, cfg, dry=False, startup_timeo
               file=sys.stderr)
         sys.exit(1)
     built_images = manifest.get("built_images", {})
+    expected_images = manifest.get("image_signatures", {})
     expected_signatures = manifest.get("runtime_signatures", {})
     expected_models = manifest.get("model_signatures", {})
     if (set(built_images) != {"head", "worker"}
+            or set(expected_images) != {"head", "worker"}
             or set(expected_signatures) != {"head", "worker"}
             or set(expected_models) != {"head", "worker"}):
         print("ERROR: DeepSeek build manifest lacks both role identities; rebuild.", file=sys.stderr)
         sys.exit(1)
     if len(set(expected_signatures.values())) != 1:
         print("ERROR: recorded DeepSeek runtime contents differ between roles; rebuild.",
+              file=sys.stderr)
+        sys.exit(1)
+    if len(set(expected_images.values())) != 1:
+        print("ERROR: recorded DeepSeek image contents differ between roles; rebuild.",
               file=sys.stderr)
         sys.exit(1)
 
@@ -3188,6 +3620,9 @@ def _launch_deepseek_cluster(profile_key, profile, cfg, dry=False, startup_timeo
             print(f"ERROR: {role} DeepSeek image does not match its reviewed build ID.",
                   file=sys.stderr)
             sys.exit(1)
+        if _deepseek_image_signature(target, profile["image"]) != expected_images[role]:
+            print(f"ERROR: {role} DeepSeek image content signature mismatch.", file=sys.stderr)
+            sys.exit(1)
         signature, detail = _deepseek_runtime_signature(target, profile["image"])
         if signature != expected_signatures[role]:
             print(f"ERROR: {role} DeepSeek runtime signature mismatch: {detail}", file=sys.stderr)
@@ -3197,7 +3632,7 @@ def _launch_deepseek_cluster(profile_key, profile, cfg, dry=False, startup_timeo
             print(f"ERROR: {role} DeepSeek model snapshot mismatch: {detail}", file=sys.stderr)
             sys.exit(1)
         runtime_cache = os.path.join(remote_home(target), ".cache", "otools",
-                                     "deepseek-v4-flash-0731")
+                                     "deepseek-v4-flash-0731-cand7")
         _host_exec(target, ["mkdir", "-p", runtime_cache], check=True)
 
     for _, target, _, _ in commands:
@@ -3234,6 +3669,7 @@ def _launch_deepseek_cluster(profile_key, profile, cfg, dry=False, startup_timeo
                         ib_ready = False
                         break
                 if ib_ready:
+                    _warm_deepseek_cluster(head, profile)
                     break
             time.sleep(10)
         else:
@@ -3254,7 +3690,7 @@ def _launch_deepseek_cluster(profile_key, profile, cfg, dry=False, startup_timeo
         if isinstance(e, KeyboardInterrupt):
             raise
         sys.exit(1)
-    print(f"READY: '{profile_key}' is healthy across '{cfg['name']}' on NCCL NET/IB; "
+    print(f"READY: '{profile_key}' passed warmups across '{cfg['name']}' on NCCL NET/IB; "
           f"head API port {profile['port']}.")
 
 
@@ -3262,7 +3698,8 @@ def cmd_cluster_launch(args):
     cfg = cluster_config(args.name)
     profile = cluster_profile(args.profile)
     if profile["backend"] == "trtllm-mpi":
-        _launch_qwen_cluster(args.profile, profile, cfg, dry=args.dry_run)
+        _launch_qwen_cluster(args.profile, profile, cfg, dry=args.dry_run,
+                             startup_timeout=args.startup_timeout)
         return
     _launch_deepseek_cluster(args.profile, profile, cfg, dry=args.dry_run,
                              startup_timeout=args.startup_timeout)
@@ -4331,8 +4768,8 @@ def main():
     p.add_argument("name")
     p.add_argument("profile", choices=sorted(CLUSTER_PROFILES))
     p.add_argument("--dry-run", action="store_true", help="print rank commands without host changes")
-    p.add_argument("--startup-timeout", type=int, default=900, metavar="SECONDS",
-                   help="DeepSeek health + NET/IB deadline (default: 900)")
+    p.add_argument("--startup-timeout", type=int, default=1800, metavar="SECONDS",
+                   help="cluster health, generation, and NET/IB deadline (default: 1800)")
     p.set_defaults(func=cmd_cluster_launch)
 
     p = cluster_sub.add_parser("status", help="show managed rank containers on both nodes")
