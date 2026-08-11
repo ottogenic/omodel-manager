@@ -175,17 +175,20 @@ to `sha256:fd231812c9cacc3cf41eb159a4ec8efefbd998ec51e43337bb9b3b65e559a944`.
 The manager builds and records its own reviewed MPI derivative rather than trusting an
 opaque image.
 
-DeepSeek V4 Flash 0731 is built and staged for physical qualification. The reviewed runtime
-source is pinned to commit `f7299002a0bfb6658ea1bb83c0cfd2be88f5e897`, tree
+DeepSeek V4 Flash 0731 was physically validated on the two-node Beebo cluster on 2026-08-11.
+The reviewed runtime source is pinned to commit `f7299002a0bfb6658ea1bb83c0cfd2be88f5e897`, tree
 `a880e225514fe88d5a8d6e69700e4888c17f130d`, and patch SHA-256
 `4ddf9d519b8b098d0dd3f2fff981e7e726f5fea1c774ef09a8c4ee6314cb82cd`.
 The operator accepts the pinned `b12x` package's Apache-2.0 metadata despite its missing
 bundled license text. The manager verifies the exact `b12x` and FlashInfer archives, builds
 with network access disabled, re-hashes each copied context, records role-specific image IDs,
 and verifies identical installed content. Both 74-file model snapshots hash to the same
-166,898,660,330-byte manifest. Worker-first launch is implemented but refuses to run until the
-QSFP/RoCE route, MTU, jumbo ping, and active HCA mapping pass; it then requires API health and
-`NCCL NET/IB` evidence. No community image or quant is used as a fallback.
+166,898,660,330-byte manifest. Worker-first launch refuses to run until the QSFP/RoCE route,
+MTU-sized ping, and active HCA mapping pass; it then requires API health and `NCCL NET/IB`
+evidence. Basic generation, tool-call emission, and tool-result continuation passed. The first
+cold tool-result continuation exposed a worker TileLang JIT timeout; restarting after the
+persistent caches populated resolved it, and repeated tool loops remained healthy. No community
+image or quant is used as a fallback.
 
 ## Primary Sources
 

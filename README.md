@@ -133,9 +133,10 @@ the reviewed patch, builds with `--network=none` on both nodes, and records role
 IDs after copied-context verification and full installed-content smoke hashes. It also hashes
 all 74 model files (166,898,660,330 bytes) on each node and requires parity. Overlay extraction
 must run from an ARM64 control/head host. The operator accepts `b12x`'s Apache-2.0 package
-metadata despite its missing bundled license file. DeepSeek launch is implemented but remains
-physically gated by the QSFP/RoCE preflight; launch waits for API health and `NCCL NET/IB`
-evidence or rolls both ranks back. No community image or quant is substituted.
+metadata despite its missing bundled license file. The deployment was validated on two GB10
+Sparks over dual-rail RoCE on 2026-08-11. Launch still requires the QSFP/RoCE preflight, API
+health, and `NCCL NET/IB` evidence or rolls both ranks back. No community image or quant is
+substituted.
 
 See [DUAL_SPARK_MODEL_RESEARCH.md](DUAL_SPARK_MODEL_RESEARCH.md) for model selection and
 primary-source links.

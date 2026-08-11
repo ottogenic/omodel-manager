@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **DeepSeek build manifests now include every launch-time model invariant.** The context writer
+  derives its metadata from the same source as launch validation, preventing a freshly prepared
+  two-Spark runtime from being rejected for missing file-count, size, or shard-count fields.
 - **Laguna `poolside_v1` reasoning-token initialization on vLLM 0.25.1.** Both Laguna profiles
   now pass explicit `<think>` / `</think>` delimiters through `--reasoning-config`, avoiding the
   known vLLM #49379 startup warning while preserving request-level thinking-on/off behavior.

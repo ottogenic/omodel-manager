@@ -173,8 +173,8 @@ CLUSTER_PROFILES = {
         "port": 8000,
         "max_model_len": 32768,
         "max_num_seqs": 1,
-        "status": "build-ready-fabric-pending",
-        "notes": "Official DeepSeek weights; locally built reviewed vLLM patch, never a community image.",
+        "status": "validated-two-spark",
+        "notes": "Official DeepSeek weights; reviewed vLLM patch validated on two GB10 Sparks.",
     },
 }
 
@@ -2226,25 +2226,9 @@ def _deepseek_runtime_context(profile, dry=False):
     dockerfile_path = os.path.join(root, "Dockerfile")
     with open(dockerfile_path, "w") as f:
         f.write(_deepseek_dockerfile(profile, package_dir))
-    manifest = {
-        "build_schema": 2,
-        "runtime_repository": profile["runtime_repo"],
-        "runtime_commit": profile["runtime_revision"],
-        "runtime_tree": profile["runtime_tree"],
-        "patch_sha256": profile["runtime_patch_sha256"],
-        "base_image": profile["base_image"],
-        "vllm_package_dir": package_dir,
-        "b12x_revision": profile["b12x_revision"],
-        "b12x_archive_sha256": profile["b12x_archive_sha256"],
-        "b12x_license_provenance": profile["b12x_license_provenance"],
-        "flashinfer_revision": profile["flashinfer_revision"],
-        "flashinfer_archive_sha256": profile["flashinfer_archive_sha256"],
-        "model": profile["model"],
-        "model_revision": profile["revision"],
-        "build_network": "none",
-        "preimages": DEEPSEEK_VLLM_PREIMAGES,
-        "dockerfile_sha256": _sha256_file(dockerfile_path),
-    }
+    manifest = _deepseek_manifest_inputs(profile)
+    manifest["vllm_package_dir"] = package_dir
+    manifest["dockerfile_sha256"] = _sha256_file(dockerfile_path)
     manifest["files"] = _tree_manifest(root, excluded=("manifest.json",))
     canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
     manifest["context_sha256"] = hashlib.sha256(canonical).hexdigest()
