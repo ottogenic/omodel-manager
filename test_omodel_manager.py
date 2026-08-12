@@ -98,6 +98,19 @@ class HostsStoreTests(unittest.TestCase):
         self.assertEqual(mm._host_label("user@unknown"), "user@unknown")  # no alias -> raw
         self.assertIsNone(mm._host_label(None))
 
+    def test_dedupe_host_targets_collapses_aliases_for_same_machine(self):
+        identities = {"user@lan": "machine-a", "user@fabric": "machine-a",
+                      "user@other": "machine-b"}
+        with mock.patch.object(mm, "_host_machine_id", side_effect=identities.get):
+            self.assertEqual(mm._dedupe_host_targets(
+                ["user@lan", "user@fabric", "user@other"]),
+                ["user@lan", "user@other"])
+
+    def test_dedupe_host_targets_preserves_unknown_targets(self):
+        with mock.patch.object(mm, "_host_machine_id", return_value=None):
+            self.assertEqual(mm._dedupe_host_targets(["user@a", "user@b"]),
+                             ["user@a", "user@b"])
+
 
 class InstallTests(unittest.TestCase):
     """`install` targets this machine when no remote is named."""
@@ -341,10 +354,28 @@ class PsUnreachableTests(unittest.TestCase):
     def test_down_host_reads_unreachable(self):
         mm.list_managed = lambda **k: None         # SSH/docker failure on every host
         out = io.StringIO()
-        with contextlib.redirect_stdout(out):
+        with mock.patch.object(mm, "_host_machine_id", return_value="machine-a"), \
+                contextlib.redirect_stdout(out):
             mm.cmd_ps(SimpleNamespace(all=False, hosts=None))
         self.assertIn("unreachable", out.getvalue())
         self.assertNotIn("idle", out.getvalue())
+
+    def test_table_columns_expand_for_cluster_names(self):
+        rows = [
+            ("local-head", "qwen3-235b-a22b-fp4-test-cluster-head",
+             "qwen3-235b-a22b-fp4", "8355", "Up 12 hours"),
+            ("worker-host", "qwen3-235b-a22b-fp4-test-cluster-worker",
+             "qwen3-235b-a22b-fp4", "?", "Up 12 hours"),
+        ]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            mm._print_ps_table(rows)
+        lines = out.getvalue().splitlines()
+        model_column = lines[0].index("MODEL")
+        port_column = lines[0].index("PORT")
+        self.assertTrue(lines[1][model_column:].startswith(rows[0][2]))
+        self.assertTrue(lines[2][model_column:].startswith(rows[1][2]))
+        self.assertTrue(lines[1][port_column:].startswith(rows[0][3]))
 
 
 class SyncTests(unittest.TestCase):
@@ -736,39 +767,50 @@ class ClusterProfileTests(unittest.TestCase):
             self.assertTrue(profile["model"].startswith("nvidia/"))
             self.assertEqual(len(profile["revision"]), 40)
             image, digest = profile["image"].split("@sha256:")
-            self.assertIn(image, {
-                "nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc5",
-                "nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc8",
-            })
+            self.assertEqual(image, "nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc8")
             self.assertEqual(len(digest), 64)
-        thinking = mm.CLUSTER_PROFILES["qwen3-235b-a22b-thinking-2507-nvfp4"]
-        self.assertIn("release:1.3.0rc8@sha256:", thinking["image"])
+            self.assertEqual(profile["runtime_image"],
+                             "otools/trtllm-mpi:1.3.0rc8-reviewed")
 
-    def test_deepseek_uses_official_weights_and_reviewed_source_commit(self):
+    def test_deepseek_uses_official_weights_and_c8r_source_pins(self):
         profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
         self.assertEqual(profile["model"], "deepseek-ai/DeepSeek-V4-Flash-0731")
         self.assertEqual(profile["served_model_name"], "deepseek-v4-flash-dspark")
         self.assertEqual(profile["status"], "validated")
         self.assertEqual(profile["revision"], "9e165c30e2704aec5d9d593cce3eebd58bbef1cb")
+        self.assertEqual(profile["runtime_lane"], "c8r")
         self.assertEqual(profile["runtime_revision"],
-                         "15f29b7bd91d45a1678b3b8600a56512c36f13f2")
-        self.assertEqual(profile["runtime_tree"], "9b1dc28c17818434d40d06e14762ea9cebf3bedf")
-        self.assertEqual(profile["runtime_patch_sha256"],
-                         "3c22304cd06135e617cf09705f28092eb4ef86c0d0f65942e1fa52239c14d4e6")
+                          "46eb0fcbadf0e4e0be8838b18f6aa85087ed8839")
+        self.assertEqual(profile["runtime_overlay_tree"],
+                         "94f81f56d9cface7c7719d4cd6d1e0954bce2c8f")
+        self.assertEqual(profile["vllm_revision"],
+                         "48bada6ea49ad7f3ecbe03128aa76562089c8b00")
+        self.assertEqual(profile["deepgemm_revision"],
+                         "a6b593d2826719dcf4892609af7b84ee23aaf32a")
         self.assertEqual(profile["b12x_revision"],
                          "7dc6fb8fcc6446ea093537d1657df81985fa5f43")
-        self.assertEqual(profile["b12x_archive_sha256"],
-                         "18a6b57739a493d5e6cca9f4f7bd91bf11d765905a43fa6dcbfc5b92d42a15a6")
         self.assertIn("operator accepted", profile["b12x_license_provenance"])
-        self.assertEqual(profile["flashinfer_revision"],
-                         "0472b9b3f2fba11b463f8526f390297d52a8aad7")
-        self.assertEqual(profile["flashinfer_archive_sha256"],
-                         "d6f79757fd97bae845fd4ba763abe9643ad581376de15e161295e4b14e8ae865")
+        self.assertEqual(profile["flashinfer_version"], "0.6.16.post3")
         self.assertIn("Reederey87/dgx-spark-2x-deepseek-v4-flash", profile["runtime_repo"])
-        self.assertIn("@sha256:", profile["base_image"])
+        self.assertEqual(profile["image"],
+                         "otools/vllm-deepseek-v4-flash-0731:c8r-reviewed")
+        self.assertEqual(len(profile["image_signature"]), 64)
+        self.assertEqual(profile["max_model_len"], 1048576)
+        self.assertEqual(profile["max_num_seqs"], 12)
+        self.assertTrue(profile["enable_prefix_caching"])
+
+    def test_deepseek_cand7_remains_an_isolated_rollback(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731-cand7"]
+        self.assertEqual(profile["runtime_lane"], "cand7")
+        self.assertEqual(profile["status"], "rollback")
+        self.assertEqual(profile["runtime_revision"],
+                         "15f29b7bd91d45a1678b3b8600a56512c36f13f2")
+        self.assertEqual(profile["image"],
+                         "otools/vllm-deepseek-v4-flash-0731:cand7-reviewed")
+        self.assertFalse(profile["enable_prefix_caching"])
 
     def test_deepseek_build_uses_only_verified_local_archives(self):
-        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731-cand7"]
         dockerfile = mm._deepseek_dockerfile(
             profile, "/usr/local/lib/python3.12/dist-packages/vllm")
         self.assertNotIn("github.com/lukealonso/b12x/archive", dockerfile)
@@ -782,9 +824,11 @@ class ClusterProfileTests(unittest.TestCase):
     def test_deepseek_manifest_binds_all_supply_chain_and_model_inputs(self):
         profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
         manifest = mm._deepseek_manifest_inputs(profile)
-        self.assertEqual(manifest["build_schema"], 3)
-        self.assertEqual(manifest["build_network"], "none")
-        self.assertEqual(manifest["preimages"], mm.DEEPSEEK_VLLM_PREIMAGES)
+        self.assertEqual(manifest["build_schema"], 4)
+        self.assertEqual(manifest["runtime_lane"], "c8r")
+        self.assertEqual(manifest["runtime_overlay_tree"], profile["runtime_overlay_tree"])
+        self.assertEqual(manifest["vllm_commit"], profile["vllm_revision"])
+        self.assertEqual(manifest["image_signature"], profile["image_signature"])
         self.assertEqual(manifest["model_file_count"], 74)
         self.assertEqual(manifest["model_shards"], 48)
         self.assertEqual(manifest["model_size"], 166898660330)
@@ -883,12 +927,24 @@ class ClusterRegistryTests(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
             mm._warm_qwen_cluster(None, profile)
 
-    def test_qwen_2507_profiles_use_conservative_fp4_startup(self):
+    def test_qwen_cluster_health_checks_generation(self):
+        args = SimpleNamespace(name="spark", profile="qwen3-235b-a22b-fp4")
+        cfg = self.config()
+        with mock.patch.object(mm, "cluster_config", return_value=cfg), \
+                mock.patch.object(mm, "_host_text", return_value=(True, "ok")) as health, \
+                contextlib.redirect_stdout(io.StringIO()):
+            mm.cmd_cluster_health(args)
+        self.assertEqual(health.call_args.args[1][-1],
+                         "http://127.0.0.1:8355/health_generate")
+
+    def test_qwen_profiles_use_conservative_fp4_startup(self):
         base = mm._qwen_extra_config(mm.CLUSTER_PROFILES["qwen3-235b-a22b-fp4"])
         instruct = mm._qwen_extra_config(
             mm.CLUSTER_PROFILES["qwen3-235b-a22b-instruct-2507-nvfp4"])
-        self.assertIn("enable_padding: true", base)
-        self.assertNotIn("enable_autotuner: false", base)
+        self.assertIn("allowed_backends:\n    - cublaslt", base)
+        self.assertIn("enable_autotuner: false", base)
+        self.assertIn("cuda_graph_config: null", base)
+        self.assertIn("free_gpu_memory_fraction: 0.75", base)
         self.assertIn("allowed_backends:\n    - cublaslt", instruct)
         self.assertIn("enable_autotuner: false", instruct)
         self.assertIn("cuda_graph_config: null", instruct)
@@ -901,15 +957,15 @@ class ClusterRegistryTests(unittest.TestCase):
             mm.CLUSTER_PROFILES["qwen3-235b-a22b-instruct-2507-nvfp4"]["max_num_tokens"],
             8192)
 
-    def test_qwen_manifests_are_separate_per_runtime(self):
+    def test_qwen_profiles_share_the_reviewed_rc8_manifest(self):
         root = "/tmp/qwen-runtime"
         base = mm.CLUSTER_PROFILES["qwen3-235b-a22b-fp4"]
         instruct = mm.CLUSTER_PROFILES["qwen3-235b-a22b-instruct-2507-nvfp4"]
         thinking = mm.CLUSTER_PROFILES["qwen3-235b-a22b-thinking-2507-nvfp4"]
         self.assertEqual(mm._qwen_manifest_path(root, base),
                          mm._qwen_manifest_path(root, instruct))
-        self.assertNotEqual(mm._qwen_manifest_path(root, base),
-                            mm._qwen_manifest_path(root, thinking))
+        self.assertEqual(mm._qwen_manifest_path(root, base),
+                         mm._qwen_manifest_path(root, thinking))
 
     def test_deepseek_argv_is_offline_pinned_and_role_aware(self):
         cfg = self.config()
@@ -933,15 +989,28 @@ class ClusterRegistryTests(unittest.TestCase):
                                 "draft_sample_method": "probabilistic"})
         self.assertEqual(head[head.index("--served-model-name") + 1],
                          profile["served_model_name"])
-        self.assertEqual(head[head.index("--kv-cache-memory-bytes") + 1], "17179869184")
-        self.assertIn("VLLM_CACHE_ROOT=/cache/runtime/vllm-cache-cand7", head)
+        self.assertEqual(head[head.index("--kv-cache-memory-bytes") + 1], "21316272128")
+        self.assertEqual(head[head.index("--max-model-len") + 1], "1048576")
+        self.assertEqual(head[head.index("--max-num-seqs") + 1], "12")
+        self.assertEqual(head[head.index("--max-cudagraph-capture-size") + 1], "72")
+        self.assertEqual(head[head.index("--gpu-memory-utilization") + 1], "0.85")
+        self.assertIn("PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True", head)
+        self.assertIn("--enable-prefix-caching", head)
+        self.assertIn("--enable-prompt-tokens-details", head)
+        self.assertIn("VLLM_CACHE_ROOT=/cache/runtime/vllm-cache-c8r", head)
         self.assertIn("NCCL_IB_ADDR_FAMILY=AF_INET", head)
         self.assertIn("--distributed-timeout-seconds", head)
-        self.assertIn("--enforce-eager", head)
+        self.assertNotIn("--enforce-eager", head)
         self.assertEqual(head[head.index("--node-rank") + 1], "0")
         self.assertEqual(worker[worker.index("--node-rank") + 1], "1")
         self.assertNotIn("--headless", head)
         self.assertIn("--headless", worker)
+
+        rollback = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731-cand7"]
+        _, rollback_head = mm.build_deepseek_cluster_argv(
+            "deepseek-v4-flash-0731-cand7", rollback, cfg, "head", None)
+        self.assertIn("VLLM_CACHE_ROOT=/cache/runtime/vllm-cache-cand7", rollback_head)
+        self.assertNotIn("--enable-prefix-caching", rollback_head)
 
     def test_deepseek_warmups_cover_agent_paths(self):
         profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
@@ -950,7 +1019,9 @@ class ClusterRegistryTests(unittest.TestCase):
         self.assertEqual(labels, ["plain decode", "tool parser", "tool result",
                                   "long prefill", "sampled streaming", "long agent streaming"])
         payloads = {label: payload for label, _, payload in requests}
+        timeouts = {label: timeout for label, timeout, _ in requests}
         self.assertGreater(len(payloads["long prefill"]["messages"][0]["content"]), 30000)
+        self.assertGreaterEqual(timeouts["long prefill"], 600)
         self.assertTrue(payloads["sampled streaming"]["stream"])
         self.assertTrue(payloads["long agent streaming"]["stream"])
         self.assertEqual(payloads["tool result"]["messages"][2]["role"], "tool")
@@ -962,6 +1033,19 @@ class ClusterRegistryTests(unittest.TestCase):
                 ("sampled streaming", 10, {"stream": True})]), \
                 mock.patch.object(mm, "_host_exec", return_value=response), \
                 contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
+            mm._warm_deepseek_cluster(None, profile)
+
+    def test_deepseek_warmup_surfaces_stream_error_detail(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        response = SimpleNamespace(
+            returncode=0,
+            stdout='data: {"error":{"message":"worker failed"}}\n\ndata: [DONE]\n',
+            stderr="")
+        with mock.patch.object(mm, "_deepseek_warmup_requests", return_value=[
+                ("sampled streaming", 10, {"stream": True})]), \
+                mock.patch.object(mm, "_host_exec", return_value=response), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                self.assertRaisesRegex(RuntimeError, "worker failed"):
             mm._warm_deepseek_cluster(None, profile)
 
     def test_local_runtime_sync_never_removes_its_source(self):

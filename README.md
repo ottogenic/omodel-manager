@@ -123,24 +123,23 @@ ARM64 TensorRT-LLM bases pinned by digest. The manager builds the small SSH/MPI 
 locally, records separate immutable build manifests per runtime, uses a deployment-specific
 SSH key, and serves absolute snapshot paths. Base, Instruct-2507, and Thinking-2507 were all
 physically validated on two GB10 Sparks on 2026-08-11 with tool loops and 12,515-token streams.
-Base and Instruct retain rc5; Thinking uses rc8 for NVIDIA's Blackwell CUTLASS TMA fix, an
-explicit pinned tokenizer, torch sampling, and a conservative 0.60 KV fraction.
+All three profiles use rc8 for NVIDIA's Blackwell CUTLASS TMA fix. Thinking additionally uses
+an explicit pinned tokenizer, torch sampling, and a conservative 0.60 KV fraction.
 
-DeepSeek V4 Flash 0731 source staging verifies the reviewed orchestration commit, Git tree,
-and vLLM patch hash while pinning the intended official model revision and official vLLM
-base digest. `cluster prepare ... --weights` downloads the exact official snapshot on both
-nodes with resumable long-timeout transfers. `cluster prepare ... --build` verifies all 12
-official-base preimages, vendors and verifies pinned `b12x` and FlashInfer archives, applies
-the reviewed patch, builds with `--network=none` on both nodes, and records role-specific image
-IDs after copied-context verification and full installed-content smoke hashes. It also hashes
-all 74 model files (166,898,660,330 bytes) on each node and requires parity. Overlay extraction
-must run from an ARM64 control/head host. The operator accepts `b12x`'s Apache-2.0 package
-metadata despite its missing bundled license file. The deployment was validated on two GB10
-Sparks over dual-rail RoCE on 2026-08-11. Launch still requires the QSFP/RoCE preflight, API
-health, and `NCCL NET/IB` evidence or rolls both ranks back. No community image or quant is
-substituted. The promoted cand7 runtime must use eager execution: both cand4 and cand7 hung
-during CUDA-graph replay around 13.8K computed tokens, while repeated eager 13,781-token agent
-streams completed cleanly.
+DeepSeek V4 Flash 0731 uses the reviewed c8r full-source lane: orchestration commit
+`46eb0fcbadf0e4e0be8838b18f6aa85087ed8839`, vLLM commit
+`48bada6ea49ad7f3ecbe03128aa76562089c8b00`, the pinned 17-file gx10 overlay, native
+FlashInfer `0.6.16.post3`, and the SM120-capable DeepGEMM pin. The multi-hour source build is
+performed by that pinned kit. `cluster prepare ... --build` then certifies the resident image
+configuration, rootfs layers, and installed runtime contents on both nodes before recording
+role-specific image IDs. It also hashes all 74 model files (166,898,660,330 bytes) on each node
+and requires parity. C8r uses dedicated `-c8r` vLLM, Triton, and TileLang caches; the reviewed
+cand7 image remains available as `deepseek-v4-flash-0731-cand7` with its own cache roots. The
+operator accepts `b12x`'s Apache-2.0 package metadata despite its missing bundled license file.
+Launch still requires the QSFP/RoCE preflight, API health, warmup battery, and `NCCL NET/IB`
+evidence or rolls both ranks back. The c8r lane passed those gates plus sustained local OpenCode
+tool traffic and a 20K-token stream on the qualified pair. No community model image or quant is
+substituted.
 
 See [DUAL_SPARK_MODEL_RESEARCH.md](DUAL_SPARK_MODEL_RESEARCH.md) for model selection and
 primary-source links.

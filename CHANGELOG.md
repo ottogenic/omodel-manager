@@ -7,6 +7,27 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **DeepSeek now has a coherent c8r primary lane and explicit cand7 rollback.** The primary
+  profile pins the current reference kit, full-source vLLM commit, 17-file gx10 overlay,
+  FlashInfer and DeepGEMM dependencies, image content signature, 1M serve defaults, and isolated
+  `-c8r` compile caches. Preparation certifies the externally built full-source image and exact
+  model snapshot on both Docker storage backends. Physical qualification passed dual-rail NCCL,
+  six launch warmups, a roughly 100K-context local OpenCode audit with tool churn and 97% prefix
+  cache hits, and a completed 20K-token stream with both ranks healthy afterward. Cand7 remains
+  a separate rollback profile with its own image and cache roots instead of being silently mixed
+  with c8r launch settings.
+- **The base Qwen3-235B two-Spark profile avoids the intermittent Blackwell TMA crash.** Base and
+  Instruct now use the same rc8 runtime as Thinking, containing TensorRT-LLM PR #11956's CUTLASS
+  fix. Base reproduced the upstream FP4 MoE failure under a normal agent request on rc5: TMA
+  descriptor initialization failed before the sampler reported a downstream illegal instruction.
+  The base profile also starts within GB10 memory limits using the
+  conservative FP4 path already qualified by the 2507 profiles: an 8K token budget, 0.75 KV-cache
+  fraction, chunked prefill, cuBLASLt-only FP4, no autotuner, and no CUDA graphs. Cluster health
+  now checks TensorRT-LLM generation rather than accepting a responsive but dead `/v1/models` API.
+- **`omm ps` now collapses multiple aliases for the same physical host.** Management and
+  cluster-fabric SSH paths remain registered and usable, but fleet status identifies their shared
+  `/etc/machine-id` and displays the machine once under the first registered alias. Table columns
+  now expand for long cluster container names instead of running into the model column.
 - **Qwen Thinking-2507 no longer hits the DGX Spark CUTLASS illegal-instruction failure.** Its
   runtime is pinned to the rc8 ARM64 manifest containing TensorRT-LLM PR #11956, with an explicit
   pinned tokenizer, FlashInfer sampling disabled, and KV fraction 0.60. The final two-node profile
@@ -14,11 +35,12 @@ All notable changes to this project are documented here. The format follows
   generation health, and clean kernel logs on both nodes.
 - **Qwen readiness now rejects malformed tool calls and preserves every reviewed runtime.** The
   launch gate requires exactly one expected function with valid JSON arguments, uses recommended
-  Thinking sampling, and stores build manifests by immutable base/runtime pair so rc5 Base/Instruct
-  and rc8 Thinking can be selected without rebuilding.
-- **DeepSeek cand7 long-agent stability.** The promoted runtime now forces eager execution after
-  both cand4 and cand7 reproduced a CUDA-graph replay stall near 13.8K computed tokens. Three
-  repeated 13,781-token agent streams completed cleanly in eager mode.
+  Thinking sampling, and stores build manifests by immutable base/runtime pair. The previous rc5
+  manifest remains recorded while all current Qwen profiles select rc8.
+- **DeepSeek cand7 long-agent investigation.** Cand4 and cand7 reproduced a CUDA-graph replay
+  stall near 13.8K computed tokens; eager test streams completed, but later real-agent traffic
+  still wedged cand7. Cand7 is therefore retained only as an explicit rollback while c8r undergoes
+  physical long-context and churn qualification.
 - **DeepSeek build manifests now include every launch-time model invariant.** The context writer
   derives its metadata from the same source as launch validation, preventing a freshly prepared
   two-Spark runtime from being rejected for missing file-count, size, or shard-count fields.

@@ -169,35 +169,37 @@ heavy preparation while either Spark is serving another model and refuses launch
 the configured peer route, jumbo ping, and active `mlx5` mapping all use the selected
 QSFP/RoCE interface.
 
-All three Qwen TensorRT-LLM profiles were physically qualified on Beebo on 2026-08-11.
-Their official NVIDIA weights are pinned to exact revisions. Base and Instruct-2507 retain
-the rc5 ARM64 digest
-`sha256:fd231812c9cacc3cf41eb159a4ec8efefbd998ec51e43337bb9b3b65e559a944`;
-Thinking-2507 uses the rc8 ARM64 digest
+All three Qwen TensorRT-LLM profiles were physically qualified on a dual-Spark pair on 2026-08-11.
+Their official NVIDIA weights are pinned to exact revisions. All three use the rc8 ARM64 digest
 `sha256:c7297fdfb2e947296a4b29c8bdf8f5122e565179d65f806f85ff8fb4a478606e`,
 which includes TensorRT-LLM PR #11956's Blackwell CUTLASS TMA fix. The manager builds and
 records reviewed MPI derivatives separately for each immutable runtime. Base and Instruct
-passed structured tool calls, tool-result continuation, and 12,515-token coding streams.
+originally passed structured tool calls, tool-result continuation, and 12,515-token coding streams
+on rc5, but Base later reproduced the upstream intermittent TMA descriptor crash and was moved to
+rc8 before requalification.
 Thinking passed reasoning/content separation, an automatic tool call and result loop, two
 12,515-token sampled streams, post-run generation health, and clean kernel logs on both nodes.
 Its final profile uses an explicit pinned tokenizer, disables FlashInfer sampling, reserves
 KV at 0.60, and retains a 32K sequence limit with 8K chunked prefill.
 
-DeepSeek V4 Flash 0731 was physically validated on the two-node Beebo cluster on 2026-08-11.
-The promoted cand7 runtime source is pinned to commit
-`15f29b7bd91d45a1678b3b8600a56512c36f13f2`, tree
-`9b1dc28c17818434d40d06e14762ea9cebf3bedf`, and patch SHA-256
-`3c22304cd06135e617cf09705f28092eb4ef86c0d0f65942e1fa52239c14d4e6`.
-The operator accepts the pinned `b12x` package's Apache-2.0 metadata despite its missing
-bundled license text. The manager verifies the exact `b12x` and FlashInfer archives, builds
-with network access disabled, re-hashes each copied context, records role-specific image IDs,
-and verifies identical installed content. Both 74-file model snapshots hash to the same
-166,898,660,330-byte manifest. Worker-first launch refuses to run until the QSFP/RoCE route,
-MTU-sized ping, and active HCA mapping pass; it then requires API health and `NCCL NET/IB`
-evidence. Generation, tool-call emission, tool-result continuation, and three repeated
-13,781-token warm-cache agent streams passed with eager execution. CUDA-graph mode on both
-cand4 and cand7 stalled around 13.8K computed tokens, so `--enforce-eager` is a required
-stability control rather than optional tuning. No community image or quant is used as a fallback.
+DeepSeek V4 Flash 0731's current primary lane is c8r, pinned to the reviewed deployment kit at
+`46eb0fcbadf0e4e0be8838b18f6aa85087ed8839` and full-source vLLM at
+`48bada6ea49ad7f3ecbe03128aa76562089c8b00`. It carries 17 whole-file gx10 overlays,
+FlashInfer `0.6.16.post3`, DeepGEMM `a6b593d2`, and separate `-c8r` compile caches. The
+manager certifies matching image configuration/rootfs signatures and installed-content hashes
+across the nodes despite their different Docker storage backends. Both 74-file model snapshots
+must hash to the same 166,898,660,330-byte manifest. The prior cand7 source remains pinned at
+`15f29b7bd91d45a1678b3b8600a56512c36f13f2` as the first explicit rollback rung with isolated
+cache roots. Cand4 and cand7 stalled near 13.8K computed tokens under CUDA graphs, and later
+real-agent traffic also wedged cand7 after eager-mode qualification, so cand7 is not treated as
+the promoted stable lane. Worker-first launch refuses to run until the QSFP/RoCE route,
+MTU-sized ping, and active HCA mapping pass; it then requires API health, the complete agent
+warmup battery, and `NCCL NET/IB` evidence. No community model image or quant is used as a
+fallback. C8r subsequently passed those physical gates, a roughly 100K-context local OpenCode
+audit with repeated tools and 97% prefix-cache reuse, and a completed 20K-token stream with both
+ranks healthy afterward. The 20K numeric prompt exhausted its budget in coherent reasoning and
+returned empty visible content, matching the model's documented long numeric-constraint trait;
+this is a quality limitation, not a runtime hang.
 
 ## Primary Sources
 
