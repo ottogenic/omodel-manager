@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **Qwen Thinking-2507 now uses an aggressive but repeatable two-Spark agent profile.** Live
+  tuning raised it from 32K context / batch 1 / 8K scheduling / 0.60 KV allocation to a
+  physically validated 48,064-token context, batch 4, 16K scheduler budget, and 0.95 of profiled
+  free memory for KV. A 32K scheduler warmup hung, FP4 autotuning reproduced the SM120 CUTLASS
+  TMA failure, and larger context declarations varied with UMA headroom, so the existing
+  cublasLt/no-autotuner/no-graph guard remains. The final profile passed a 43,245-token retrieval,
+  four-way concurrency, reasoning, tool continuation, real OpenCode churn, and post-run health.
 - **DeepSeek now has a coherent c8r primary lane and explicit cand7 rollback.** The primary
   profile pins the current reference kit, full-source vLLM commit, 17-file gx10 overlay,
   FlashInfer and DeepGEMM dependencies, image content signature, 1M serve defaults, and isolated
