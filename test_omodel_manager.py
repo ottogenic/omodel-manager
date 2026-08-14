@@ -952,7 +952,20 @@ class ClusterRegistryTests(unittest.TestCase):
         thinking = mm._qwen_extra_config(
             mm.CLUSTER_PROFILES["qwen3-235b-a22b-thinking-2507-nvfp4"])
         self.assertIn("disable_flashinfer_sampling: true", thinking)
+        self.assertIn("cuda_graph_config: null", thinking)
+        self.assertIn("allowed_backends:\n    - cublaslt", thinking)
+        self.assertIn("enable_autotuner: false", thinking)
+        self.assertIn("free_gpu_memory_fraction: 0.95", thinking)
         self.assertNotIn("disable_flashinfer_sampling: true", instruct)
+        self.assertEqual(
+            mm.CLUSTER_PROFILES["qwen3-235b-a22b-thinking-2507-nvfp4"]["max_model_len"],
+            48064)
+        self.assertEqual(
+            mm.CLUSTER_PROFILES["qwen3-235b-a22b-thinking-2507-nvfp4"]["max_num_tokens"],
+            16384)
+        self.assertEqual(
+            mm.CLUSTER_PROFILES["qwen3-235b-a22b-thinking-2507-nvfp4"]["max_batch_size"],
+            4)
         self.assertEqual(
             mm.CLUSTER_PROFILES["qwen3-235b-a22b-instruct-2507-nvfp4"]["max_num_tokens"],
             8192)

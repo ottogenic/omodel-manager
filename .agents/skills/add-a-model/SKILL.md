@@ -288,7 +288,7 @@ Only after the model runs clean and you know what's tunable:
   from the updated defaults (this resets it; re-add any local tweaks if needed).
 - Commit `DEFAULT_CONFIG` and `configs/<key>.toml` together. Do **not** commit
   `model_manager.json` — it's your local, git-ignored sandbox. Run
-  `python3 -m unittest` in both repos. To commit + open the PR, load the **open-a-pr** skill.
+  `python3 -m unittest` in both repos, then use the maintainer's requested git workflow.
 - Optionally `omodel-wire --verify --remote <host>` to diff declared vs live.
 - Add a `CHANGELOG.md` entry in each repo.
 - If you hit a *new* GB10/sm_121 trap during testing, log it in SPARK_NOTES.md (see §1).

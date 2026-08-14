@@ -26,7 +26,6 @@ task-specific lives in a **skill** (see the index at the bottom) that loads on d
   script) is the committed source of truth.** Edit the JSON to test freely; promote a change
   into `DEFAULT_CONFIG` **only after it's validated and approved**. Never commit the JSON,
   never edit `DEFAULT_CONFIG` just to test, never edit both for a change-in-progress.
-- **You open PRs — you never merge, push to `main`, or approve.** (See the `open-a-pr` skill.)
 - **Cross-platform paths** (WSL/Linux + Windows): use `os.path` / `expanduser`.
 
 ## Working agreement
@@ -40,10 +39,11 @@ task-specific lives in a **skill** (see the index at the bottom) that loads on d
   host explicitly (`launch <profile> <alias>` or `--host <alias>`) — pick an idle box from
   `ps`, don't grep the config. (Details in the `launch-and-operate` skill.)
 - **Parallel-safe git.** Other agents may share this repo. Work in your own `git worktree`,
-  branch first (`git switch -c …`), stage **explicit paths** (never `git add -A`), and start
+  stage **explicit paths** (never `git add -A`), and start
   from a clean tree — if `git status` shows work that isn't yours, stop and surface it. Test
   via `python3 ./omodel-manager …` from your checkout, **not** the `omm` alias (it runs the
-  main clone + its config, not your branch). Full flow: the `open-a-pr` skill.
+  main clone + its config, not your worktree). Follow the maintainer's requested git destination;
+  before any commit or push, inspect status, diff, and recent history and run the required checks.
 
 ## Skills — load the one matching your task first
 
@@ -57,7 +57,6 @@ via the `skill` tool).
 | Launch / inspect / stop containers on remote hosts | **`launch-and-operate`** |
 | Edit launch profiles or launch behavior (Docker/vLLM/SSH reference + vetted gotchas) | **`edit-launch-profiles`** |
 | Make a code change (file layout, how to extend, checks to run) | **`code-changes`** |
-| Commit + open a pull request | **`open-a-pr`** |
 | Review / approve / merge an open PR | delegate to **`agent-review`** (see the note below the table) |
 
 Other docs (read directly when relevant): `SPARK_NOTES.md` (DGX Spark GB10/sm_121 hardware

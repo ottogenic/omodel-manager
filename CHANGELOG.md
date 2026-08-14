@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **Qwen Thinking-2507 now uses an aggressive but repeatable two-Spark agent profile.** Live
+  tuning raised it from 32K context / batch 1 / 8K scheduling / 0.60 KV allocation to a
+  physically validated 48,064-token context, batch 4, 16K scheduler budget, and 0.95 of profiled
+  free memory for KV. A 32K scheduler warmup hung, FP4 autotuning reproduced the SM120 CUTLASS
+  TMA failure, and larger context declarations varied with UMA headroom, so the existing
+  cublasLt/no-autotuner/no-graph guard remains. The final profile passed a 43,245-token retrieval,
+  four-way concurrency, reasoning, tool continuation, real OpenCode churn, and post-run health.
 - **DeepSeek now has a coherent c8r primary lane and explicit cand7 rollback.** The primary
   profile pins the current reference kit, full-source vLLM commit, 17-file gx10 overlay,
   FlashInfer and DeepGEMM dependencies, image content signature, 1M serve defaults, and isolated
@@ -326,7 +333,7 @@ All notable changes to this project are documented here. The format follows
   trivial turns. It's now a lean always-on core (invariants + working agreement + a skill
   index); the workflows and reference material moved into OpenCode **skills** under
   `.agents/skills/` (the vendor-neutral discovery path): `add-a-model`, `benchmark-model`,
-  `launch-and-operate`, `edit-launch-profiles`, `code-changes`, `open-a-pr`. Only each skill's
+  `launch-and-operate`, `edit-launch-profiles`, `code-changes`. Only each skill's
   name + description is advertised up front; the body loads on demand via the `skill` tool.
   `ADD_A_MODEL.md` moved into the `add-a-model` skill. Cuts per-request prompt overhead by
   ~4k tokens with no loss of guidance.

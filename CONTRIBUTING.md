@@ -3,9 +3,10 @@
 A small, private, single-maintainer project. The workflow below keeps history clean and
 releases traceable without ceremony.
 
-## Branching — GitHub Flow
+## Branching and publishing
 
-- **`main` is always releasable.** Never commit directly to `main`.
+- **`main` is always releasable.** Use the branch or direct-push workflow requested by the
+  maintainer for the change at hand.
 - **Short-lived feature branches** off `main`, named by type:
   - `feat/<slug>` — a new capability (e.g. `feat/docker-context-remote`)
   - `fix/<slug>` — a bug fix (e.g. `fix/resolve-target-leading-slash`)
@@ -26,14 +27,9 @@ chore(cli): add --version flag
 Types: `feat`, `fix`, `docs`, `refactor`, `chore`, `test`. `scope` is optional
 (e.g. `profiles`, `remote`, `setup`, `assets`, `cli`). Add a body when the "why" isn't obvious.
 
-## Merging (reviewer / maintainer only)
-
-Merging is the **reviewer/maintainer's** step, not the contributor's. **AI contributors never
-merge — they open the PR and stop.**
-
-- **Squash-merge** feature branches into `main` so `main` reads as one clean commit per
-  change. Delete the branch after merging.
-- The squash commit's subject should itself be a Conventional Commit.
+When using a feature branch, keep the final `main` history to one clean Conventional Commit
+per change and delete the branch after integration. For an explicitly requested direct push,
+stage only intended paths, run the checks below, and never force-push.
 
 ## Releases — SemVer + tags
 
@@ -50,7 +46,7 @@ To cut a release: bump `__version__`, add a dated section to `CHANGELOG.md`, com
 git tag -a vX.Y.Z -m "vX.Y.Z"
 ```
 
-## Before you open a PR / merge
+## Before you publish
 
 1. `python3 -m py_compile omodel-manager` passes.
 2. `python3 -m unittest` passes (fast, offline — no containers, no network).

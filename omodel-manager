@@ -159,10 +159,10 @@ CLUSTER_PROFILES = {
                   "sha256:c7297fdfb2e947296a4b29c8bdf8f5122e565179d65f806f85ff8fb4a478606e"),
         "runtime_image": "otools/trtllm-mpi:1.3.0rc8-reviewed",
         "port": 8355,
-        "max_model_len": 32768,
-        "max_num_tokens": 8192,
-        "max_batch_size": 1,
-        "kv_free_fraction": 0.60,
+        "max_model_len": 48064,
+        "max_num_tokens": 16384,
+        "max_batch_size": 4,
+        "kv_free_fraction": 0.95,
         "enable_chunked_prefill": True,
         "tool_parser": "qwen3",
         "reasoning_parser": "deepseek-r1",
@@ -170,8 +170,13 @@ CLUSTER_PROFILES = {
         "conservative_fp4_startup": True,
         "disable_flashinfer_sampling": True,
         "status": "validated",
-        "notes": ("Official NVIDIA checkpoint; rc8 CUTLASS fix and conservative memory profile "
-                  "physically qualified on two GB10 Sparks."),
+        "notes": ("Official NVIDIA checkpoint; rc8 CUTLASS fix. Aggressive two-Spark agent "
+                  "profile targets the repeatable 48,064-token resident context, four requests, "
+                  "a 16K scheduler budget, and 95% "
+                  "of profiled free memory for KV cache. The cublasLt/no-autotuner/no-graph "
+                  "guard remains required after the SM120 TMA failure reproduced at startup; "
+                  "32K scheduler warmup hung during KV-capacity profiling. A 61,344-token trial "
+                  "worked once but later auto-reduced to 48,064 as UMA headroom varied."),
     },
     "deepseek-v4-flash-0731": {
         "backend": "deepseek-vllm-mp",
