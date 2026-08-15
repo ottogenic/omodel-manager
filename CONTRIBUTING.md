@@ -5,13 +5,17 @@ releases traceable without ceremony.
 
 ## Branching and publishing
 
-- **`main` is always releasable.** Use the branch or direct-push workflow requested by the
-  maintainer for the change at hand.
+- **`main` is always releasable.** This is a single-maintainer repo, so a tested direct push to
+  `main` is the default when the maintainer requests publishing. Use a branch or PR only when the
+  maintainer requests one or when temporary isolation protects a working version.
 - **Short-lived feature branches** off `main`, named by type:
   - `feat/<slug>` — a new capability (e.g. `feat/docker-context-remote`)
   - `fix/<slug>` — a bug fix (e.g. `fix/resolve-target-leading-slash`)
   - `chore/<slug>` / `docs/<slug>` / `refactor/<slug>` — everything else
 - Keep a branch focused on one change. Rebase on `main` before merging.
+- After publishing, verify the canonical checkout at
+  `/mnt/c/Users/Otto/Documents/Projects/omodel-manager` and `origin/main` point to the same commit;
+  pushing remote `main` from another worktree is not sufficient.
 
 ## Commits — Conventional Commits
 
@@ -94,9 +98,10 @@ filename, so it never has to be a valid module name.
 - `.gitignore` already excludes `assets/`, `.otools/`, `*.bak`, caches, **and
   `model_manager.json`** (the local sandbox — curated profiles live in `DEFAULT_CONFIG`).
 
-## Code review (AI reviewer)
+## Optional PR review (AI reviewer)
 
-Pull requests are reviewed and merged by an AI reviewer (Claude) following **`REVIEW.md`**.
+When the maintainer explicitly chooses a pull request, it is reviewed and merged by an AI
+reviewer (Claude) following **`REVIEW.md`**.
 Open a Claude Code chat in this repo and say **"review open PRs"** (or run `/review-prs`): it
 lists the open PRs, runs the checks, makes critical fixes, and squash-merges the ones that pass
 the bar — leaving anything risky open with a change-request review. Authors follow the rules in

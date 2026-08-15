@@ -38,12 +38,16 @@ task-specific lives in a **skill** (see the index at the bottom) that loads on d
 - **`launch` with no host runs locally.** When operating remote boxes, always name the
   host explicitly (`launch <profile> <alias>` or `--host <alias>`) — pick an idle box from
   `ps`, don't grep the config. (Details in the `launch-and-operate` skill.)
-- **Parallel-safe git.** Other agents may share this repo. Work in your own `git worktree`,
-  stage **explicit paths** (never `git add -A`), and start
-  from a clean tree — if `git status` shows work that isn't yours, stop and surface it. Test
-  via `python3 ./omodel-manager …` from your checkout, **not** the `omm` alias (it runs the
-  main clone + its config, not your worktree). Follow the maintainer's requested git destination;
-  before any commit or push, inspect status, diff, and recent history and run the required checks.
+- **Solo git by default.** This is a single-maintainer repo unless told otherwise. Work in the
+  canonical checkout and publish directly to `main` when the maintainer requests publishing.
+  Use a branch/worktree only when explicitly requested, when concurrent work is actually active,
+  or when isolation protects a working version. Always start clean, stage **explicit paths**
+  (never `git add -A`), and inspect status, diff, and recent history before committing or pushing.
+- **Publishing is not complete until the live checkout is current.** If work happened on a branch
+  or worktree, integrate it into the canonical checkout, push the requested destination, and verify
+  the canonical `HEAD`, local `main`, and `origin/main` agree. Do not tell the maintainer to run
+  `omm` until `/mnt/c/Users/Otto/Documents/Projects/omodel-manager` contains the published change.
+  Test with `python3 ./omodel-manager …` before integration; verify the alias only afterward.
 
 ## Skills — load the one matching your task first
 
@@ -57,12 +61,13 @@ via the `skill` tool).
 | Launch / inspect / stop containers on remote hosts | **`launch-and-operate`** |
 | Edit launch profiles or launch behavior (Docker/vLLM/SSH reference + vetted gotchas) | **`edit-launch-profiles`** |
 | Make a code change (file layout, how to extend, checks to run) | **`code-changes`** |
-| Review / approve / merge an open PR | delegate to **`agent-review`** (see the note below the table) |
+| Review / approve / merge an explicitly requested PR | delegate to **`agent-review`** (see the note below the table) |
 
 Other docs (read directly when relevant): `SPARK_NOTES.md` (DGX Spark GB10/sm_121 hardware
 traps), `configs/README.md` (config format), `README.md` (user-facing).
 
-**PR reviews** are handled by the **`agent-review`** subagent — it checks the PR against `REVIEW.md`
+**When a PR is explicitly requested**, reviews are handled by the **`agent-review`** subagent.
+It checks the PR against `REVIEW.md`
 (the repo's bar), returns an itemized list of issues + suggested fixes, and merges only when the
 review is clean. **If you have the `task` tool, delegate the review to `agent-review`** (call it by
 name — `@agent-review` is only for when a human types it) rather than reviewing inline; when it
