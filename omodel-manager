@@ -664,6 +664,70 @@ DEFAULT_CONFIG = {
                 "enable-log-requests": True,
             },
         },
+        "qwen3.8-27b-fp8": {
+            "tok_s": 7,
+            # Dedicated Qwen3.8 build tested on GB10; pin the multi-arch manifest so
+            # Docker selects its physically validated ARM64 image deterministically.
+            "image": ("vllm/vllm-openai@"
+                      "sha256:4a2f33a884222f7049b983263ad9976f89452bb81affecf5b67d89ad35c1bc31"),
+            "notes": [
+                "Official Qwen Qwen3.8-27B FP8 (e4m3), native multimodal hybrid "
+                "Gated DeltaNet/full-attention model with 262K context. Dedicated qwen38 "
+                "image is pinned at vLLM 0.1.dev19754+g3a0914114; quantization is auto-detected.",
+                "VALIDATED on DGX Spark 2026-08-15: CUTLASS FP8 linear, Triton GDN, "
+                "FlashAttention 2, BF16 KV, reasoning on/off, xhigh/low effort, structured "
+                "qwen3_coder tools, vision (blue PNG), long code, and four-way concurrency pass. "
+                "The three-run quality battery passed 12/12 tool and 12/12 executable code cases.",
+                "AGGRESSIVE CAPACITY: 0.9 utilization yields 1,190,794 BF16-KV tokens, enough "
+                "for 4.54 simultaneous full 262K sequences. max-num-seqs=4 is "
+                "physically qualified; no fp8-KV quality compromise.",
+                "QUALITY-FIRST default without MTP: 6.9 tok/s at ~55K context (34.4s TTFT) "
+                "and 6.6 tok/s at ~110K (53.8s TTFT). Use the -mtp sibling only when its "
+                "decode-speed gain outweighs the observed quality and long-prefill regressions.",
+                "NVFP4 intentionally omitted: no first-party Qwen or NVIDIA Qwen3.8-27B "
+                "NVFP4 checkpoint existed at validation time; current artifacts are third-party "
+                "and lack matched quality plus GB10 stability evidence.",
+            ],
+            "model": "Qwen/Qwen3.8-27B-FP8",
+            "port": 8000,
+            "usecase": ["Coding", "Agentic", "Reasoning", "Vision", "Long-context"],
+            "vllm_args": {
+                "trust-remote-code": False,
+                "served-model-name": "qwen3.8-27b-fp8",
+                "tensor-parallel-size": 1,
+                "dtype": "bfloat16",
+                "gpu-memory-utilization": 0.9,
+                "max-model-len": 262144,
+                "max-num-seqs": 4,
+                "enable-chunked-prefill": True,
+                "enable-auto-tool-choice": True,
+                "tool-call-parser": "qwen3_coder",
+                "reasoning-parser": "qwen3",
+                "enable-log-requests": True,
+            },
+        },
+        "qwen3.8-27b-fp8-mtp": {
+            "tok_s": 11,
+            "extends": "qwen3.8-27b-fp8",
+            "notes": [
+                "EXPERIMENTAL SPEED VARIANT of qwen3.8-27b-fp8: MTP depth 3 with prefix "
+                "caching disabled. Use the base profile for quality-first serving.",
+                "MTP-3 measured 11.2 tok/s at ~55K context (36.6s TTFT) and 11.4 tok/s at "
+                "~110K (91.5s TTFT); depth 2 measured 10.8 tok/s. The three-run battery passed "
+                "12/12 tool cases but 10/12 code cases, versus the base profile's 12/12. No "
+                "garbage or repetition was observed, but one request timed out and one generated "
+                "solution failed a hidden test.",
+                "MTP reduces the BF16-KV pool to 1,113,917 tokens, still 4.25 full 262K "
+                "sequences. vLLM disables effective min_p/logit_bias under speculative decode.",
+                "Do not raise max-num-batched-tokens to 8192 on Spark: repeated ~55K prefill "
+                "fell from ~1,500-1,600 to ~790 tok/s. Leave the scheduler's 2048 default.",
+            ],
+            "vllm_args": {
+                "served-model-name": "qwen3.8-27b-fp8-mtp",
+                "no-enable-prefix-caching": True,
+                "speculative-config": '{"method":"mtp","num_speculative_tokens":3}',
+            },
+        },
         "glm-4.7-flash": {
             "tok_s": 18,
             "notes": ["zai-org/GLM-4.7-Flash on the nightly aarch64 image (DGX Spark = ARM); "

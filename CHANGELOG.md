@@ -60,6 +60,13 @@ All notable changes to this project are documented here. The format follows
   unchanged.
 
 ### Added
+- **Qwen3.8-27B FP8 for one DGX Spark.** Added the official Qwen FP8 checkpoint on a
+  digest-pinned vLLM Qwen3.8 ARM64 build with the full native 262K context, BF16 KV cache,
+  four physically qualified sequence slots, and multimodal/tool/reasoning presets. The quality-first
+  profile passed every case in a three-run tool/code battery; an explicitly experimental MTP-3
+  sibling raises decode from 6.9 to 11.2 tok/s at roughly 55K input but passed only 10/12 code
+  cases. Validation also exercised 110K input and four-way concurrency. NVFP4 is intentionally
+  absent because no first-party Qwen or NVIDIA checkpoint was available.
 - **Physical qualification for all four two-Spark profiles.** DeepSeek V4 Flash 0731, Qwen3
   235B Base, Instruct-2507, and Thinking-2507 now carry validated status from dual-GB10 testing on
   Beebo, including structured tools, tool-result continuation, long streaming, health, and
