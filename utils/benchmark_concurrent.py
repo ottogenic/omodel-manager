@@ -121,7 +121,11 @@ def run_one(base_url, model, story, max_tokens, timeout):
                 if obj.get("usage"):
                     usage = obj["usage"]
                 ch = obj.get("choices") or []
-                if ch and (ch[0].get("delta") or {}).get("content"):
+                delta = (ch[0].get("delta") or {}) if ch else {}
+                # Reasoning models may stream their entire completion before the
+                # final answer through either reasoning field.
+                if (delta.get("content") or delta.get("reasoning")
+                        or delta.get("reasoning_content")):
                     now = time.time()
                     if first is None:
                         first = now
@@ -184,7 +188,12 @@ def main():
     print("  warming up ...", flush=True)
     run_one(base_url, model, make_story(999, 200), max_tokens=16, timeout=min(args.timeout, 60))
 
-    stories = [make_story(sid, args.context) for sid in range(args.n)]
+    # Make repeated benchmark invocations unique too. Without a run nonce, a
+    # server with prefix caching can reuse the same sid=0 story from an earlier
+    # N=1 run and report a meaningless near-zero TTFT.
+    nonce = time.time_ns()
+    stories = [f"Benchmark run {nonce}, request {sid}.\n" + make_story(sid, args.context)
+               for sid in range(args.n)]
     results = [None] * args.n
     t0 = time.time()
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.n) as pool:

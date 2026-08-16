@@ -120,6 +120,26 @@ class ConfigValidityTests(unittest.TestCase):
         })
         self.assertEqual(cfg["capabilities"]["concurrency"], 2)
 
+    def test_muse_config_matches_observed_capabilities_and_sampling(self):
+        cfg = _load(CONFIGS / "muse-glimmer-30b-nvfp4.toml")
+        self.assertEqual(cfg["capabilities"]["vision"], {
+            "input": ["text", "image"], "output": ["text"],
+        })
+        self.assertEqual(cfg["capabilities"]["concurrency"], 8)
+        for preset in REQUIRED_PRESETS:
+            self.assertEqual(cfg["presets"][preset]["sampling"], {
+                "temperature": 1.0, "top_p": 0.95, "top_k": 64,
+            })
+
+    def test_lightning_config_keeps_coding_only_template_option(self):
+        cfg = _load(CONFIGS / "nemotron-3.5-lightning-30b-a3b-nvfp4.toml")
+        self.assertFalse(cfg["capabilities"]["vision"])
+        self.assertEqual(cfg["context"]["native"], 1048576)
+        self.assertEqual(cfg["presets"]["plan"]["options"]["chat_template_kwargs"],
+                         {"enable_thinking": True})
+        self.assertEqual(cfg["presets"]["build"]["options"]["chat_template_kwargs"],
+                         {"enable_thinking": True, "force_nonempty_content": True})
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1,0 +1,47 @@
+# muse-glimmer-30b-nvfp4 — sampling & thinking reference
+#
+# Meta Muse Glimmer 30B NVFP4 (Inferact ModelOpt W4A4), dense 29.6B multimodal
+# (text+image) agentic model. Apache-2.0. Video is not a native input modality;
+# applications may sample a video into separate image frames themselves.
+#
+# THINKING CONTROL: there is NO chat-template kwarg or vLLM knob for thinking.
+# Reasoning strength is set with a `Reasoning strength: <low|medium|high|xhigh>`
+# line in the SYSTEM PROMPT — the adapter must inject it; presets cannot. The
+# model always emits channel-scoped CoT (parsed to message.reasoning by the
+# muse_glimmer reasoning parser); `high`/`xhigh` are for coding and agentic.
+#
+# thinking_control = "none": nothing to auto-inject per request; the strength
+# hint is harness-side (system prompt), so it is documented here, not in options
+# (options would be sent as body params and vLLM would reject them).
+#
+# TOOL CALLS: ATEM XML, one call per message, AUTO choice only (required/named
+# unsupported). Do not enable guided JSON.
+
+match  = ["muse-glimmer-30b-nvfp4", "meta-models/Muse-Glimmer-30B", "Inferact/Muse-Glimmer-30B-NVFP4-W4A4"]
+source = "https://huggingface.co/Inferact/Muse-Glimmer-30B-NVFP4-W4A4"
+
+[capabilities]
+vision           = { input = ["text", "image"], output = ["text"] }
+reasoning        = true
+tool_call        = true
+concurrency      = 8
+thinking_control = "none"
+
+[context]
+native = 131072
+
+[presets.plan]                # planning & Q&A
+thinking = true
+max_output = 65536
+[presets.plan.sampling]
+temperature = 1.0
+top_p       = 0.95
+top_k       = 64
+
+[presets.build]               # implementation
+thinking = true
+max_output = 32768
+[presets.build.sampling]
+temperature = 1.0
+top_p       = 0.95
+top_k       = 64

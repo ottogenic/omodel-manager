@@ -31,6 +31,9 @@ All notable changes to this project are documented here. The format follows
   loopback-bound and are unchanged.
 
 ### Fixed
+- **Concurrent benchmarks now measure reasoning streams and defeat cross-run prefix-cache
+  reuse.** `benchmark_concurrent.py` recognizes both vLLM reasoning field names and adds a
+  unique run nonce, preventing empty-output errors and misleading near-zero repeated TTFTs.
 - **Qwen Thinking-2507 now uses an aggressive but repeatable two-Spark agent profile.** Live
   tuning raised it from 32K context / batch 1 / 8K scheduling / 0.60 KV allocation to a
   physically validated 48,064-token context, batch 4, 16K scheduler budget, and 0.95 of profiled
@@ -84,6 +87,14 @@ All notable changes to this project are documented here. The format follows
   unchanged.
 
 ### Added
+- **Muse Glimmer 30B NVFP4 for one DGX Spark.** Added the 128K multimodal model with
+  paired reasoning/tool parsers, DFlash speculative decoding, eight sequence slots, and
+  card-recommended sampling. On-box validation covered reasoning, ATEM tools, images,
+  quality, and concurrency; DFlash raised ~49K-context decode from 11.4 to 27.2 tok/s.
+- **Nemotron 3.5 Lightning 30B-A3B NVFP4 in 256K and 1M profiles.** Both use NVIDIA's
+  v0.27.1 Spark recipe, Marlin MoE, FP8 KV, aligned Mamba cache, and DSpark speculation.
+  The 256K profile measured 93.8 tok/s at ~49K input, and the 1M profile generated
+  successfully from a 1,034,771-token prompt.
 - **Remote install now discovers two-node clusters directly from the DGX hosts.** It uses
   the DGX-side NVIDIA Sync netplan marker plus live GB10 identity, active RoCE addresses,
   UCX mappings, MTU, machine IDs, and bidirectional rail pings. One unambiguous new pair

@@ -799,6 +799,50 @@ class LagunaProfileTests(unittest.TestCase):
         self.assertEqual(spec["num_speculative_tokens"], 7)
 
 
+class NewModelProfileTests(unittest.TestCase):
+    def setUp(self):
+        self.cfg = json.loads(json.dumps(mm.DEFAULT_CONFIG))
+
+    def test_muse_uses_validated_dflash_settings(self):
+        profile = mm.merge_model(self.cfg, "muse-glimmer-30b-nvfp4")
+        args = profile["vllm_args"]
+        spec = json.loads(args["speculative-config"])
+        self.assertEqual(self.cfg["models"]["muse-glimmer-30b-nvfp4"]["tok_s"], 27)
+        self.assertFalse(args["trust-remote-code"])
+        self.assertEqual(args["max-model-len"], 131072)
+        self.assertEqual(args["max-num-seqs"], 8)
+        self.assertEqual(args["max-num-batched-tokens"], 2048)
+        self.assertEqual(args["reasoning-parser"], "muse_glimmer")
+        self.assertEqual(args["tool-call-parser"], "muse_glimmer")
+        self.assertEqual(spec, {
+            "method": "dflash",
+            "model": "meta-models/Muse-Glimmer-30B-assistant",
+            "num_speculative_tokens": 15,
+        })
+
+    def test_lightning_uses_spark_recipe_and_1m_variant_inherits_it(self):
+        profile = mm.merge_model(self.cfg, "nemotron-3.5-lightning-30b-a3b-nvfp4")
+        args = profile["vllm_args"]
+        spec = json.loads(args["speculative-config"])
+        self.assertEqual(
+            self.cfg["models"]["nemotron-3.5-lightning-30b-a3b-nvfp4"]["tok_s"], 94)
+        self.assertFalse(args["trust-remote-code"])
+        self.assertEqual(args["mamba-cache-mode"], "align")
+        self.assertEqual(args["mamba-ssm-cache-dtype"], "float32")
+        self.assertEqual(args["moe-backend"], "marlin")
+        self.assertEqual(args["kv-cache-dtype"], "fp8")
+        self.assertEqual(args["max-num-batched-tokens"], 16384)
+        self.assertEqual(spec["method"], "dspark")
+        self.assertEqual(spec["num_speculative_tokens"], 3)
+
+        long_profile = mm.merge_model(
+            self.cfg, "nemotron-3.5-lightning-30b-a3b-nvfp4-1m")
+        long_args = long_profile["vllm_args"]
+        self.assertEqual(long_args["max-model-len"], 1048576)
+        self.assertEqual(long_args["max-num-seqs"], 2)
+        self.assertEqual(long_args["speculative-config"], args["speculative-config"])
+
+
 class Qwen38Bf16ProfileTests(unittest.TestCase):
     def setUp(self):
         self.cfg = json.loads(json.dumps(mm.DEFAULT_CONFIG))

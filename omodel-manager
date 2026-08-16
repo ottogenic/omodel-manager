@@ -1357,6 +1357,174 @@ DEFAULT_CONFIG = {
                 "enable-log-requests": True,
             },
         },
+        "muse-glimmer-30b-nvfp4": {
+            "tok_s": 27,
+            "image": "vllm/vllm-openai:muse-glimmer",
+            "model": "Inferact/Muse-Glimmer-30B-NVFP4-W4A4",
+            "port": 8000,
+            "usecase": ["Vision", "Agentic", "Coding", "Reasoning"],
+            "notes": [
+                "Meta Muse Glimmer 30B (Apache-2.0, ungated): dense 29.6B multimodal "
+                "(native text+image; applications can sample video into image frames) causal LM "
+                "+ ViT-G/14 perception encoder, "
+                "128K trained context (131072), distilled from Muse Spark for local agentic "
+                "use. Knowledge cutoff 2026-01-04. Upstream vLLM support = PR #51655 "
+                "(merged 2026-08-14) for v0.27.0+; the required custom muse-glimmer image "
+                "currently identifies as v0.26.1rc1.dev608 while carrying that implementation.",
+                "QUANT = Inferact/Muse-Glimmer-30B-NVFP4-W4A4 (ModelOpt NVFP4, W4A4 gs16, "
+                "25.42 GB) -- the recipe's recommended Spark pick (leaves the shared pool for "
+                "KV + host vs the 59.6GB BF16). vLLM auto-detects (modelopt_fp4 "
+                "fused-activation), DO NOT pass --quantization. NVFP4 kernels are "
+                "Blackwell-only (fine on GB10/sm_121). The RedHatAI FP8-block (32.8GB) "
+                "triggers the DeepGEMM 'Unknown SF transformation' load crash on sm_121 "
+                "(#51884) -- avoid; NVFP4 loads fine with DeepGEMM defaults.",
+                "IMAGE PINNED to vllm/vllm-openai:muse-glimmer (by necessity, not preference): "
+                "the MuseGlimmer model code + muse_glimmer parsers are NOT in any released vLLM "
+                "wheel (nightly_required). Multi-arch (arm64 present). Re-validate GENERATION "
+                "(not just startup) on any image move.",
+                "PARSERS ARE A PAIR -- run BOTH --reasoning-parser muse_glimmer AND "
+                "--tool-call-parser muse_glimmer: output is channel-scoped "
+                "(<|start|>assistant to=self/...to=<tool>...), reasoning surfaces on "
+                "message.reasoning (NOT reasoning_content), tools are ATEM XML (one tool call "
+                "per assistant message, auto-choice ONLY -- tool_choice required/named "
+                "unsupported, #51655; do NOT enable guided JSON). The reasoning parser forces "
+                "skip_special_tokens=False.",
+                "AGGRESSIVE capacity: gpu-memory-utilization 0.92 (recipe value), "
+                "max-num-seqs 8 (recipe uses 64 at TP=4/GB300; on-box KV pool supports 26.6 "
+                "full-128K sequences). max-model-len 131072 = trained context; a 262144 "
+                "extrapolation is served by others (GH200, unsloth) -- bump only if validation "
+                "shows it's clean. DFlash speculative decode ON (num_speculative_tokens 15 is "
+                "FIXED -- head block_size 16, slot 0 re-presents last token; not a knob). Keep "
+                "max-num-batched-tokens 2048: on-box ~49K A/B found 8192 regressed TTFT "
+                "17.8->22.7s, prefill 2757->2170 tok/s, and decode 27.2->25.9 tok/s.",
+                "SAMPLING: temperature 1.0 / top_p 0.95 / top_k 64 (card). Do NOT run greedy "
+                "(non-reproducible). Reasoning strength is SYSTEM-PROMPT driven ('Reasoning "
+                "strength: low|medium|high|xhigh') -- NOT a vLLM knob and not a "
+                "chat_template_kwarg; use high/xhigh for coding+agentic (harness-side). "
+                "kv-cache-dtype left at bf16 default (quality-first); fp8_e4m3 is the capacity "
+                "lever if needed (#52280 user serves 262144 with it).",
+                "DRAFT (spec-dec) checkpoint: meta-models/Muse-Glimmer-30B-assistant (5.11GB, "
+                "DFlash), validated against this Inferact NVFP4 target. On-box dgx3: ~49K decode "
+                "27.2 tok/s versus target-only 11.4 (2.4x), TTFT 17.8s, prefill 2757 tok/s; "
+                "DFlash mean acceptance length ~5.45 and average acceptance ~29.6% in the "
+                "quality run. Reasoning, ATEM tools, 64x64 image recognition, and two-run "
+                "quality battery passed (tools 100%, executable code 88%; one stochastic "
+                "Roman-numeral miss). Prefix-caching remains off under spec-decode. Nonzero "
+                "min_p is unsupported with speculative decoding.",
+            ],
+            "vllm_args": {
+                "served-model-name": "muse-glimmer-30b-nvfp4",
+                "trust-remote-code": False,
+                "tensor-parallel-size": 1,
+                "gpu-memory-utilization": 0.92,
+                "max-model-len": 131072,
+                "max-num-seqs": 8,
+                "max-num-batched-tokens": 2048,
+                "enable-chunked-prefill": True,
+                "enable-auto-tool-choice": True,
+                "tool-call-parser": "muse_glimmer",
+                "reasoning-parser": "muse_glimmer",
+                "generation-config": "auto",
+                "speculative-config": ('{"method":"dflash",'
+                                       '"model":"meta-models/Muse-Glimmer-30B-assistant",'
+                                       '"num_speculative_tokens":15}'),
+                "enable-log-requests": True,
+            },
+        },
+        "nemotron-3.5-lightning-30b-a3b-nvfp4": {
+            "tok_s": 94,
+            "image": "vllm/vllm-openai:v0.27.1",
+            "model": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4",
+            "port": 8000,
+            "usecase": ["Coding", "Agentic", "Reasoning"],
+            "notes": [
+                "NVIDIA Nemotron 3.5 Lightning (OpenMDW-1.1, commercial OK): hybrid Mamba-MoE, "
+                "30B total / 3B active (23 mamba + 23 moe + 6 attention layers, 128 experts "
+                "top-6 + 1 shared). Text-only. Up to 1M context (NVFP4 config "
+                "max_position_embeddings 1048576). Distilled from Nemotron 3 Ultra, trained "
+                "for agent harnesses. Release 2026-08-11.",
+                "QUANT = official NVFP4 (ModelOpt W4A16 gs16, FP8 on mamba in/out_proj, NVFP4 "
+                "on expert up/down_proj), ~25.2GB -- the intended DGX Spark deployment target "
+                "(NVIDIA validated 1M ctx on GB10). vLLM auto-detects (DO NOT pass "
+                "--quantization). BF16 sibling is 65.8GB reference only.",
+                "IMAGE PINNED vllm/vllm-openai:v0.27.1 (recipe-pinned known-good, "
+                "Spark-verified; multi-arch with arm64). min vLLM 0.27.1. The rolling nightly "
+                "is NOT yet vetted for this arch.",
+                "REQUIRED on Spark: --mamba-cache-mode align -- auto/selecting 'all' crashes at "
+                "CUDA-graph startup with MRv2+prefix-caching+DSpark on GB10/sm_121a (vLLM "
+                "#52317). Recipe base_args also pin --mamba-backend flashinfer and "
+                "--enable-prefix-caching. Note fp8 KV forces the scheduler block to 2304 tokens, "
+                "so prefixes under ~4.6K tokens never register cache hits (fine at agent-loop "
+                "sizes).",
+                "GB10/sm_121 NVFP4 MoE: --moe-backend marlin (W4A16 Marlin dequant is THE Spark "
+                "path -- no FP4 tensor-core route on GB10; recipe-pinned). kv-cache-dtype fp8 "
+                "(recipe NVFP4 default; capacity win). mamba_ssm_cache_dtype float32 explicit "
+                "(the float16+stochastic-rounding fast path is TRT-LLM-only and an accuracy risk "
+                "on vLLM -- NVIDIA Spark cookbook, see SPARK_NOTES).",
+                "SPEC-DECODE = DSpark (preferred on DGX Spark per recipe: lowest latency): "
+                "--speculative-config method dspark, draft nvidia/NVIDIA-Nemotron-3.5-Lightning-"
+                "30B-A3B-NVFP4-DSpark (967M total / 615M non-embedding, W4A16), "
+                "num_speculative_tokens 3. MTP (embedded, moe_backend triton on Blackwell) and "
+                "DFlash are alternates. On-box draft acceptance was roughly 80-90% in initial "
+                "requests.",
+                "AGGRESSIVE tuning validated on dgx4: gpu-memory-utilization 0.91 (NVIDIA "
+                "model-card Spark quickstart) + max-num-seqs 8 at 262144 ctx. ~49K N=1 measured "
+                "93.8 tok/s decode, 8.5s TTFT, and 6510 tok/s prefill. N=2/4/8 completed without "
+                "crashes; large prefills serialize heavily. The 1M sibling completed generation "
+                "at 1,034,771 input tokens: 764.8s TTFT / 1353 prefill tok/s / 221.8 decode tok/s "
+                "for a short output.",
+                "reasoning-parser nemotron_v3; tool-call-parser qwen3_coder (official NVIDIA "
+                "Spark command; matches OpenCode). enable_thinking and coding-agent "
+                "force_nonempty_content are chat_template_kwargs (harness-side, config TOML). "
+                "Card sampling temp 1.0 / top_p 0.95. Thinking on/off, tools, and two-run quality "
+                "battery passed (tools and executable code 100%). Nonzero min_p is unsupported "
+                "with speculative decoding; thinking_token_budget is unsupported by this runner.",
+            ],
+            "vllm_args": {
+                "served-model-name": "nemotron-3.5-lightning-30b-a3b-nvfp4",
+                "trust-remote-code": False,
+                "tensor-parallel-size": 1,
+                "mamba-backend": "flashinfer",
+                "mamba-cache-mode": "align",
+                "mamba-ssm-cache-dtype": "float32",
+                "kv-cache-dtype": "fp8",
+                "moe-backend": "marlin",
+                "gpu-memory-utilization": 0.91,
+                "max-model-len": 262144,
+                "max-num-seqs": 8,
+                "max-num-batched-tokens": 16384,
+                "enable-chunked-prefill": True,
+                "enable-prefix-caching": True,
+                "speculative-config": ('{"method":"dspark",'
+                                       '"model":"nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-'
+                                       'NVFP4-DSpark","num_speculative_tokens":3}'),
+                "enable-auto-tool-choice": True,
+                "tool-call-parser": "qwen3_coder",
+                "reasoning-parser": "nemotron_v3",
+                "enable-log-requests": True,
+            },
+        },
+        "nemotron-3.5-lightning-30b-a3b-nvfp4-1m": {
+            "extends": "nemotron-3.5-lightning-30b-a3b-nvfp4",
+            "notes": [
+                "1M-context variant of Nemotron 3.5 Lightning NVFP4 (the model's headline "
+                "context; NVFP4 config already declares max_position_embeddings 1048576, so no "
+                "rope scaling or VLLM_ALLOW_LONG_MAX_MODEL_LEN needed). ~3KB/token KV over 6 "
+                "attention layers + mamba SSM cache stays small at 1M.",
+                "AGGRESSIVE within the 1M regime: gpu-memory-utilization 0.91 inherited, "
+                "max-num-seqs 2 (1M full-prefill is heavy; 2 seqs keeps decode sane; a single "
+                "full-1M seq is ~3GB KV so 2 is not memory-limited). DSpark spec-decode inherited. "
+                "On-box dgx4 generation passed at 1,034,771 input tokens, just under the 1,048,576 "
+                "configured limit: TTFT 764.8s, prefill 1353 tok/s, short-output decode 221.8 "
+                "tok/s.",
+            ],
+            "usecase": ["Long-context", "Coding", "Agentic"],
+            "vllm_args": {
+                "served-model-name": "nemotron-3.5-lightning-30b-a3b-nvfp4-1m",
+                "max-model-len": 1048576,
+                "max-num-seqs": 2,
+            },
+        },
     },
 }
 

@@ -1,0 +1,40 @@
+# nemotron-3.5-lightning — sampling & thinking reference
+#
+# NVIDIA Nemotron 3.5 Lightning 30B-A3B NVFP4 (hybrid Mamba+MoE+attention,
+# 3B active, up to 1M context). Text-only reasoning + tool-calling model,
+# distilled for agent harnesses. OpenMDW-1.1 (commercial OK).
+#
+# thinking_control = "enable_thinking": chat-template kwarg works per request.
+# reasoning-parser nemotron_v3; tool-call-parser qwen3_coder.
+# Card sampling: temp 1.0 / top_p 0.95.
+
+match  = ["nemotron-3.5-lightning-30b-a3b-nvfp4", "nemotron-3.5-lightning-30b-a3b-nvfp4-1m", "NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4", "nemotron-3.5-lightning"]
+source = "https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4"
+
+[capabilities]
+vision           = false
+reasoning        = true
+tool_call        = true
+thinking_control = "enable_thinking"
+
+[context]
+native = 1048576
+
+[presets.plan]                # planning & Q&A
+thinking = true
+options.chat_template_kwargs = { enable_thinking = true }
+[presets.plan.sampling]
+temperature = 1.0
+top_p       = 0.95
+
+[presets.build]               # implementation
+thinking = true
+options.chat_template_kwargs = { enable_thinking = true, force_nonempty_content = true }
+[presets.build.sampling]
+temperature = 1.0
+top_p       = 0.95
+
+[variants.think]
+options.chat_template_kwargs = { enable_thinking = true }
+[variants.no-think]
+options.chat_template_kwargs = { enable_thinking = false }
