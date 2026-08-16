@@ -140,12 +140,14 @@ class InstallTests(unittest.TestCase):
         with mock.patch.object(mm, "_setup_host", return_value=(True, True)) as setup, \
                 mock.patch.object(mm.shutil, "which", return_value="/usr/bin/ssh"), \
                 mock.patch.object(mm, "load_hosts", return_value=[]), \
-                mock.patch.object(mm, "save_hosts") as save:
+                mock.patch.object(mm, "save_hosts") as save, \
+                mock.patch.object(mm, "auto_register_dgx_cluster") as discover:
             with self.assertRaises(SystemExit) as raised:
                 mm.cmd_install(args)
         self.assertEqual(raised.exception.code, 0)
         setup.assert_called_once_with("user@192.0.2.101", True)
         save.assert_called_once_with([("dgx1", "user@192.0.2.101")])
+        discover.assert_called_once_with([("dgx1", "user@192.0.2.101")])
 
     def test_local_setup_skips_ssh_prerequisites(self):
         def setup_ok(target, cmd):
@@ -205,6 +207,149 @@ class InstallTests(unittest.TestCase):
         run.assert_called_once_with(["sh", "-c", "command -v docker"], text=True,
                                     capture_output=True)
         remote.assert_not_called()
+
+
+class DgxClusterDiscoveryTests(unittest.TestCase):
+    def setUp(self):
+        self._clusters = mm.CLUSTERS_FILE
+        mm.CLUSTERS_FILE = os.path.join(tempfile.mkdtemp(), "clusters.json")
+        self.hosts = [("dgx3", "otto@dgx3"), ("dgx4", "otto@dgx4")]
+
+    def tearDown(self):
+        mm.CLUSTERS_FILE = self._clusters
+
+    @staticmethod
+    def host(alias, target, machine_id, suffix):
+        return {
+            "alias": alias,
+            "target": target,
+            "hostname": f"otto-{alias}",
+            "machine_id": machine_id,
+            "fabric": {
+                "enp1s0f1np1": {
+                    "ip": f"10.100.176.{suffix}", "network": "10.100.176.0/24",
+                    "ucx_device": "rocep1s0f1:1", "mtu": 1500,
+                },
+                "enP2p1s0f1np1": {
+                    "ip": f"10.100.177.{suffix}", "network": "10.100.177.0/24",
+                    "ucx_device": "roceP2p1s0f1:1", "mtu": 1500,
+                },
+            },
+        }
+
+    def test_reads_identity_and_active_fabric_from_dgx(self):
+        links = [{
+            "ifname": "enp1s0f1np1", "operstate": "UP", "mtu": 1500,
+            "addr_info": [{"family": "inet", "scope": "global",
+                           "local": "10.100.176.2", "prefixlen": 24}],
+        }]
+
+        def host_text(target, args):
+            responses = {
+                ("test", "-f", "/etc/netplan/99-nvidia-sync-cluster.yaml"): (True, ""),
+                ("uname", "-m"): (True, "aarch64"),
+                ("nvidia-smi", "--query-gpu=name", "--format=csv,noheader"):
+                    (True, "NVIDIA GB10"),
+                ("hostnamectl", "--static"): (True, "otto-dgx-3"),
+                ("cat", "/etc/machine-id"): (True, "machine-three"),
+                ("ibdev2netdev",):
+                    (True, "rocep1s0f1 port 1 ==> enp1s0f1np1 (Up)"),
+                ("ip", "-j", "address", "show"): (True, json.dumps(links)),
+            }
+            return responses[tuple(args)]
+
+        with mock.patch.object(mm, "_host_text", side_effect=host_text):
+            host = mm._dgx_cluster_host("dgx3", "otto@dgx3")
+        self.assertEqual(host["hostname"], "otto-dgx-3")
+        self.assertEqual(host["machine_id"], "machine-three")
+        self.assertEqual(host["fabric"]["enp1s0f1np1"]["ucx_device"],
+                         "rocep1s0f1:1")
+
+    def test_pair_requires_bidirectional_interface_bound_ping(self):
+        head = self.host("dgx3", "otto@dgx3", "three", 2)
+        worker = self.host("dgx4", "otto@dgx4", "four", 1)
+        with mock.patch.object(mm, "_host_text", return_value=(True, "")) as probe:
+            cfg = mm._dgx_pair_config(head, worker)
+        self.assertEqual(cfg["fabric"]["head_ips"],
+                         ["10.100.176.2", "10.100.177.2"])
+        self.assertEqual(cfg["fabric"]["worker_ips"],
+                         ["10.100.176.1", "10.100.177.1"])
+        self.assertEqual(probe.call_count, 4)
+        for call in probe.call_args_list:
+            self.assertEqual(call.args[1][0], "ping")
+            self.assertIn("-I", call.args[1])
+
+    def test_pair_is_rejected_when_a_rail_ping_fails(self):
+        head = self.host("dgx3", "otto@dgx3", "three", 2)
+        worker = self.host("dgx4", "otto@dgx4", "four", 1)
+        with mock.patch.object(mm, "_host_text",
+                               side_effect=[(True, ""), (False, "unreachable")]):
+            self.assertIsNone(mm._dgx_pair_config(head, worker))
+
+    def test_registers_one_discovered_pair_after_name_prompt(self):
+        found = {
+            "otto@dgx3": self.host("dgx3", "otto@dgx3", "three", 2),
+            "otto@dgx4": self.host("dgx4", "otto@dgx4", "four", 1),
+        }
+        with mock.patch.object(mm, "_dgx_cluster_host",
+                               side_effect=lambda alias, target: found[target]), \
+                mock.patch.object(mm, "_host_text", return_value=(True, "")):
+            added = mm.auto_register_dgx_cluster(
+                self.hosts, prompt=lambda message: "Beebo")
+        self.assertEqual(added, ["Beebo"])
+        self.assertEqual(mm.load_clusters()["Beebo"]["head"], "dgx3")
+        self.assertEqual(mm.load_clusters()["Beebo"]["worker"], "dgx4")
+
+    def test_existing_pair_is_not_prompted_or_overwritten(self):
+        existing = {"Beebo": {"head": "dgx3", "worker": "dgx4", "fabric": {}}}
+        mm.save_clusters(existing)
+        found = {
+            "otto@dgx3": self.host("dgx3", "otto@dgx3", "three", 2),
+            "otto@dgx4": self.host("dgx4", "otto@dgx4", "four", 1),
+        }
+        prompt = mock.Mock(return_value="replacement")
+        with mock.patch.object(mm, "_dgx_cluster_host",
+                               side_effect=lambda alias, target: found[target]), \
+                mock.patch.object(mm, "_host_text", return_value=(True, "")):
+            added = mm.auto_register_dgx_cluster(self.hosts, prompt=prompt)
+        self.assertEqual(added, [])
+        self.assertEqual(mm.load_clusters(), existing)
+        prompt.assert_not_called()
+
+    def test_existing_pair_matches_alternate_aliases_by_machine_id(self):
+        hosts = [("dgx3", "otto@dgx3-mgmt"), ("dgx3-fabric", "otto@dgx3-fabric"),
+                 ("dgx4", "otto@dgx4-mgmt"), ("dgx4-fabric", "otto@dgx4-fabric")]
+        mm.save_clusters({"Beebo": {"head": "dgx3-fabric", "worker": "dgx4-fabric",
+                                     "fabric": {}}})
+        found = {
+            target: self.host(alias, target, "three" if "dgx3" in target else "four",
+                              2 if "dgx3" in target else 1)
+            for alias, target in hosts
+        }
+        prompt = mock.Mock(return_value="duplicate")
+        with mock.patch.object(mm, "_dgx_cluster_host",
+                               side_effect=lambda alias, target: found[target]), \
+                mock.patch.object(mm, "_host_text", return_value=(True, "")):
+            added = mm.auto_register_dgx_cluster(hosts, prompt=prompt)
+        self.assertEqual(added, [])
+        prompt.assert_not_called()
+
+    def test_multiple_possible_pairs_are_not_guessed(self):
+        hosts = self.hosts + [("dgx5", "otto@dgx5")]
+        found = {
+            target: self.host(alias, target, alias, index)
+            for index, (alias, target) in enumerate(hosts, 1)
+        }
+        prompt = mock.Mock(return_value="ambiguous")
+        err = io.StringIO()
+        with mock.patch.object(mm, "_dgx_cluster_host",
+                               side_effect=lambda alias, target: found[target]), \
+                mock.patch.object(mm, "_host_text", return_value=(True, "")), \
+                contextlib.redirect_stderr(err):
+            added = mm.auto_register_dgx_cluster(hosts, prompt=prompt)
+        self.assertEqual(added, [])
+        self.assertIn("multiple possible", err.getvalue())
+        prompt.assert_not_called()
 
 
 class NonBlockingLaunchTests(unittest.TestCase):
@@ -302,7 +447,7 @@ class LaunchTargetTests(unittest.TestCase):
         mm.HOSTS_FILE, mm.REMOTE, mm.need_docker = self._hosts, self._remote, self._need
 
     def _launch(self, **kw):
-        base = dict(key=self.key, remote=None, local=False, dry_run=True,
+        base = dict(key=self.key, host=None, remote=None, local=False, dry_run=True,
                     foreground=False, keep=False, force=False, no_fetch=True,
                     refresh=False, wait=False)
         base.update(kw)
@@ -333,6 +478,62 @@ class LaunchTargetTests(unittest.TestCase):
     def test_no_hosts_is_quietly_local(self):
         out = self._launch()                       # empty registry: local, no note
         self.assertNotIn("Registered hosts", out)
+
+
+class LaunchClusterDispatchTests(unittest.TestCase):
+    def setUp(self):
+        self._clusters = mm.CLUSTERS_FILE
+        mm.CLUSTERS_FILE = os.path.join(tempfile.mkdtemp(), "clusters.json")
+        mm.save_clusters({"Beebo": {"head": "dgx3", "worker": "dgx4"}})
+
+    def tearDown(self):
+        mm.CLUSTERS_FILE = self._clusters
+
+    def args(self, **kw):
+        base = dict(key="deepseek-v4-flash-0731", host="beebo", remote=None,
+                    local=False, dry_run=True, foreground=False, keep=False,
+                    force=False, no_fetch=False, refresh=False, wait=False)
+        base.update(kw)
+        return SimpleNamespace(**base)
+
+    def test_cluster_profile_dispatches_with_canonical_cluster_name(self):
+        with mock.patch.object(mm, "cmd_cluster_launch") as launch:
+            mm.cmd_launch(self.args())
+        forwarded = launch.call_args.args[0]
+        self.assertEqual(forwarded.profile, "deepseek-v4-flash-0731")
+        self.assertEqual(mm.cluster_config(forwarded.name)["name"], "Beebo")
+        self.assertTrue(forwarded.dry_run)
+        self.assertEqual(forwarded.startup_timeout, 1800)
+
+    def test_cluster_profile_accepts_shared_host_option(self):
+        with mock.patch.object(mm, "cmd_cluster_launch") as launch:
+            mm.cmd_launch(self.args(host=None, remote="beebo"))
+        self.assertEqual(launch.call_args.args[0].name, "beebo")
+
+    def test_cluster_status_uses_canonical_name_for_labels(self):
+        cfg = {"name": "Beebo", "head": "dgx3", "worker": "dgx4"}
+        row = {"Names": "rank", "Labels": f"{mm.LABEL_CLUSTER}=Beebo", "Status": "Up"}
+        args = SimpleNamespace(name="beebo")
+        out = io.StringIO()
+        with mock.patch.object(mm, "cluster_config", return_value=cfg), \
+                mock.patch.object(mm, "_cluster_targets", return_value=("head", "worker")), \
+                mock.patch.object(mm, "list_managed", return_value=[row]), \
+                contextlib.redirect_stdout(out):
+            mm.cmd_cluster_status(args)
+        self.assertIn("rank", out.getvalue())
+        self.assertNotIn("busy (other model)", out.getvalue())
+
+    def test_cluster_profile_requires_a_cluster_target(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            mm.cmd_launch(self.args(host=None))
+
+    def test_cluster_profile_rejects_local_flag(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            mm.cmd_launch(self.args(local=True))
+
+    def test_cluster_profile_rejects_single_host_options(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            mm.cmd_launch(self.args(foreground=True))
 
 
 class ListManagedTests(unittest.TestCase):
@@ -366,15 +567,17 @@ class PsUnreachableTests(unittest.TestCase):
     """A host that can't be queried shows as 'unreachable', not 'idle' (README promise)."""
 
     def setUp(self):
-        self._hosts, self._remote = mm.HOSTS_FILE, mm.REMOTE
+        self._hosts, self._clusters, self._remote = mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.REMOTE
         self._lm, self._shutil = mm.list_managed, mm.shutil
-        mm.HOSTS_FILE = os.path.join(tempfile.mkdtemp(), "hosts")
+        root = tempfile.mkdtemp()
+        mm.HOSTS_FILE = os.path.join(root, "hosts")
+        mm.CLUSTERS_FILE = os.path.join(root, "clusters.json")
         mm.REMOTE = None
         mm.save_hosts([("dgx1", "user@a")])
         mm.shutil = SimpleNamespace(which=lambda n: "/bin/" + n)   # pretend ssh exists
 
     def tearDown(self):
-        mm.HOSTS_FILE, mm.REMOTE = self._hosts, self._remote
+        mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.REMOTE = self._hosts, self._clusters, self._remote
         mm.list_managed, mm.shutil = self._lm, self._shutil
 
     def test_down_host_reads_unreachable(self):
@@ -388,20 +591,77 @@ class PsUnreachableTests(unittest.TestCase):
 
     def test_table_columns_expand_for_cluster_names(self):
         rows = [
-            ("local-head", "qwen3-235b-a22b-fp4-test-cluster-head",
-             "qwen3-235b-a22b-fp4", "8355", "Up 12 hours"),
-            ("worker-host", "qwen3-235b-a22b-fp4-test-cluster-worker",
-             "qwen3-235b-a22b-fp4", "?", "Up 12 hours"),
+            ("local-head", "test-cluster", "qwen3-235b-a22b-fp4-test-cluster-head",
+              "qwen3-235b-a22b-fp4", "8355", "Up 12 hours"),
+            ("worker-host", "test-cluster", "qwen3-235b-a22b-fp4-test-cluster-worker",
+              "qwen3-235b-a22b-fp4", "?", "Up 12 hours"),
         ]
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             mm._print_ps_table(rows)
         lines = out.getvalue().splitlines()
+        cluster_column = lines[0].index("CLUSTER")
         model_column = lines[0].index("MODEL")
         port_column = lines[0].index("PORT")
-        self.assertTrue(lines[1][model_column:].startswith(rows[0][2]))
-        self.assertTrue(lines[2][model_column:].startswith(rows[1][2]))
-        self.assertTrue(lines[1][port_column:].startswith(rows[0][3]))
+        self.assertTrue(lines[1][cluster_column:].startswith(rows[0][1]))
+        self.assertTrue(lines[1][model_column:].startswith(rows[0][3]))
+        self.assertTrue(lines[2][model_column:].startswith(rows[1][3]))
+        self.assertTrue(lines[1][port_column:].startswith(rows[0][4]))
+
+    def test_cluster_rows_show_name_and_cluster_commands(self):
+        mm.list_managed = lambda **k: [{
+            "Names": "otools-vllm-deepseek-Beebo-head",
+            "Labels": (f"{mm.LABEL_MODEL}=deepseek-v4-flash-0731,"
+                       f"{mm.LABEL_CLUSTER}=Beebo,{mm.LABEL_PORT}=8000"),
+            "Status": "Up 1 hour",
+        }]
+        out = io.StringIO()
+        with mock.patch.object(mm, "_host_machine_id", return_value="machine-a"), \
+                mock.patch.object(mm, "_pulling_keys", return_value=[]), \
+                contextlib.redirect_stdout(out):
+            mm.cmd_ps(SimpleNamespace(all=False, hosts=None))
+        body = out.getvalue()
+        self.assertLess(body.index("HOST"), body.index("CLUSTER"))
+        self.assertIn("Beebo", body)
+        self.assertIn("omm cluster status Beebo", body)
+        self.assertIn("omm cluster health Beebo deepseek-v4-flash-0731", body)
+
+    def test_single_host_model_shows_registered_cluster_membership(self):
+        mm.save_clusters({"Beebo": {"head": "dgx1", "worker": "user@b", "fabric": {}}})
+        mm.list_managed = lambda **k: [{
+            "Names": "otools-vllm-model-a",
+            "Labels": f"{mm.LABEL_MODEL}=model-a,{mm.LABEL_PORT}=8000",
+            "Status": "Up 1 hour",
+        }]
+        out = io.StringIO()
+        with mock.patch.object(mm, "_host_machine_id", return_value="machine-a"), \
+                mock.patch.object(mm, "_pulling_keys", return_value=[]), \
+                contextlib.redirect_stdout(out):
+            mm.cmd_ps(SimpleNamespace(all=False, hosts=None))
+        row = out.getvalue().splitlines()[1]
+        self.assertIn("dgx1", row)
+        self.assertIn("Beebo", row)
+        self.assertIn("omm logs dgx1 -f", out.getvalue())
+
+    def test_membership_survives_alternate_alias_deduplication(self):
+        mm.save_hosts([("dgx-mgmt", "user@mgmt"), ("dgx-fabric", "user@fabric")])
+        mm.save_clusters({"Beebo": {"head": "dgx-fabric", "worker": "user@worker",
+                                     "fabric": {}}})
+        mm.list_managed = lambda **k: [{
+            "Names": "otools-vllm-model-a",
+            "Labels": f"{mm.LABEL_MODEL}=model-a,{mm.LABEL_PORT}=8000",
+            "Status": "Up 1 hour",
+        }]
+        identities = {"user@mgmt": "same-machine", "user@fabric": "same-machine",
+                      "user@worker": "worker-machine"}
+        out = io.StringIO()
+        with mock.patch.object(mm, "_host_machine_id", side_effect=identities.get), \
+                mock.patch.object(mm, "_pulling_keys", return_value=[]), \
+                contextlib.redirect_stdout(out):
+            mm.cmd_ps(SimpleNamespace(all=False, hosts=None))
+        row = out.getvalue().splitlines()[1]
+        self.assertIn("dgx-mgmt", row)
+        self.assertIn("Beebo", row)
 
 
 class SyncTests(unittest.TestCase):
@@ -537,6 +797,35 @@ class LagunaProfileTests(unittest.TestCase):
         self.assertEqual(spec["model"], "poolside/Laguna-S-2.1-DFlash-NVFP4")
         self.assertEqual(spec["revision"], "b3b5921a900b9e0a1e27e50bdaeb480692a6d19b")
         self.assertEqual(spec["num_speculative_tokens"], 7)
+
+
+class Qwen38Bf16ProfileTests(unittest.TestCase):
+    def setUp(self):
+        self.cfg = json.loads(json.dumps(mm.DEFAULT_CONFIG))
+
+    def test_quality_profile_keeps_full_precision_and_vision(self):
+        profile = mm.merge_model(self.cfg, "qwen3.8-27b-bf16")
+        args = profile["vllm_args"]
+        self.assertEqual(profile["model"], "Qwen/Qwen3.8-27B")
+        self.assertIn("@sha256:", profile["image"])
+        self.assertEqual(args["revision"],
+                         "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0")
+        self.assertEqual(args["tokenizer"], "Qwen/Qwen3.8-27B-FP8")
+        self.assertEqual(args["dtype"], "bfloat16")
+        self.assertEqual(args["max-model-len"], 262144)
+        self.assertEqual(args["max-num-seqs"], 2)
+        self.assertNotIn("language-model-only", args)
+        self.assertNotIn("speculative-config", args)
+        self.assertIn("Vision", self.cfg["models"]["qwen3.8-27b-bf16"]["usecase"])
+
+    def test_mtp_profile_is_an_isolated_speed_variant(self):
+        profile = mm.merge_model(self.cfg, "qwen3.8-27b-bf16-mtp")
+        args = profile["vllm_args"]
+        self.assertEqual(args["served-model-name"], "qwen3.8-27b-bf16-mtp")
+        self.assertTrue(args["no-enable-prefix-caching"])
+        self.assertEqual(json.loads(args["speculative-config"]),
+                         {"method": "mtp", "num_speculative_tokens": 2})
+        self.assertNotIn("language-model-only", args)
 
 
 class ExtendsTests(unittest.TestCase):
@@ -1113,6 +1402,17 @@ class ClusterRegistryTests(unittest.TestCase):
         self.assertIn("PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True", head)
         self.assertIn("--enable-prefix-caching", head)
         self.assertIn("--enable-prompt-tokens-details", head)
+        self.assertEqual(head[head.index("--tokenizer-mode") + 1], "deepseek_v4")
+        self.assertEqual(head[head.index("--tool-call-parser") + 1], "deepseek_v4")
+        self.assertEqual(head[head.index("--reasoning-parser") + 1], "deepseek_v4")
+        reasoning = json.loads(head[head.index("--reasoning-config") + 1])
+        self.assertEqual(reasoning, {
+            "reasoning_parser": "deepseek_v4",
+            "reasoning_start_str": "<think>",
+            "reasoning_end_str": "</think>",
+        })
+        defaults = json.loads(head[head.index("--default-chat-template-kwargs") + 1])
+        self.assertEqual(defaults, {"thinking": True, "reasoning_effort": "high"})
         self.assertIn("VLLM_CACHE_ROOT=/cache/runtime/vllm-cache-c8r", head)
         self.assertIn("NCCL_IB_ADDR_FAMILY=AF_INET", head)
         self.assertIn("--distributed-timeout-seconds", head)
@@ -1132,10 +1432,17 @@ class ClusterRegistryTests(unittest.TestCase):
         profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
         requests = mm._deepseek_warmup_requests(profile)
         labels = [label for label, _, _ in requests]
-        self.assertEqual(labels, ["plain decode", "tool parser", "tool result",
-                                  "long prefill", "sampled streaming", "long agent streaming"])
+        self.assertEqual(labels, ["non-thinking decode", "think high", "think max",
+                                  "tool parser", "tool result", "long prefill",
+                                  "sampled streaming", "long agent streaming"])
         payloads = {label: payload for label, _, payload in requests}
         timeouts = {label: timeout for label, timeout, _ in requests}
+        self.assertEqual(payloads["non-thinking decode"]["chat_template_kwargs"],
+                         {"thinking": False})
+        self.assertEqual(payloads["think high"]["chat_template_kwargs"],
+                         {"thinking": True, "reasoning_effort": "high"})
+        self.assertEqual(payloads["think max"]["chat_template_kwargs"],
+                         {"thinking": True, "reasoning_effort": "max"})
         self.assertGreater(len(payloads["long prefill"]["messages"][0]["content"]), 30000)
         self.assertGreaterEqual(timeouts["long prefill"], 600)
         self.assertTrue(payloads["sampled streaming"]["stream"])
@@ -1162,6 +1469,29 @@ class ClusterRegistryTests(unittest.TestCase):
                 mock.patch.object(mm, "_host_exec", return_value=response), \
                 contextlib.redirect_stdout(io.StringIO()), \
                 self.assertRaisesRegex(RuntimeError, "worker failed"):
+            mm._warm_deepseek_cluster(None, profile)
+
+    def test_deepseek_thinking_warmup_requires_reasoning_and_final_content(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        response = SimpleNamespace(returncode=0, stdout=json.dumps({
+            "choices": [{"message": {"content": "4"}}]}), stderr="")
+        with mock.patch.object(mm, "_deepseek_warmup_requests", return_value=[
+                ("think high", 10, {})]), \
+                mock.patch.object(mm, "_host_exec", return_value=response), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                self.assertRaisesRegex(RuntimeError, "emitted no reasoning"):
+            mm._warm_deepseek_cluster(None, profile)
+
+    def test_deepseek_non_thinking_warmup_rejects_reasoning(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        response = SimpleNamespace(returncode=0, stdout=json.dumps({
+            "choices": [{"message": {"content": "ok", "reasoning": "unexpected"}}]}),
+            stderr="")
+        with mock.patch.object(mm, "_deepseek_warmup_requests", return_value=[
+                ("non-thinking decode", 10, {})]), \
+                mock.patch.object(mm, "_host_exec", return_value=response), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                self.assertRaisesRegex(RuntimeError, "unexpectedly emitted reasoning"):
             mm._warm_deepseek_cluster(None, profile)
 
     def test_local_runtime_sync_never_removes_its_source(self):

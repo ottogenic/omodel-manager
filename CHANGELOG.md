@@ -7,6 +7,18 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- **`ps` now shows `HOST` and `CLUSTER` as its first two columns.** Distributed ranks
+  expose their cluster label directly, while idle, pulling, and one-node rows derive
+  membership from the cluster registry. Suggested follow-up commands use the cluster name
+  for status, health, logs, and stop operations when distributed ranks are active.
+- **Two-node profiles now use the normal launch syntax.** `launch <profile> <cluster>`
+  recognizes cluster-only profiles, resolves registered cluster names case-insensitively,
+  and delegates to the existing preflight, launch, warmup, and rollback lifecycle.
+- **Model configs now expose only native Plan and Build presets.** The retired
+  `reason`/`code`/`agent`/`instruct` schema is removed from every TOML. DeepSeek V4
+  Flash gains a shared c8r/cand7 config with Plan=`max`, Build=`high`, and selectable
+  low/high/max/no-think variants; cluster warmups now exercise and validate non-thinking,
+  Think High, and Think Max reasoning separation.
 - **Models now bind loopback (`127.0.0.1`) by default, so a launch can no longer
   accidentally expose an endpoint to the LAN.** `defaults.host` flips from `0.0.0.0`
   to `127.0.0.1`; the server is reachable only on the box it runs on. A profile that
@@ -72,6 +84,16 @@ All notable changes to this project are documented here. The format follows
   unchanged.
 
 ### Added
+- **Remote install now discovers two-node clusters directly from the DGX hosts.** It uses
+  the DGX-side NVIDIA Sync netplan marker plus live GB10 identity, active RoCE addresses,
+  UCX mappings, MTU, machine IDs, and bidirectional rail pings. One unambiguous new pair
+  prompts once for a local cluster name; existing and ambiguous pairs are never overwritten
+  or guessed. No NVIDIA Sync installation or state is required on the client machine.
+- **Qwen3.8-27B BF16 with multimodal standard and MTP profiles for one DGX Spark.**
+  Both pin the official checkpoint revision and a physically validated vLLM ARM64 image,
+  retain BF16 KV cache and the native 262K context, and pass vision, thinking, tools, and
+  executable-code checks. The quality-first profile measures 4.2 tok/s at ~55K input;
+  the MTP-2 speed variant measures 7.0 tok/s and passed its three-run quality battery.
 - **Qwen3.8-27B FP8 for one DGX Spark.** Added the official Qwen FP8 checkpoint on a
   digest-pinned vLLM Qwen3.8 ARM64 build with the full native 262K context, BF16 KV cache,
   four physically qualified sequence slots, and multimodal/tool/reasoning presets. The quality-first

@@ -51,37 +51,18 @@ concurrency      = 1                       # RC2's 99.7GB target leaves limited 
 native = 229376                            # validated serving cap for the target-only Spark profile
                                            # (RC2 arch/config supports 1M; card recipe uses 256K)
 
-[presets.reason]              # research & planning — thinking on
+[presets.plan]                # planning - thinking on
 thinking   = true
 max_output = 32768
-[presets.reason.sampling]
+[presets.plan.sampling]
 temperature = 1.0
 top_p       = 1.0
 top_k       = 20
 
-[presets.code]                # precise coding
+[presets.build]               # precise coding
 thinking   = true
 max_output = 32768
-[presets.code.sampling]
-temperature = 1.0
-top_p       = 1.0
-top_k       = 20
-
-[presets.agent]               # unattended agentic loops. preserve_thinking is the
-thinking   = true             # OFFICIAL agentic rec: "works best with preserved
-max_output = 32768            # thinking… may stop reasoning in follow-up steps if
-                              # prior thinking blocks are dropped"
-                              # (https://huggingface.co/poolside/Laguna-S-2.1)
-options.chat_template_kwargs = { preserve_thinking = true }
-[presets.agent.sampling]
-temperature = 1.0
-top_p       = 1.0
-top_k       = 20
-
-[presets.instruct]            # quick answers — thinking off (loops live in thinking;
-thinking   = false            # this mode sidesteps them entirely)
-max_output = 16384
-[presets.instruct.sampling]
+[presets.build.sampling]
 temperature = 1.0
 top_p       = 1.0
 top_k       = 20

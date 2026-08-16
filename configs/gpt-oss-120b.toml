@@ -23,7 +23,7 @@ concurrency      = 4                       # mirrors the launch profile's max-nu
 [context]
 native = 131072
 
-# ── Task-mode presets ────────────────────────────────────────────────────────
+# Harness-agnostic Plan/Build task-mode presets.
 # gpt-oss always reasons; `reasoning_effort` trades latency for depth. Sampling
 # knobs (vLLM default in parens):
 #   temperature (1.0)   1.0 = OpenAI default; 0.6–0.8 for focused coding.
@@ -31,38 +31,20 @@ native = 131072
 # reasoning_effort is a non-standard body param -> it lives under each preset's
 # `options`, not `sampling`.
 
-[presets.reason]              # research & planning — deepest thinking
+[presets.plan]                # planning - deepest thinking
 thinking   = true
 max_output = 32768
-[presets.reason.sampling]
+[presets.plan.sampling]
 temperature = 1.0
 top_p       = 1.0
-[presets.reason.options]
+[presets.plan.options]
 reasoning_effort = "high"
 
-[presets.code]                # code generation — tighter sampling, deep thinking
+[presets.build]               # implementation - tighter sampling, deep thinking
 thinking   = true
 max_output = 32768
-[presets.code.sampling]
+[presets.build.sampling]
 temperature = 0.7
 top_p       = 0.95
-[presets.code.options]
+[presets.build.options]
 reasoning_effort = "high"
-
-[presets.agent]               # tool-using agent loops — balance depth vs latency
-thinking   = true
-max_output = 16384
-[presets.agent.sampling]
-temperature = 1.0
-top_p       = 1.0
-[presets.agent.options]
-reasoning_effort = "medium"
-
-[presets.instruct]            # quick instructions — minimal reasoning
-thinking   = false
-max_output = 8192
-[presets.instruct.sampling]
-temperature = 1.0
-top_p       = 1.0
-[presets.instruct.options]
-reasoning_effort = "low"

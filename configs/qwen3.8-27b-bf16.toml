@@ -1,15 +1,15 @@
-# Qwen3.8-27B official FP8 model configuration.
+# Qwen3.8-27B official BF16 model configuration.
 # Thinking is enabled by default. `reasoning_effort` accepts xhigh, medium, or low;
 # `enable_thinking = false` selects the direct-response mode.
 
-match  = ["qwen3.8-27b-fp8", "qwen3.8-27b-fp8-mtp", "Qwen/Qwen3.8-27B-FP8"]
-source = "https://huggingface.co/Qwen/Qwen3.8-27B-FP8"
+match  = ["qwen3.8-27b-bf16", "qwen3.8-27b-bf16-mtp"]
+source = "https://huggingface.co/Qwen/Qwen3.8-27B"
 
 [capabilities]
 vision           = { input = ["text", "image", "video"], output = ["text"] }
 reasoning        = true
 tool_call        = true
-concurrency      = 4
+concurrency      = 2
 thinking_control = "enable_thinking"
 
 [context]

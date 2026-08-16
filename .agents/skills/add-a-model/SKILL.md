@@ -158,7 +158,7 @@ consume — keep it harness-agnostic. Fill from research; the live tests will co
 - `[capabilities]`: `vision` (a modalities table if multimodal, else `false`),
   `reasoning`, `tool_call`, `thinking_control`.
 - `[context]`: `native`, `min_thinking`.
-- `[presets.*]` (`reason`/`code`/`agent`/`instruct`): `thinking`, `max_output`,
+- `[presets.*]` (`plan`/`build`): `thinking`, `max_output`,
   `[presets.*.sampling]`, and any `options.chat_template_kwargs`.
 - If it's the same base model as an existing config (different quant), consider
   **one config matching both** served ids rather than a duplicate.

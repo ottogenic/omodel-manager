@@ -24,8 +24,7 @@ concurrency      = 4                  # mirrors the launch profile's max-num-seq
 native       = 262144
 min_thinking = 131072
 
-# ── Task-mode presets ────────────────────────────────────────────────────────
-# Adapters (omodel-wire → OpenCode, …) map these onto agents/subagents.
+# Harness-agnostic Plan/Build task-mode presets.
 # Sampling knobs (vLLM default in parens):
 #   temperature (1.0)       0.6 = focus; 0.8–1.0 = variety. NEVER 0 (loops on thinking models).
 #   top_p       (1.0)       0.95 reasoning baseline; ~0.8 tightens.
@@ -36,44 +35,24 @@ min_thinking = 131072
 #   repetition_penalty(1.0) 1.05–1.15; don't stack hard with presence/frequency.
 #   max_output              16k–32k for thinking (the reasoning trace eats budget).
 
-[presets.reason]              # research & planning (thinking on) -- card "Thinking / General"
+[presets.plan]                # planning (thinking on) -- card "Thinking / General"
 thinking   = true
 max_output = 32768
-[presets.reason.sampling]
+[presets.plan.sampling]
 temperature      = 1.0        # card: General/reasoning thinking = 1.0 (precise coding uses 0.6)
 top_p            = 0.95
 top_k            = 20
 min_p            = 0.0
 presence_penalty = 1.5        # card: General thinking presence_penalty = 1.5 (anti-loop)
 
-[presets.code]                # precise coding (thinking on)
+[presets.build]               # precise coding (thinking on)
 thinking   = true
 max_output = 32768
-[presets.code.sampling]
+[presets.build.sampling]
 temperature      = 0.6
 top_p            = 0.95
 top_k            = 20
 min_p            = 0.0
-
-[presets.agent]               # unattended worker: coding sampling + preserved thinking
-thinking   = true
-max_output = 32768
-options.chat_template_kwargs = { preserve_thinking = true }
-[presets.agent.sampling]
-temperature      = 0.6
-top_p            = 0.95
-top_k            = 20
-min_p            = 0.0
-
-[presets.instruct]            # fast, no thinking
-thinking   = false
-max_output = 32768
-[presets.instruct.sampling]
-temperature      = 0.7
-top_p            = 0.80
-top_k            = 20
-min_p            = 0.0
-presence_penalty = 1.5
 
 # ── Ctrl+T thinking-depth variants (raw options only) ────────────────────────
 [variants.think]

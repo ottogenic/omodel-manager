@@ -18,35 +18,18 @@ concurrency      = 1
 [context]
 native = 131072
 
-[presets.reason]
+[presets.plan]
 thinking   = true
 max_output = 32768
-[presets.reason.sampling]
+[presets.plan.sampling]
 temperature = 1.0
 top_p       = 1.0
 top_k       = 20
 
-[presets.code]
+[presets.build]
 thinking   = true
 max_output = 32768
-[presets.code.sampling]
-temperature = 1.0
-top_p       = 1.0
-top_k       = 20
-
-[presets.agent]
-thinking   = true
-max_output = 32768
-options.chat_template_kwargs = { preserve_thinking = true }
-[presets.agent.sampling]
-temperature = 1.0
-top_p       = 1.0
-top_k       = 20
-
-[presets.instruct]
-thinking   = false
-max_output = 16384
-[presets.instruct.sampling]
+[presets.build.sampling]
 temperature = 1.0
 top_p       = 1.0
 top_k       = 20

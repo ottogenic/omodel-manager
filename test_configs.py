@@ -15,7 +15,7 @@ import unittest
 
 CONFIGS = pathlib.Path(__file__).resolve().parent / "configs"
 
-REQUIRED_PRESETS = {"reason", "code", "agent", "instruct"}
+REQUIRED_PRESETS = {"plan", "build"}
 KNOWN_THINKING_CONTROL = {"enable_thinking", "reasoning_effort", "soft_switch", "none"}
 KNOWN_SAMPLING = {"temperature", "top_p", "top_k", "min_p", "presence_penalty",
                   "frequency_penalty", "repetition_penalty"}
@@ -53,8 +53,8 @@ class ConfigValidityTests(unittest.TestCase):
                     self.assertIn(tc, KNOWN_THINKING_CONTROL)
 
                 presets = r.get("presets", {})
-                self.assertTrue(REQUIRED_PRESETS.issubset(presets),
-                                f"missing presets: {REQUIRED_PRESETS - set(presets)}")
+                self.assertEqual(set(presets), REQUIRED_PRESETS,
+                                 f"presets must be exactly {sorted(REQUIRED_PRESETS)}")
                 for pk, preset in presets.items():
                     self.assertIn("thinking", preset, f"{pk}: needs thinking flag")
                     s = preset.get("sampling", {})
@@ -96,6 +96,29 @@ class ConfigValidityTests(unittest.TestCase):
                     sampling = cfg["presets"][preset]["sampling"]
                     self.assertEqual(sampling,
                                      {"temperature": 1.0, "top_p": 1.0, "top_k": 20})
+
+    def test_deepseek_plan_build_modes_and_variants(self):
+        cfg = _load(CONFIGS / "deepseek-v4-flash-0731.toml")
+        self.assertEqual(cfg["capabilities"]["concurrency"], 12)
+        self.assertEqual(cfg["capabilities"]["thinking_control"], "none")
+        self.assertEqual(cfg["context"], {"native": 1048576, "min_thinking": 393216})
+        self.assertEqual(cfg["presets"]["plan"]["options"]["chat_template_kwargs"],
+                         {"thinking": True, "reasoning_effort": "max"})
+        self.assertEqual(cfg["presets"]["build"]["options"]["chat_template_kwargs"],
+                         {"thinking": True, "reasoning_effort": "high"})
+        self.assertEqual(set(cfg["variants"]), {"low", "high", "max", "no-think"})
+        self.assertEqual(cfg["variants"]["no-think"]["options"]["chat_template_kwargs"],
+                         {"thinking": False})
+
+    def test_qwen38_bf16_config_matches_multimodal_profiles(self):
+        cfg = _load(CONFIGS / "qwen3.8-27b-bf16.toml")
+        self.assertEqual(set(cfg["match"]), {
+            "qwen3.8-27b-bf16", "qwen3.8-27b-bf16-mtp",
+        })
+        self.assertEqual(cfg["capabilities"]["vision"], {
+            "input": ["text", "image", "video"], "output": ["text"],
+        })
+        self.assertEqual(cfg["capabilities"]["concurrency"], 2)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 ---
 name: getting-started
-description: End-to-end onboarding for the otools DGX stack — serve local models on a DGX host with omodel-manager (omm) and wire them into OpenCode with omodel-wire (omw). Use when a user is setting up from scratch or asks how to install, provision a host, launch a model, install OpenCode, sync the agent roster, or "help me get started / onboard / set this up". Covers shell aliases, DGX provisioning, launching a first model, the HuggingFace token, installing OpenCode, and syncing + tweaking the agent roster.
+description: End-to-end onboarding for the otools DGX stack - serve local models on a DGX host with omodel-manager (omm) and wire them into OpenCode Build/Plan with omodel-wire (omw). Use when a user is setting up from scratch or asks how to install, provision a host, launch a model, install OpenCode, sync models, or "help me get started / onboard / set this up".
 ---
 
 # Getting started with the otools DGX stack
@@ -10,13 +10,13 @@ Two sibling tools, run in this order:
 | Tool | Alias | Job |
 | --- | --- | --- |
 | **omodel-manager** | `omm` | Launches & manages vLLM model containers on your DGX host(s). |
-| **omodel-wire** | `omw` | Discovers those live models and wires them into **OpenCode** as an agent roster. |
+| **omodel-wire** | `omw` | Discovers live models and configures OpenCode's native Build and Plan agents. |
 
 `omw` reads `omm`'s model configs from the sibling `../omodel-manager/configs` (or `--configs` / `$OMODEL_CONFIGS`), so keep both repos checked out side by side.
 
 ## How to drive this guide (for the AI assistant)
 
-- **Run the read-only / inspection commands yourself and show the output** — `omm list`, `omm ps`, `omm health …`, `omw agents`, `omw models`, `omw audit`. These are safe.
+- **Run the read-only / inspection commands yourself and show the output** - `omm list`, `omm ps`, `omm health ...`, `omw sync --dry-run`, and `omw verify`. These are safe.
 - For anything that **touches a remote host, starts a container, or is interactive** — `omm install`, `omm launch`, the OpenCode installer, `shell-init` (edits their rc file) — **give a copy-paste block and offer to run it**, but let the user confirm first (these do real work / may prompt).
 - The shell env is **WSL/Linux with `python3`** (there is no bare `python`). Use `python3` for the one-time bootstrap; after `shell-init` the `omm`/`omw` aliases work from anywhere.
 
@@ -99,7 +99,7 @@ Alternatives: `npm install -g opencode-ai` (or `bun`/`pnpm`). Docs: <https://ope
 
 ---
 
-## 6. Sync the agent roster (omw)
+## 6. Sync OpenCode Build and Plan (omw)
 
 With at least one model live (step 3) and OpenCode installed, wire it up:
 
@@ -107,56 +107,33 @@ With at least one model live (step 3) and OpenCode installed, wire it up:
 omw sync         # probes your live endpoints, reads omm's configs, writes ~/.config/opencode/opencode.json
 ```
 
-`omw sync` writes the OpenCode config + sampling plugin + agent prompts. It builds a roster: visible agents **research / code / agent / team** (Tab-cyclable) and hidden workers **agent-plan / agent-code / agent-instruct / agent-review**. Re-run it any time to reset to the known-good config. Useful flags: `--dry-run` (preview, write nothing), `--hosts`/`--ports` (where to probe), `--team-model REF` (put the team orchestrator on a specific model).
+`omw sync` adds the live DGX providers, assigns model-specific `build` and `plan`
+presets to OpenCode's native agents, and writes the sampling plugin for parameters
+OpenCode cannot express directly. It does not create custom agents, prompts, or
+workflows. Useful flags: `--dry-run`, `--hosts`/`--ports`, `--build-model REF`, and
+`--plan-model REF`.
 
 Confirm it worked (safe — run these and show output):
 
 ```bash
-omw audit        # live config vs the known-good configs
-opencode         # launch OpenCode; Tab cycles research/code/agent/team
+omw verify       # compare the live endpoint with its model declaration
+opencode         # launch OpenCode; Tab switches native Build and Plan
 ```
 
 ---
 
-## 7. View & tweak agents and models
+## 7. Choose Build and Plan models
 
-**See the roster:**
-
-```bash
-omw agents            # primary agents (research, code, agent, team)
-omw subagents         # hidden workers (agent-plan, agent-code, agent-instruct, agent-review)
-omw agents team       # detail for one agent
-```
-
-**See the models and their exact refs:**
+`omw sync` prints every discovered host-qualified model reference. Preview the
+result first, then optionally choose different live models for Build and Plan:
 
 ```bash
-omw models            # live models — the MODEL column is the host-qualified ref you pass to --set-model
-omw models --all      # include declared-but-offline models
+omw sync --dry-run
+omw sync --build-model dgx-102-8000/model-id --plan-model dgx-103-8000/model-id
 ```
 
-`omw models` prints the **host-qualified ref** (`dgx-<host>/<served-id>`) — one row per live instance, so the same model on two hosts is two distinct refs. Copy that exact MODEL value for `--set-model` below.
-
-**Pin an agent (or all workers) to a specific model** — use the full ref from `omw models`:
-
-```bash
-omw agents code --set-model dgx-102-8000/unsloth/qwen3-coder-next-fp8   # exact host-qualified ref
-omw agents team --set-model anthropic/claude-opus-4-8                   # a cloud model works too
-omw subagents   --set-model dgx-103-8000/qwen3-coder-next-fp8           # all hidden workers at once
-```
-
-If a name maps to more than one host, `--set-model` lists the exact refs to choose from instead of guessing. (Live `--set-*` edits touch only `~/.config/opencode/`; `omw sync` resets them.)
-
-**Edit your default model preferences** — `default_models.json` in the omodel-wire repo picks each agent's model at `sync` time. Unlike `--set-model`, these are **host-agnostic**: list bare served ids in order of preference and sync resolves each to whichever host is live (falling back to a cloud model if none are). Structure:
-
-```json
-{
-  "agents":   { "team": ["unsloth/qwen3-coder-next-fp8", "openai/gpt-5.5"], "research": ["…"], "code": ["…"], "agent": ["…"] },
-  "subagents":{ "agent-plan": ["…"], "agent-code": ["…"], "agent-instruct": ["…"], "agent-review": ["anthropic/claude-opus-4-8"] }
-}
-```
-
-Hand-edit that file, then `omw sync` to apply. (Offer to open it and show the current contents.)
+Without explicit flags, a still-live existing selection is preserved; otherwise
+the first live model with the corresponding TOML preset is selected.
 
 ---
 
@@ -173,5 +150,5 @@ omm logs   unsloth-qwen3-coder-next-fp8 --host dgx1 -f
 # 4. install OpenCode
 curl -fsSL https://opencode.ai/install | bash
 # 5. wire it up + verify
-omw sync ; omw agents ; omw models ; opencode
+omw sync ; omw verify ; opencode
 ```

@@ -36,7 +36,7 @@ thinking_control = "enable_thinking"  # enable_thinking | reasoning_effort | sof
 native       = 262144
 min_thinking = 131072
 
-# ── Task-mode presets ────────────────────────────────────────────────────────
+# Harness-agnostic Plan/Build task-mode presets.
 # Model card eval uses temperature=1.0, top_p=0.95, max_new_tokens=131072.
 #   temperature (1.0)       1.0 = card baseline for reasoning; 0.6 for precise coding
 #   top_p       (0.95)      card baseline; tighten to ~0.8 for focused tasks
@@ -44,36 +44,19 @@ min_thinking = 131072
 #   presence_penalty  (0.0) anti-loop; +0.5…+1.5 breaks repetition
 #   max_output              32k for thinking (reasoning trace eats budget)
 
-[presets.reason]              # research & planning (thinking on) -- card "General"
+[presets.plan]                # planning (thinking on) -- card "General"
 thinking   = true
 max_output = 32768
-[presets.reason.sampling]
+[presets.plan.sampling]
 temperature      = 1.0        # card: General/reasoning baseline
 top_p            = 0.95
 
-[presets.code]                # precise coding (thinking on)
+[presets.build]               # precise coding (thinking on)
 thinking   = true
 max_output = 32768
-[presets.code.sampling]
+[presets.build.sampling]
 temperature = 0.6
 top_p       = 0.95
-top_k       = 20
-
-[presets.agent]               # unattended worker: coding sampling + preserved thinking
-thinking   = true
-max_output = 32768
-options.chat_template_kwargs = { preserve_thinking = true }
-[presets.agent.sampling]
-temperature = 0.6
-top_p       = 0.95
-top_k       = 20
-
-[presets.instruct]            # fast, no thinking
-thinking   = false
-max_output = 32768
-[presets.instruct.sampling]
-temperature = 0.7
-top_p       = 0.80
 top_k       = 20
 
 # ── Ctrl+T thinking-depth variants (raw options only) ────────────────────────

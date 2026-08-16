@@ -2,8 +2,7 @@
 #
 # NVIDIA Nemotron-3-Super-120B-A12B-NVFP4 (hybrid Mamba+MoE+attention). Reasoning
 # model, tool-calling. Launch via the omodel-manager `nemotron-3-super-120b-nvfp4-*`
-# profiles. The card gives ONE sampling (temp 1.0, top_p 0.95) for all tasks; the
-# roles share it and differ by thinking + permission.
+# profiles. The card gives one sampling (temp 1.0, top_p 0.95) for both modes.
 #
 # thinking_control = "none": the adapter does NOT auto-inject Qwen-style knobs;
 # each preset carries its own chat_template_kwargs. Nemotron has `low_effort`
@@ -22,31 +21,17 @@ thinking_control = "enable_thinking"   # the model DOES support enable_thinking 
 [context]
 native = 1000000
 
-[presets.reason]              # research & Q&A
+[presets.plan]                # planning & Q&A
 thinking = true
 options.chat_template_kwargs = { enable_thinking = true }
-[presets.reason.sampling]
+[presets.plan.sampling]
 temperature = 1.0
 top_p       = 0.95
 
-[presets.code]                # interactive coding
+[presets.build]               # implementation
 thinking = true
 options.chat_template_kwargs = { enable_thinking = true }
-[presets.code.sampling]
-temperature = 1.0
-top_p       = 0.95
-
-[presets.agent]               # unattended worker
-thinking = true
-options.chat_template_kwargs = { enable_thinking = true }
-[presets.agent.sampling]
-temperature = 1.0
-top_p       = 0.95
-
-[presets.instruct]            # fast, no thinking
-thinking = false
-options.chat_template_kwargs = { enable_thinking = false }
-[presets.instruct.sampling]
+[presets.build.sampling]
 temperature = 1.0
 top_p       = 0.95
 

@@ -731,6 +731,73 @@ DEFAULT_CONFIG = {
                 "speculative-config": '{"method":"mtp","num_speculative_tokens":3}',
             },
         },
+        "qwen3.8-27b-bf16": {
+            "tok_s": 4,
+            "image": ("vllm/vllm-openai@"
+                      "sha256:c96082d33456ceeae7ec0d4faf2b5e47fb806a103decf94f9fbc9b35fd7d6b25"),
+            "notes": [
+                "Official Qwen/Qwen3.8-27B BF16 revision "
+                "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0, native multimodal hybrid "
+                "Gated DeltaNet/full-attention model with 262K context. Validated on DGX "
+                "Spark 2026-08-16.",
+                "Quality-first profile uses BF16 weights and KV cache, MTP disabled, 0.85 "
+                "memory utilization, and two sequence slots. Vision (solid-blue PNG), "
+                "thinking on/off, structured tools, and executable code all pass; the "
+                "three-run battery passed 12/12 tool and 12/12 code cases.",
+                "Pinned nightly ac7509e2b1db40fec2f03dde1ed4e9dfdc2338c9 selected fused "
+                "CUDA GDN decode, Triton/FLA GDN prefill, and FlashAttention 2. Tokenizer "
+                "assets use the official FP8 sibling; tokenizer.json is byte-identical "
+                "and the snapshot was already validated on this host.",
+                "VALIDATED with vision enabled: 51.75 GiB checkpoint, 51.1 GiB loaded model, "
+                "750,300-token BF16 KV pool (2.86x full 262K contexts). At ~55K input: "
+                "4.2 tok/s decode, 50.4s TTFT, 1,085 prefill tok/s. A cache-clean N=2 run "
+                "serialized heavily: TTFT 56.3/111.9s and decode 1.6/3.9 tok/s.",
+            ],
+            "model": "Qwen/Qwen3.8-27B",
+            "port": 8000,
+            "usecase": ["Coding", "Agentic", "Reasoning", "Vision", "Long-context"],
+            "vllm_args": {
+                "revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+                "tokenizer": "Qwen/Qwen3.8-27B-FP8",
+                "tokenizer-revision": "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
+                "trust-remote-code": False,
+                "served-model-name": "qwen3.8-27b-bf16",
+                "tensor-parallel-size": 1,
+                "dtype": "bfloat16",
+                "gpu-memory-utilization": 0.85,
+                "max-model-len": 262144,
+                "max-num-seqs": 2,
+                "enable-chunked-prefill": True,
+                "enable-auto-tool-choice": True,
+                "tool-call-parser": "qwen3_coder",
+                "reasoning-parser": "qwen3",
+                "enable-log-requests": True,
+            },
+        },
+        "qwen3.8-27b-bf16-mtp": {
+            "tok_s": 7,
+            "extends": "qwen3.8-27b-bf16",
+            "notes": [
+                "Validated speed variant of qwen3.8-27b-bf16: built-in MTP at depth 2 "
+                "with prefix caching disabled. On DGX Spark 2026-08-16 it measured 7.0 "
+                "tok/s at ~55K input (50.0s TTFT, 1,094 prefill tok/s), versus the base "
+                "profile's 4.2 tok/s.",
+                "The three-run quality battery passed 12/12 structured-tool and 12/12 "
+                "executable-code cases with no repetition; after enabling vision, a "
+                "solid-blue PNG and another 4/4 tool plus 4/4 code battery passed. MTP "
+                "reduced the vision-enabled BF16-KV pool from 750,300 to 688,419 tokens, "
+                "still 2.63 full 262K contexts. vLLM warns that min_p/logit_bias are "
+                "ineffective under speculative decode.",
+                "A two-request run serialized prefill and decode heavily: TTFT 52.7/104.7s "
+                "and decode 1.9/7.4 tok/s. The profile remains a single-user speed option "
+                "rather than a latency-isolated concurrency profile.",
+            ],
+            "vllm_args": {
+                "served-model-name": "qwen3.8-27b-bf16-mtp",
+                "no-enable-prefix-caching": True,
+                "speculative-config": '{"method":"mtp","num_speculative_tokens":2}',
+            },
+        },
         "glm-4.7-flash": {
             "tok_s": 18,
             "notes": ["zai-org/GLM-4.7-Flash on the nightly aarch64 image (DGX Spark = ARM); "
@@ -1849,11 +1916,14 @@ def _host_machine_id(target):
     return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
 
 
-def _dedupe_host_targets(targets):
+def _dedupe_host_targets(targets, machine_ids=None):
     """Keep the first connection path for each physical host, preserving unknown targets."""
+    machine_ids = {} if machine_ids is None else machine_ids
     seen, unique = set(), []
     for target in targets:
-        machine_id = _host_machine_id(target)
+        if target not in machine_ids:
+            machine_ids[target] = _host_machine_id(target)
+        machine_id = machine_ids[target]
         identity = ("machine", machine_id) if machine_id else ("target", target)
         if identity in seen:
             continue
@@ -1904,6 +1974,188 @@ def save_clusters(clusters, path=None):
             pass
 
 
+def _dgx_cluster_host(alias, target):
+    """Read the DGX-side identity and active NVIDIA Sync RoCE fabric."""
+    checks = (
+        (["test", "-f", "/etc/netplan/99-nvidia-sync-cluster.yaml"], None),
+        (["uname", "-m"], "aarch64"),
+    )
+    for command, expected in checks:
+        ok, body = _host_text(target, command)
+        if not ok or (expected is not None and body != expected):
+            return None
+    ok, gpu = _host_text(target, ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"])
+    if not ok or "GB10" not in gpu:
+        return None
+    ok, hostname = _host_text(target, ["hostnamectl", "--static"])
+    if not ok or not hostname:
+        return None
+    ok, machine_id = _host_text(target, ["cat", "/etc/machine-id"])
+    if not ok or not machine_id:
+        return None
+    ok, rdma_body = _host_text(target, ["ibdev2netdev"])
+    if not ok:
+        return None
+    rdma = {}
+    for line in rdma_body.splitlines():
+        match = re.match(r"^(\S+)\s+port\s+([1-9][0-9]*)\s+==>\s+(\S+)\s+\(Up\)$",
+                         line.strip())
+        if match:
+            device, port, interface = match.groups()
+            rdma[interface] = f"{device}:{port}"
+    ok, address_body = _host_text(target, ["ip", "-j", "address", "show"])
+    if not ok:
+        return None
+    try:
+        links = json.loads(address_body)
+    except json.JSONDecodeError:
+        return None
+    fabric = {}
+    for link in links if isinstance(links, list) else []:
+        if not isinstance(link, dict):
+            continue
+        interface = link.get("ifname")
+        if interface not in rdma or link.get("operstate") != "UP":
+            continue
+        addresses = [item for item in link.get("addr_info", [])
+                     if isinstance(item, dict) and item.get("family") == "inet"
+                     and item.get("scope") == "global"]
+        if len(addresses) != 1:
+            continue
+        address = addresses[0]
+        try:
+            ipif = ipaddress.ip_interface(f"{address['local']}/{address['prefixlen']}")
+            mtu = int(link.get("mtu", 0))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if ipif.version != 4 or not 1500 <= mtu <= 9000:
+            continue
+        fabric[interface] = {
+            "ip": str(ipif.ip),
+            "network": str(ipif.network),
+            "ucx_device": rdma[interface],
+            "mtu": mtu,
+        }
+    if not fabric:
+        return None
+    return {"alias": alias, "target": target, "hostname": hostname.splitlines()[0].strip(),
+            "machine_id": machine_id.splitlines()[0].strip(), "fabric": fabric}
+
+
+def _dgx_pair_config(head, worker, verify=True):
+    if head["machine_id"] == worker["machine_id"]:
+        return None
+    interfaces = []
+    for interface, left in head["fabric"].items():
+        right = worker["fabric"].get(interface)
+        if not right:
+            continue
+        if (left["network"] != right["network"] or left["ip"] == right["ip"]
+                or left["ucx_device"] != right["ucx_device"]
+                or left["mtu"] != right["mtu"]):
+            continue
+        interfaces.append(interface)
+    if not interfaces:
+        return None
+    if len({head["fabric"][name]["mtu"] for name in interfaces}) != 1:
+        return None
+    if verify:
+        for interface in interfaces:
+            left, right = head["fabric"][interface], worker["fabric"][interface]
+            checks = ((head["target"], interface, right["ip"]),
+                      (worker["target"], interface, left["ip"]))
+            for target, source_interface, peer_ip in checks:
+                ok, _ = _host_text(target, ["ping", "-c", "1", "-W", "2", "-I",
+                                                source_interface, peer_ip])
+                if not ok:
+                    return None
+    return {
+        "head": head["alias"],
+        "worker": worker["alias"],
+        "fabric": {
+            "interfaces": interfaces,
+            "ucx_devices": [head["fabric"][name]["ucx_device"] for name in interfaces],
+            "head_ips": [head["fabric"][name]["ip"] for name in interfaces],
+            "worker_ips": [worker["fabric"][name]["ip"] for name in interfaces],
+            "mtu": head["fabric"][interfaces[0]]["mtu"],
+        },
+    }
+
+
+def _cluster_registered_for_pair(clusters, candidate, hosts, machine_ids):
+    host_map = dict(hosts)
+
+    def identity(value):
+        target = host_map.get(value, resolve_host(value))
+        machine_id = machine_ids.get(target)
+        return ("machine", machine_id) if machine_id else ("target", target)
+
+    candidate_hosts = {identity(candidate["head"]), identity(candidate["worker"])}
+    for cfg in clusters.values():
+        if not isinstance(cfg, dict):
+            continue
+        current_hosts = {identity(cfg.get("head")), identity(cfg.get("worker"))}
+        if current_hosts == candidate_hosts:
+            return True
+    return False
+
+
+def auto_register_dgx_cluster(hosts=None, prompt=input):
+    """Discover one unambiguous NVIDIA Sync pair from the registered DGX hosts."""
+    hosts = load_hosts() if hosts is None else hosts
+    discovered = []
+    machine_ids = {}
+    seen_machine_ids = set()
+    for alias, target in hosts:
+        host = _dgx_cluster_host(alias, target)
+        if not host:
+            continue
+        machine_ids[target] = host["machine_id"]
+        if host["machine_id"] in seen_machine_ids:
+            continue
+        seen_machine_ids.add(host["machine_id"])
+        discovered.append(host)
+    candidates = []
+    for index, head in enumerate(discovered):
+        for worker in discovered[index + 1:]:
+            candidate = _dgx_pair_config(head, worker)
+            if candidate:
+                candidates.append(candidate)
+    clusters = load_clusters()
+    candidates = [candidate for candidate in candidates
+                  if not _cluster_registered_for_pair(clusters, candidate, hosts, machine_ids)]
+    if not candidates:
+        return []
+    if len(candidates) != 1:
+        pairs = ", ".join(f"{item['head']}+{item['worker']}" for item in candidates)
+        print(f"WARNING: found multiple possible DGX cluster pairs ({pairs}); "
+              "not auto-registering an ambiguous topology.", file=sys.stderr)
+        return []
+    candidate = candidates[0]
+    print(f"-> discovered DGX cluster fabric: {candidate['head']} + {candidate['worker']} "
+          f"on {', '.join(candidate['fabric']['interfaces'])}")
+    try:
+        name = prompt("   Name this cluster once (blank to skip): ").strip()
+    except EOFError:
+        name = ""
+    if not name:
+        print("   cluster registration skipped.")
+        return []
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+        print("WARNING: cluster name must contain only letters, digits, dot, underscore, "
+              "or dash; registration skipped.", file=sys.stderr)
+        return []
+    existing_names = [current for current in clusters if current.casefold() == name.casefold()]
+    if existing_names:
+        print(f"WARNING: cluster name '{name}' already exists; registration skipped.",
+              file=sys.stderr)
+        return []
+    clusters[name] = candidate
+    save_clusters(clusters)
+    print(f"-> registered cluster '{name}' in {CLUSTERS_FILE}")
+    return [name]
+
+
 def cluster_profile(key):
     try:
         return json.loads(json.dumps(CLUSTER_PROFILES[key]))
@@ -1916,10 +2168,15 @@ def cluster_profile(key):
 def cluster_config(name):
     clusters = load_clusters()
     if name not in clusters:
-        avail = ", ".join(sorted(clusters)) or "(none)"
-        print(f"ERROR: unknown cluster '{name}'. Available: {avail}. "
-              f"Create one with `{_cli_name()} cluster add ...`.", file=sys.stderr)
-        sys.exit(1)
+        matches = [candidate for candidate in clusters
+                   if candidate.casefold() == name.casefold()]
+        if len(matches) == 1:
+            name = matches[0]
+        else:
+            avail = ", ".join(sorted(clusters)) or "(none)"
+            print(f"ERROR: unknown cluster '{name}'. Available: {avail}. "
+                  f"Create one with `{_cli_name()} cluster add ...`.", file=sys.stderr)
+            sys.exit(1)
     cfg = json.loads(json.dumps(clusters[name]))
     cfg["name"] = name
     return cfg
@@ -3149,13 +3406,14 @@ def _managed_on(remote):
 
 def _print_ps_table(rows):
     """Print ps rows with widths derived from the complete result set."""
-    headers = ("HOST", "NAME", "MODEL", "PORT", "STATUS")
+    headers = ("HOST", "CLUSTER", "NAME", "MODEL", "PORT", "STATUS")
     host_width = max(16, *(len(str(row[0])) for row in rows))
-    name_width = max(28, *(len(str(row[1])) for row in rows))
-    model_width = max(28, *(len(str(row[2])) for row in rows))
-    port_width = max(6, *(len(str(row[3])) for row in rows))
-    fmt = (f"{{:<{host_width}}} {{:<{name_width}}} {{:<{model_width}}} "
-           f"{{:<{port_width}}} {{}}")
+    cluster_width = max(16, *(len(str(row[1])) for row in rows))
+    name_width = max(28, *(len(str(row[2])) for row in rows))
+    model_width = max(28, *(len(str(row[3])) for row in rows))
+    port_width = max(6, *(len(str(row[4])) for row in rows))
+    fmt = (f"{{:<{host_width}}} {{:<{cluster_width}}} {{:<{name_width}}} "
+           f"{{:<{model_width}}} {{:<{port_width}}} {{}}")
     print(fmt.format(*headers))
     for row in rows:
         print(fmt.format(*row))
@@ -3166,6 +3424,33 @@ def cmd_ps(args):
     registered = load_hosts()                       # [(alias, target)]
     alias_of = {t: a for a, t in registered}
     hlabel = lambda t: alias_of.get(t) or (t if t else "localhost")
+    machine_ids = {}
+    cluster_membership, cluster_membership_by_machine = {}, {}
+
+    def machine_id(target):
+        if target not in machine_ids:
+            machine_ids[target] = _host_machine_id(target)
+        return machine_ids[target]
+
+    for cluster_name, cfg in load_clusters().items():
+        if not isinstance(cfg, dict):
+            continue
+        for value in (cfg.get("head"), cfg.get("worker")):
+            target = None if value in ("local", "localhost") else resolve_host(value)
+            if value and cluster_name not in cluster_membership.setdefault(target, []):
+                cluster_membership[target].append(cluster_name)
+                physical = machine_id(target)
+                if physical:
+                    cluster_membership_by_machine.setdefault(physical, []).append(cluster_name)
+
+    def cluster_label(target):
+        names = list(cluster_membership.get(target, []))
+        physical = machine_id(target)
+        if physical:
+            for name in cluster_membership_by_machine.get(physical, []):
+                if name not in names:
+                    names.append(name)
+        return ",".join(names) or "—"
 
     # Targets, and whether to also show registered hosts that have nothing running.
     # explicit --hosts > --host/--remote > registered hosts > local.
@@ -3187,7 +3472,7 @@ def cmd_ps(args):
     elif any(targets) and not shutil.which("ssh"):
         print("ERROR: `ssh` not found on PATH (needed for --host).", file=sys.stderr)
         sys.exit(1)
-    targets = _dedupe_host_targets(targets)
+    targets = _dedupe_host_targets(targets, machine_ids)
 
     all_rows, state, pulling = [], {}, {}
     for t in targets:
@@ -3215,22 +3500,34 @@ def cmd_ps(args):
         labels = r.get("Labels", "")
         model = _label(labels, LABEL_MODEL) or r.get("Image", "")[:28]
         port = _label(labels, LABEL_PORT) or "?"
+        cluster = _label(labels, LABEL_CLUSTER) or cluster_label(r.get("_host"))
         cname = r.get("Names", "")
         name = cname[len(NAME_PREFIX):] if cname.startswith(NAME_PREFIX) else cname
-        display_rows.append((hlabel(r.get("_host")), name, model, str(port),
+        display_rows.append((hlabel(r.get("_host")), cluster, name, model, str(port),
                              r.get("Status", "")))
     for t in targets:                                # a box mid-pull isn't free -- surface it
         for key in pulling.get(t, []):
-            display_rows.append((hlabel(t), key, "—", "—", "pulling image"))
+            display_rows.append((hlabel(t), cluster_label(t), key, "—", "—", "pulling image"))
     if show_idle:                                    # idle/unreachable hosts so agents can pick one
         for t in targets:
             st = state.get(t)
             if st in ("idle", "unreachable"):
                 label = "idle" if st == "idle" else "unreachable (ssh)"
-                display_rows.append((hlabel(t), "—", "—", "—", label))
+                display_rows.append((hlabel(t), cluster_label(t), "—", "—", "—", label))
     _print_ps_table(display_rows)
 
-    if all_rows:                                     # address the model by its host (stable, unlike an index)
+    cluster_rows = [(r, _label(r.get("Labels", ""), LABEL_CLUSTER))
+                    for r in all_rows if _label(r.get("Labels", ""), LABEL_CLUSTER)]
+    if cluster_rows:
+        row, cluster = cluster_rows[0]
+        profile = _label(row.get("Labels", ""), LABEL_MODEL) or "<profile>"
+        _suggest([
+            ("Inspect the cluster", f"{p} cluster status {cluster}"),
+            ("Check cluster readiness", f"{p} cluster health {cluster} {profile}"),
+            ("Follow cluster logs", f"{p} cluster logs {cluster} {profile} -f"),
+            ("Stop the cluster", f"{p} cluster stop {cluster}"),
+        ])
+    elif all_rows:                                   # address a one-node model by its stable host
         fh = all_rows[0].get("_host")
         ref = hlabel(fh) if fh else (_label(all_rows[0].get("Labels", ""), LABEL_MODEL)
                                      or all_rows[0].get("Names"))
@@ -3356,7 +3653,7 @@ def cmd_cluster_prepare(args):
               "Stop those models or pass --allow-busy after assessing UMA/page-cache risk.",
               file=sys.stderr)
         sys.exit(1)
-    print(f"Preparing '{args.profile}' for cluster '{args.name}' ...")
+    print(f"Preparing '{args.profile}' for cluster '{cfg['name']}' ...")
     if profile["backend"] == "trtllm-mpi":
         _prepare_qwen(cfg, profile, build=args.build, weights=args.weights, dry=args.dry_run)
     else:
@@ -3728,6 +4025,9 @@ def _deepseek_manifest_inputs(profile):
 
 def _deepseek_warmup_requests(profile):
     model = profile["served_model_name"]
+    no_think = {"thinking": False}
+    think_high = {"thinking": True, "reasoning_effort": "high"}
+    think_max = {"thinking": True, "reasoning_effort": "max"}
     tool = {
         "type": "function",
         "function": {
@@ -3748,11 +4048,33 @@ def _deepseek_warmup_requests(profile):
     long_prompt = "Reply with the single word ok. " + " ".join(
         f"lorem ipsum filler segment {i}." for i in range(1200))
     return [
-        ("plain decode", 120, {
+        ("non-thinking decode", 120, {
             "model": model,
             "messages": [{"role": "user", "content": "Reply with the single word ok."}],
-            "max_tokens": 8,
-            "temperature": 0,
+            "max_tokens": 32,
+            "temperature": 1.0,
+            "top_p": 1.0,
+            "chat_template_kwargs": no_think,
+            "user": "omodel-manager-warmup",
+        }),
+        ("think high", 180, {
+            "model": model,
+            "messages": [{"role": "user", "content": (
+                "Briefly explain why two plus two equals four, then give the final answer.")}],
+            "max_tokens": 512,
+            "temperature": 1.0,
+            "top_p": 1.0,
+            "chat_template_kwargs": think_high,
+            "user": "omodel-manager-warmup",
+        }),
+        ("think max", 300, {
+            "model": model,
+            "messages": [{"role": "user", "content": (
+                "Calculate 17 times 19 and return the final integer.")}],
+            "max_tokens": 1024,
+            "temperature": 1.0,
+            "top_p": 1.0,
+            "chat_template_kwargs": think_max,
             "user": "omodel-manager-warmup",
         }),
         ("tool parser", 180, {
@@ -3762,6 +4084,7 @@ def _deepseek_warmup_requests(profile):
             "tool_choice": "auto",
             "max_tokens": 128,
             "temperature": 0,
+            "chat_template_kwargs": think_high,
             "user": "omodel-manager-warmup",
         }),
         ("tool result", 180, {
@@ -3776,6 +4099,7 @@ def _deepseek_warmup_requests(profile):
             "tool_choice": "auto",
             "max_tokens": 128,
             "temperature": 0,
+            "chat_template_kwargs": think_high,
             "user": "omodel-manager-warmup",
         }),
         ("long prefill", 720, {
@@ -3783,6 +4107,7 @@ def _deepseek_warmup_requests(profile):
             "messages": [{"role": "user", "content": long_prompt}],
             "max_tokens": 8,
             "temperature": 0,
+            "chat_template_kwargs": no_think,
             "user": "omodel-manager-warmup",
         }),
         ("sampled streaming", 180, {
@@ -3791,6 +4116,7 @@ def _deepseek_warmup_requests(profile):
             "max_tokens": 64,
             "temperature": 1.0,
             "top_p": 1.0,
+            "chat_template_kwargs": think_high,
             "stream": True,
             "user": "omodel-manager-warmup",
         }),
@@ -3810,7 +4136,8 @@ def _deepseek_warmup_requests(profile):
             "tool_choice": "auto",
             "max_tokens": 128,
             "temperature": 1.0,
-            "top_p": 1.0,
+            "top_p": 0.95,
+            "chat_template_kwargs": think_max,
             "stream": True,
             "user": "omodel-manager-warmup",
         }),
@@ -3856,7 +4183,18 @@ def _warm_deepseek_cluster(head, profile):
         choices = response.get("choices")
         if not isinstance(choices, list) or not choices:
             raise RuntimeError(f"DeepSeek {label} warmup returned no choices")
-        if label == "tool parser" and not choices[0].get("message", {}).get("tool_calls"):
+        message = choices[0].get("message", {})
+        if label in ("non-thinking decode", "think high", "think max"):
+            reasoning = message.get("reasoning")
+            if reasoning is None:
+                reasoning = message.get("reasoning_content")
+            if label == "non-thinking decode" and reasoning:
+                raise RuntimeError("DeepSeek non-thinking warmup unexpectedly emitted reasoning")
+            if label != "non-thinking decode" and not reasoning:
+                raise RuntimeError(f"DeepSeek {label} warmup emitted no reasoning")
+            if not message.get("content"):
+                raise RuntimeError(f"DeepSeek {label} warmup emitted no final content")
+        if label == "tool parser" and not message.get("tool_calls"):
             raise RuntimeError("DeepSeek tool parser warmup emitted no tool call")
 
 
@@ -4018,6 +4356,7 @@ def cmd_cluster_launch(args):
 
 def cmd_cluster_status(args):
     cfg = cluster_config(args.name)
+    cluster_name = cfg["name"]
     head, worker = _cluster_targets(cfg)
     print(f"{'ROLE':<8} {'HOST':<18} {'CONTAINER':<55} STATUS")
     for role, target in (("head", head), ("worker", worker)):
@@ -4026,7 +4365,8 @@ def cmd_cluster_status(args):
         if rows is None:
             print(f"{role:<8} {label:<18} {'—':<55} unreachable")
             continue
-        matched = [r for r in rows if _label(r.get("Labels", ""), LABEL_CLUSTER) == args.name]
+        matched = [r for r in rows
+                   if _label(r.get("Labels", ""), LABEL_CLUSTER) == cluster_name]
         if not matched:
             busy = _cluster_busy(target)
             if busy is None:
@@ -4042,9 +4382,10 @@ def cmd_cluster_status(args):
 
 def cmd_cluster_stop(args):
     cfg = cluster_config(args.name)
+    cluster_name = cfg["name"]
     head, worker = _cluster_targets(cfg)
     if not args.yes:
-        reply = input(f"Stop all managed ranks in cluster '{args.name}'? [y/N] ").strip().lower()
+        reply = input(f"Stop all managed ranks in cluster '{cluster_name}'? [y/N] ").strip().lower()
         if reply not in ("y", "yes"):
             print("Aborted."); return
     stopped, failures = 0, []
@@ -4054,7 +4395,7 @@ def cmd_cluster_stop(args):
             failures.append(f"{role} unreachable")
             continue
         for row in rows:
-            if _label(row.get("Labels", ""), LABEL_CLUSTER) != args.name:
+            if _label(row.get("Labels", ""), LABEL_CLUSTER) != cluster_name:
                 continue
             name = row.get("Names")
             if not name:
@@ -4074,7 +4415,7 @@ def cmd_cluster_logs(args):
     profile = cluster_profile(args.profile)
     head, worker = _cluster_targets(cfg)
     role, target = ("worker", worker) if args.role == "worker" else ("head", head)
-    name = _cluster_container_name(args.profile, args.name, role)
+    name = _cluster_container_name(args.profile, cfg["name"], role)
     if profile["backend"] == "trtllm-mpi" and role == "head":
         cmd = ["docker", "exec", name, "sh", "-c",
                ("tail " + ("-f " if args.follow else "") +
@@ -4308,6 +4649,28 @@ def _launch_status(body):
 
 
 def cmd_launch(args):
+    if args.key in CLUSTER_PROFILES:
+        cluster_name = getattr(args, "host", None) or getattr(args, "remote", None)
+        if not cluster_name:
+            print(f"ERROR: cluster profile '{args.key}' requires a registered cluster: "
+                  f"`{_cli_name()} launch {args.key} <cluster>`.", file=sys.stderr)
+            sys.exit(1)
+        if args.local:
+            print("ERROR: --local cannot be used with a two-node cluster profile.",
+                  file=sys.stderr)
+            sys.exit(1)
+        single_host_options = [flag for attr, flag in (
+            ("foreground", "--foreground"), ("keep", "--keep"), ("force", "--force"),
+            ("no_fetch", "--no-fetch"), ("refresh", "--refresh"), ("wait", "--wait"),
+        ) if getattr(args, attr, False)]
+        if single_host_options:
+            print("ERROR: these options apply only to single-host profiles: "
+                  + ", ".join(single_host_options), file=sys.stderr)
+            sys.exit(1)
+        cluster_args = argparse.Namespace(name=cluster_name, profile=args.key,
+                                          dry_run=args.dry_run, startup_timeout=1800)
+        cmd_cluster_launch(cluster_args)
+        return
     cfg = load_config()
     merged = merge_model(cfg, args.key)
     # Host resolution: explicit host (positional / --host) > --local > per-model
@@ -4717,6 +5080,7 @@ def cmd_install(args):
         print(f"-> registered {len(connected)} host(s) for `ps` / `--host` in {HOSTS_FILE}:")
         for a, t in connected:
             print(f"     {a:<12} {t}" if a != t else f"     {t}")
+        auto_register_dgx_cluster(merged)
     sys.exit(0 if all_ready else 1)
 
 
@@ -5018,10 +5382,11 @@ def main():
         p = sub.add_parser(alias, help="table of profiles: context, concurrency, use-case")
         p.set_defaults(func=cmd_models)
 
-    p = sub.add_parser("launch", help="launch a model profile", parents=[remote_parent])
-    p.add_argument("key", help="profile key from the config (see `models`)")
-    p.add_argument("host", nargs="?", metavar="HOST",
-                   help="host to launch on: an alias (e.g. dgx-1) or user@ip -- positional --host")
+    p = sub.add_parser("launch", help="launch a model or two-node cluster profile",
+                       parents=[remote_parent])
+    p.add_argument("key", help="model or cluster profile key (see `models` / `cluster profiles`)")
+    p.add_argument("host", nargs="?", metavar="HOST|CLUSTER",
+                   help="host for a model profile, or registered cluster for a cluster profile")
     p.add_argument("--dry-run", action="store_true", help="print the docker command, don't run")
     p.add_argument("--foreground", action="store_true", help="run with -it instead of detached -d")
     p.add_argument("--keep", action="store_true",
@@ -5155,12 +5520,12 @@ def main():
     p.set_defaults(func=cmd_cluster_health)
 
     p = sub.add_parser("install", aliases=["setup"],
-                       help="bootstrap this machine, or bootstrap + register a remote host")
+                       help="bootstrap/register hosts and discover DGX cluster pairs")
     p.add_argument("target", nargs="?",
                    help="USER@HOST to install (default: this machine); comma-separate several "
                         "(a,b) when giving no alias. "
                         "Reachable hosts are saved to ~/.config/otools/hosts so `ps` and `--host` "
-                        "find them.")
+                        "find them; an unambiguous DGX pair prompts once for a cluster name.")
     p.add_argument("alias", nargs="?",
                    help="short name for this host, e.g. dgx1 (then `launch <model> --host dgx1`)")
     p.add_argument("--fix", action="store_true", help="remediate failures (installs docker, adds "
@@ -5210,7 +5575,8 @@ def main():
                     setattr(args, attr, None)         # command resolves the sole container on it
                 break
 
-    # `launch <profile> <host>`: the positional host is where to launch (same as --host).
+    # For normal profiles the positional target is a host (same as --host). Cluster-only
+    # profiles resolve it as a registered cluster inside cmd_launch instead.
     at_host = getattr(args, "host", None)
     if at_host:
         args.remote = at_host

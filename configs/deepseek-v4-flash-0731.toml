@@ -1,0 +1,49 @@
+# DeepSeek-V4-Flash-0731 official release. Both cluster runtime lanes serve the
+# same weights and API model id, so they intentionally share this config.
+# DeepSeek uses `chat_template_kwargs.thinking` (not Qwen's enable_thinking)
+# and supports reasoning_effort low/high/max. Official sampling is temperature
+# 1.0, top_p 0.95 for agentic work and 1.0 otherwise.
+
+match = [
+  "deepseek-v4-flash-0731",
+  "deepseek-v4-flash-0731-cand7",
+  "deepseek-v4-flash-dspark",
+  "deepseek-ai/DeepSeek-V4-Flash-0731",
+]
+source = "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731"
+
+[capabilities]
+vision           = false
+reasoning        = true
+tool_call        = true
+concurrency      = 12
+thinking_control = "none" # Explicit native kwargs below; do not inject Qwen controls.
+
+[context]
+native       = 1048576
+min_thinking = 393216 # Think Max requires max-model-len >= 384K.
+
+[presets.plan]
+thinking   = true
+max_output = 393216
+options.chat_template_kwargs = { thinking = true, reasoning_effort = "max" }
+[presets.plan.sampling]
+temperature = 1.0
+top_p       = 0.95
+
+[presets.build]
+thinking   = true
+max_output = 393216
+options.chat_template_kwargs = { thinking = true, reasoning_effort = "high" }
+[presets.build.sampling]
+temperature = 1.0
+top_p       = 0.95
+
+[variants.low]
+options.chat_template_kwargs = { thinking = true, reasoning_effort = "low" }
+[variants.high]
+options.chat_template_kwargs = { thinking = true, reasoning_effort = "high" }
+[variants.max]
+options.chat_template_kwargs = { thinking = true, reasoning_effort = "max" }
+[variants.no-think]
+options.chat_template_kwargs = { thinking = false }

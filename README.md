@@ -49,16 +49,16 @@ Optional: `python omodel-manager shell-init` adds an `omm` shell alias.
 | Command | What it does |
 |---|---|
 | `list` (alias `models`) | Table of profiles: context, concurrency, use-case |
-| `launch <profile> [host]` | Start a profile (detached) — optional positional host (alias/user@ip) to launch on. `--dry-run`, `--foreground`, `--keep`, `--force`, `--wait`, `--local`. Uncached image → pulls in the background and returns immediately |
+| `launch <profile> [host\|cluster]` | Start a profile (detached) on an optional host, or launch a two-node profile on a registered cluster. Single-host options: `--foreground`, `--keep`, `--force`, `--wait`, `--local`; `--dry-run` works for both. Uncached image → pulls in the background and returns immediately |
 | `pull <profile>` | Pre-pull a profile's image so `launch` starts instantly |
 | `pull-status <profile\|host>` | Progress of a backgrounded launch/pull |
 | `logs <profile\|host> [-f]` | Show/follow a container's logs (Ctrl-C detaches cleanly) |
 | `health [<profile\|host>]` | `GET /v1/models` on running containers |
 | `cluster <subcommand>` | Register, preflight, prepare, launch, inspect, and stop one model across two DGX Sparks |
-| `ps [--all]` | Running containers **plus** every registered host, each `running`/`idle`/`pulling`/`unreachable` |
+| `ps [--all]` | Running containers plus every registered host, with host and cluster columns and each target `running`/`idle`/`pulling`/`unreachable` |
 | `stop <profile\|host>` (alias `kill`) | Stop + remove a container (`-y` to skip confirm) |
 | `fetch <profile>` | Pre-download a profile's declared assets |
-| `install [<user@ip> [alias]] [--fix]` (alias `setup`) | Bootstrap this machine when no host is given; otherwise bootstrap a remote + register it under an alias |
+| `install [<user@ip> [alias]] [--fix]` (alias `setup`) | Bootstrap this machine; for remotes, register the host and discover unambiguous DGX cluster pairs |
 | `uninstall <alias\|host> [--purge]` | Unregister a host + revoke the otools key (`--purge` also drops docker-group/containers + drop-caches rule) |
 | `sync` | Reset `model_manager.json` from the committed `DEFAULT_CONFIG` — run after `git pull` to pick up newly merged profiles (backs up a differing old file to `.bak`; pairs with `omw sync`) |
 | `config [--path/--init/--edit]` | Show/init/edit the config file |
@@ -92,6 +92,14 @@ normal one-container profile into a distributed deployment. Cluster definitions 
 `~/.local/share/otools/clusters/`. Override those paths for automation with
 `$OMODEL_MANAGER_CLUSTERS` and `$OMODEL_MANAGER_CLUSTER_DATA`.
 
+Remote `install` discovers cluster pairs directly from the registered Linux DGX hosts; it
+does not read NVIDIA Sync or other state from the client machine. A host qualifies only
+when it is an ARM64 GB10 with NVIDIA Sync's DGX-side netplan marker and active IPv4 RoCE
+interfaces. The manager requires matching subnets, UCX mappings and MTU on both hosts,
+then verifies every rail with bidirectional interface-bound pings. If exactly one new pair
+is unambiguous, it prompts once for the local cluster name and saves the resulting fabric
+definition. Existing pairs are left unchanged, and ambiguous topologies are never guessed.
+
 Register the local Spark as the head and a previously installed host alias as the worker.
 The Linux interface and UCX RDMA device are deliberately separate: confirm their mapping
 with `ibdev2netdev` after connecting the approved QSFP112 cable.
@@ -111,12 +119,15 @@ omm cluster preflight spark2
 
 # Stop existing one-node inference first. Heavy preparation refuses busy nodes by default.
 omm cluster prepare spark2 qwen3-235b-a22b-fp4 --build --weights
-omm cluster launch spark2 qwen3-235b-a22b-fp4
+# Normal launch syntax recognizes cluster-only profiles and cluster names case-insensitively.
+omm launch qwen3-235b-a22b-fp4 spark2
 omm cluster status spark2
 omm cluster health spark2 qwen3-235b-a22b-fp4
 omm cluster logs spark2 qwen3-235b-a22b-fp4 -f
 omm cluster stop spark2 -y
 ```
+
+The explicit `omm cluster launch spark2 qwen3-235b-a22b-fp4` form remains available.
 
 The Qwen path uses official NVIDIA checkpoints pinned to exact Hugging Face revisions and
 ARM64 TensorRT-LLM bases pinned by digest. The manager builds the small SSH/MPI derivatives
@@ -139,7 +150,8 @@ operator accepts `b12x`'s Apache-2.0 package metadata despite its missing bundle
 Launch still requires the QSFP/RoCE preflight, API health, warmup battery, and `NCCL NET/IB`
 evidence or rolls both ranks back. The c8r lane passed those gates plus sustained local OpenCode
 tool traffic and a 20K-token stream on the qualified pair. No community model image or quant is
-substituted.
+substituted. Its shared model config drives OpenCode's native Plan mode at Think Max and Build
+mode at Think High, with low/high/max/no-think request variants available for either runtime lane.
 
 See [DUAL_SPARK_MODEL_RESEARCH.md](DUAL_SPARK_MODEL_RESEARCH.md) for model selection and
 primary-source links.
@@ -217,7 +229,8 @@ none is set. Run it without `--fix` for a read-only status report. It also **reg
 the host — under `alias` (e.g. `dgx1`) — in `~/.config/otools/hosts`, **merging** into
 that list so other hosts stay. Then `ps` fans across every host by default and
 `--host dgx1` resolves the alias. A bare `user@host` line works too; the file is safe to
-hand-edit.
+hand-edit. After registration, `install` probes the registered DGXs directly and offers to
+name a newly discovered two-node cluster once both members are present.
 
 `uninstall <alias|host>` reverses it: drops the host from the registry and revokes the
 otools key from the remote's `authorized_keys`. It leaves Docker, the docker group, and

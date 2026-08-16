@@ -21,8 +21,7 @@ concurrency      = 4                      # mirrors the launch profile's max-num
 [context]
 native       = 262144
 
-# ── Task-mode presets ────────────────────────────────────────────────────────
-# This model has NO thinking/reasoning mode. All presets are non-thinking.
+# Harness-agnostic Plan/Build task-mode presets. This model has no thinking mode.
 # Sampling knobs (vLLM default in parens):
 #   temperature (1.0)       1.0 = card default; 0.6–0.8 for focused coding.
 #   top_p       (1.0)       0.95 = card recommended baseline.
@@ -33,42 +32,23 @@ native       = 262144
 #   repetition_penalty(1.0) 1.05–1.15.
 #   max_output              16k–32k for coding tasks.
 
-[presets.reason]              # research & planning (no thinking)
+[presets.plan]                # planning (no thinking)
 thinking   = false
 max_output = 32768
-[presets.reason.sampling]
+[presets.plan.sampling]
 temperature      = 1.0        # card: General reasoning = 1.0
 top_p            = 0.95
 top_k            = 40         # card recommended
 min_p            = 0.0
 
-[presets.code]                # precise coding
+[presets.build]               # precise coding
 thinking   = false
 max_output = 32768
-[presets.code.sampling]
+[presets.build.sampling]
 temperature = 0.7             # card: coding uses slightly lower
 top_p       = 0.95
 top_k       = 40
 min_p       = 0.0
-
-[presets.agent]               # unattended worker
-thinking   = false
-max_output = 32768
-[presets.agent.sampling]
-temperature = 0.7
-top_p       = 0.95
-top_k       = 40
-min_p       = 0.0
-
-[presets.instruct]            # fast, no thinking (default for all modes)
-thinking   = false
-max_output = 32768
-[presets.instruct.sampling]
-temperature      = 0.7
-top_p            = 0.80
-top_k            = 40
-min_p            = 0.0
-presence_penalty = 1.5        # anti-loop rule
 
 # ── Variants (raw options only) ──────────────────────────────────────────────
 [variants.think]
