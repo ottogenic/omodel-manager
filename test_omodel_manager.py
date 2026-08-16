@@ -170,6 +170,32 @@ class InstallTests(unittest.TestCase):
         self.assertIn("Setup for this machine", out.getvalue())
         self.assertNotIn("SSH", out.getvalue())
 
+    def test_remote_setup_requires_curl_for_health_checks(self):
+        def setup_ok(target, cmd):
+            self.assertEqual(target, "user@host")
+            if cmd == "command -v curl":
+                return False, ""
+            if cmd == "docker --version":
+                return True, "Docker version 29"
+            if cmd == "id -nG":
+                return True, "user docker"
+            if cmd.startswith("nvidia-smi"):
+                return True, "GPU 0: NVIDIA GB10"
+            if "Runtimes" in cmd:
+                return True, '{"nvidia": {}}'
+            return True, "ok"
+
+        out = io.StringIO()
+        with mock.patch.object(mm, "hf_token", return_value="hf_test"), \
+                mock.patch.object(mm.os.path, "exists", return_value=True), \
+                mock.patch.object(mm, "_setup_ok", side_effect=setup_ok) as check, \
+                contextlib.redirect_stdout(out):
+            ready, ssh_ok = mm._setup_host("user@host", False)
+        self.assertFalse(ready)
+        self.assertTrue(ssh_ok)
+        self.assertIn(mock.call("user@host", "command -v curl"), check.call_args_list)
+        self.assertIn("[FAIL] curl", out.getvalue())
+
     def test_setup_runner_executes_locally_without_ssh(self):
         completed = SimpleNamespace(returncode=0, stdout="ok\n")
         with mock.patch.object(mm.subprocess, "run", return_value=completed) as run, \
@@ -569,6 +595,83 @@ class BuildArgvTests(unittest.TestCase):
         i = argv.index("--hf-overrides")
         j = json.loads(argv[i + 1])
         self.assertEqual(j["text_config"]["rope_parameters"]["rope_type"], "yarn")
+
+
+class HostBindTests(unittest.TestCase):
+    """Loopback is the default bind; LAN exposure is an explicit per-profile opt-in."""
+
+    def setUp(self):
+        # Committed source of truth, not the git-ignored sandbox (machine-dependent).
+        self.cfg = json.loads(json.dumps(mm.DEFAULT_CONFIG))
+
+    def test_all_profiles_default_to_loopback(self):
+        for key in self.cfg["models"]:
+            with self.subTest(profile=key):
+                merged = mm.merge_model(self.cfg, key)
+                self.assertEqual(merged["host"], "127.0.0.1")
+
+    def test_loopback_reaches_the_argv(self):
+        m = mm.merge_model(self.cfg, "glm-4.7-flash")
+        _, argv, _ = mm.build_run_argv("glm-4.7-flash", m, target=None)
+        self.assertEqual(argv[argv.index("--host") + 1], "127.0.0.1")
+
+    def test_profile_can_opt_into_lan(self):
+        self.cfg["models"]["glm-4.7-flash"]["host"] = "0.0.0.0"
+        m = mm.merge_model(self.cfg, "glm-4.7-flash")
+        self.assertEqual(m["host"], "0.0.0.0")
+        _, argv, _ = mm.build_run_argv("glm-4.7-flash", m, target=None)
+        self.assertEqual(argv[argv.index("--host") + 1], "0.0.0.0")
+
+
+class RemoteHealthTests(unittest.TestCase):
+    """`health` on a remote box probes that box's loopback over SSH (curl), since a
+    loopback-bound server is invisible on the LAN."""
+
+    def _probe(self, returncode, stdout, stderr=""):
+        with mock.patch.object(mm, "run_remote",
+                               return_value=SimpleNamespace(returncode=returncode,
+                                                            stdout=stdout, stderr=stderr)) as run:
+            result = mm.remote_http_models("user@host", 8000)
+        command = run.call_args.args[1]
+        self.assertIn("exit $rc", command)
+        self.assertIn("--noproxy '*'", command)
+        return result
+
+    def test_ready_lists_model_ids(self):
+        body = json.dumps({"data": [{"id": "m1"}, {"id": "m2"}]})
+        self.assertEqual(self._probe(0, body + "\nHTTP_CODE:200"), ("ready", "m1, m2"))
+
+    def test_http_error_is_surfaced(self):
+        self.assertEqual(self._probe(0, "boom\nHTTP_CODE:500"), ("error", "HTTP 500"))
+
+    def test_no_listener(self):
+        self.assertEqual(self._probe(7, "", "connection refused"),
+                         ("starting", "server not listening yet"))
+
+    def test_timeout_reads_as_starting(self):
+        self.assertEqual(self._probe(28, "", "timed out"),
+                         ("starting", "server not listening yet"))
+
+    def test_missing_curl_is_an_error(self):
+        phase, detail = self._probe(127, "", "curl: not found")
+        self.assertEqual(phase, "error")
+        self.assertIn("curl not found", detail)
+
+    def test_ssh_failure_is_an_error(self):
+        phase, detail = self._probe(255, "", "ssh: connection reset")
+        self.assertEqual(phase, "error")
+        self.assertIn("SSH health probe failed", detail)
+        self.assertIn("connection reset", detail)
+
+    def test_other_curl_failure_is_an_error(self):
+        phase, detail = self._probe(35, "", "TLS failure")
+        self.assertEqual(phase, "error")
+        self.assertIn("exit 35", detail)
+
+    def test_malformed_success_is_an_error(self):
+        phase, detail = self._probe(0, "not the marked response")
+        self.assertEqual(phase, "error")
+        self.assertIn("invalid response", detail)
 
 
 class TokenTests(unittest.TestCase):

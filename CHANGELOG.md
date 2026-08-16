@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Models now bind loopback (`127.0.0.1`) by default, so a launch can no longer
+  accidentally expose an endpoint to the LAN.** `defaults.host` flips from `0.0.0.0`
+  to `127.0.0.1`; the server is reachable only on the box it runs on. A profile that
+  must be reachable from another machine (e.g. OpenCode on a laptop) opts back in with
+  `"host": "0.0.0.0"` on that profile. `health` follows the bind: for a remote host it
+  now probes the box's own loopback over SSH (curl on the box) instead of hitting the
+  host's LAN address from the laptop, so it works for both loopback and LAN binds. Remote
+  setup now checks that curl is installed, and health distinguishes model startup from
+  missing-curl, SSH, and other probe failures. Two-Spark cluster profiles were already
+  loopback-bound and are unchanged.
+
 ### Fixed
 - **Qwen Thinking-2507 now uses an aggressive but repeatable two-Spark agent profile.** Live
   tuning raised it from 32K context / batch 1 / 8K scheduling / 0.60 KV allocation to a

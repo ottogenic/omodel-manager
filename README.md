@@ -20,7 +20,7 @@ Built for a DGX Spark setup but works against any host with Docker + NVIDIA GPUs
 
 - Python 3.8+ (stdlib only)
 - Local: Docker with the NVIDIA container runtime/CDI
-- Remote: an `ssh` client locally; Docker on the remote (see `install`)
+- Remote: an `ssh` client locally; Docker and `curl` on the remote (see `install`)
 
 ## Quick start
 
@@ -158,7 +158,7 @@ to `.bak` first; `config --init --force` is the older spelling of the same reset
 ```jsonc
 {
   "defaults": {                     // merged UNDER every profile
-    "image": "...", "host": "0.0.0.0", "gpus": "all",
+    "image": "...", "host": "127.0.0.1", "gpus": "all",
     "remote": null,                 // "user@host" to default all commands remote
     "hf_cache": "~/.cache/huggingface",
     "env": { "HF_TOKEN": null, "VLLM_LOGGING_COLOR": "1" },
@@ -187,6 +187,11 @@ to `.bak` first; `config --init --force` is the older spelling of the same reset
 - **`vllm_args`**: `true` renders a bare flag (`--trust-remote-code`); any other
   value renders `--flag value`. JSON-string values (e.g. `--speculative-config`,
   `--hf-overrides`) pass through as a single intact argument.
+- **`host`** (bind address): defaults to **`127.0.0.1` — loopback only**, so a launch can
+  never accidentally expose the endpoint to the LAN. The server is reachable only on the box
+  it runs on (local clients, and `health`/benchmarks that run there or probe over SSH). Set
+  `"host": "0.0.0.0"` on a profile to expose it to the LAN on purpose — e.g. when a client
+  on another machine (OpenCode on your laptop) must reach it directly.
 - **`extends`**: inherit another profile and override only what differs.
 - **`assets`**: files auto-downloaded before launch (cached in `assets/<key>/`)
   and mounted; for remote launches they're `scp`'d to the box.

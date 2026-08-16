@@ -297,7 +297,10 @@ DEFAULT_CONFIG = {
     "$otools": "model_manager",
     "defaults": {
         "image": DEFAULT_IMAGE,
-        "host": "0.0.0.0",
+        # Loopback by default: the server is reachable only on the box it runs
+        # on, so a launch can never accidentally expose an endpoint to the LAN.
+        # Set "host": "0.0.0.0" on a profile to expose it to the LAN on purpose.
+        "host": "127.0.0.1",
         "gpus": "all",
         "remote": None,                     # e.g. "user@192.0.2.101" to run on the DGX;
                                             #      null = local. Override per-model or with --remote.
@@ -1359,7 +1362,7 @@ def merge_model(cfg, key):
     m = resolve_entry(cfg, key)
     merged = {
         "image": m.get("image", d.get("image", DEFAULT_IMAGE)),
-        "host": m.get("host", d.get("host", "0.0.0.0")),
+        "host": m.get("host", d.get("host", "127.0.0.1")),
         "gpus": m.get("gpus", d.get("gpus", "all")),
         "hf_cache": m.get("hf_cache", d.get("hf_cache", "~/.cache/huggingface")),
         "model": m.get("model"),
@@ -4588,7 +4591,10 @@ def cmd_health(args):
     for label, host, port, running in targets:
         if not port:
             print(f"  {label}: unknown port"); continue
-        phase, detail = http_models(host, int(port))
+        # Remote servers bind loopback on the box (the LAN can't see it), so probe
+        # over SSH there; local servers are probed directly.
+        probe = remote_http_models(REMOTE, int(port)) if REMOTE else http_models(host, int(port))
+        phase, detail = probe
         if phase == "ready":
             print(f"  {label:<28} :{port}  READY  {detail}")
         elif phase == "starting" and running:
@@ -4616,6 +4622,45 @@ def http_models(host, port, timeout=3.0):
         return "error", f"HTTP {e.code}"
     except (urllib.error.URLError, OSError):
         return "starting", "server not listening yet"
+
+
+def remote_http_models(target, port, timeout=3.0):
+    """http_models() for a remote host, same (phase, detail) contract. The server is
+    loopback-bound ON THAT HOST, which the laptop can't reach over the LAN -- so curl
+    runs on the box itself and probes its own 127.0.0.1 (works for a 0.0.0.0 bind too)."""
+    url = f"http://127.0.0.1:{port}/v1/models"
+    sh = (f"out=$(curl -sS --noproxy '*' -w '\\nHTTP_CODE:%{{http_code}}' "
+          f"--max-time {int(timeout)} "
+          f"-H 'Authorization: Bearer x' {shlex.quote(url)}); rc=$?; "
+          f"[ $rc -ne 0 ] && exit $rc; printf '%s' \"$out\"")
+    res = run_remote(target, sh, capture=True, batch=True)
+    out = res.stdout or ""
+    # curl 7/28 are connection-refused/timeout; 52/56 are startup-time socket
+    # closures. Those mean vLLM may still be loading. Tool and SSH failures do not.
+    if res.returncode in (7, 28, 52, 56):
+        return "starting", "server not listening yet"
+    error = (res.stderr or "").strip()
+    if res.returncode == 127:
+        return "error", "curl not found on remote host (run `install <host>` to check setup)"
+    if res.returncode == 255:
+        return "error", "SSH health probe failed" + (f": {error[-300:]}" if error else "")
+    if res.returncode != 0:
+        return "error", f"curl health probe failed (exit {res.returncode})" + (
+            f": {error[-300:]}" if error else "")
+    if not out:
+        return "error", "remote curl probe returned an empty response"
+    sep = out.rfind("\nHTTP_CODE:")
+    if sep < 0:
+        return "error", "remote curl probe returned an invalid response"
+    body, code = out[:sep], out[sep + len("\nHTTP_CODE:"):].strip()
+    if code != "200":
+        return "error", f"HTTP {code}"
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return "error", "unparseable /v1/models body"
+    ids = [m.get("id") for m in data.get("data", []) if m.get("id")]
+    return "ready", ", ".join(ids) if ids else "(no model ids)"
 
 
 def _print_results(results):
@@ -4780,6 +4825,11 @@ def _setup_host(target, fix):
             print("\nSSH must work before the rest -- skipping this host.")
             return False, False
 
+        # Standard remote health checks probe the box's loopback with curl over SSH.
+        curl_ok, curl_path = _setup_ok(target, "command -v curl")
+        results.append(("curl", curl_ok, curl_path or
+                        "missing; install curl (required for remote health checks)"))
+
     # 3) docker installed
     dok, _ = _setup_ok(target, "command -v docker")
     if not dok and fix:
@@ -4850,10 +4900,10 @@ def _setup_host(target, fix):
               f"'{OTOOLS_SSH_COMMENT}'\n"
               f"    ssh {target} \"sed -i '/{OTOOLS_SSH_COMMENT}/d' ~/.ssh/authorized_keys\"\n"
               f"  and locally: rm {OTOOLS_SSH_KEY} {OTOOLS_SSH_PUB}")
-    essentials = {"keyless SSH", "docker installed", "docker w/o sudo",
+    essentials = {"keyless SSH", "curl", "docker installed", "docker w/o sudo",
                   "nvidia driver", "docker GPU runtime", "drop-caches sudo"}
     if not target:
-        essentials.remove("keyless SSH")
+        essentials -= {"keyless SSH", "curl"}
     ready = all(ok for name, ok, _ in results if name in essentials)
     print(f"\n{'READY: launch away.' if ready else 'NOT READY -- address the [FAIL] rows above'}"
           + ("" if fix else "  (re-run with --fix to remediate)"))
