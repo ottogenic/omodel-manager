@@ -96,9 +96,25 @@ Remote `install` discovers cluster pairs directly from the registered Linux DGX 
 does not read NVIDIA Sync or other state from the client machine. A host qualifies only
 when it is an ARM64 GB10 with NVIDIA Sync's DGX-side netplan marker and active IPv4 RoCE
 interfaces. The manager requires matching subnets, UCX mappings and MTU on both hosts,
-then verifies every rail with bidirectional interface-bound pings. If exactly one new pair
-is unambiguous, it prompts once for the local cluster name and saves the resulting fabric
-definition. Existing pairs are left unchanged, and ambiguous topologies are never guessed.
+then verifies every rail with bidirectional interface-bound pings and physical peer MACs.
+After the second host is installed, an unambiguous pair is registered automatically as
+`<head-alias>-<worker-alias>`. Existing pairs are left unchanged, and ambiguous topologies
+are never guessed. Rename a stopped pair with `omm cluster rename OLD NEW`.
+
+The normal new-cluster flow is therefore:
+
+```bash
+omm install otto@new-dgx-1 dgx-5 --fix
+omm install otto@new-dgx-2 dgx-6 --fix
+omm cluster rename dgx-5-dgx-6 studio  # optional
+omm launch deepseek-v4-flash-0731 studio
+```
+
+DeepSeek launch is idempotent: it downloads missing pinned weights, reuses the reviewed c8r
+image from either cluster node or another registered DGX, certifies image/runtime/model content,
+and stores recoverable certificates on both DGXs. Local build state is only a cache, so replacing
+the control machine no longer requires manual manifest reconstruction. A completely isolated
+fleet still needs the reviewed c8r image built once or made available on one registered DGX.
 
 Register the local Spark as the head and a previously installed host alias as the worker.
 The Linux interface and UCX RDMA device are deliberately separate: confirm their mapping
@@ -117,7 +133,7 @@ omm cluster preflight spark2 --management-only
 # and mlx5-to-netdev mapping. A route over Wi-Fi/Ethernet is a hard failure.
 omm cluster preflight spark2
 
-# Stop existing one-node inference first. Heavy preparation refuses busy nodes by default.
+# Optional explicit preparation; normal DeepSeek launch now ensures missing artifacts itself.
 omm cluster prepare spark2 qwen3-235b-a22b-fp4 --build --weights
 # Normal launch syntax recognizes cluster-only profiles and cluster names case-insensitively.
 omm launch qwen3-235b-a22b-fp4 spark2

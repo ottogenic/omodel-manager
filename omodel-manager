@@ -46,6 +46,7 @@ Stdlib only. Commands:
 """
 
 import argparse
+import concurrent.futures
 import hashlib
 import ipaddress
 import json
@@ -2204,6 +2205,9 @@ def _dgx_cluster_host(alias, target):
             "ucx_device": rdma[interface],
             "mtu": mtu,
         }
+        ok, mac = _host_text(target, ["cat", f"/sys/class/net/{interface}/address"])
+        if ok and re.fullmatch(r"[0-9a-fA-F:]{17}", mac):
+            fabric[interface]["mac"] = mac.lower()
     if not fabric:
         return None
     return {"alias": alias, "target": target, "hostname": hostname.splitlines()[0].strip(),
@@ -2237,9 +2241,21 @@ def _dgx_pair_config(head, worker, verify=True):
                                                 source_interface, peer_ip])
                 if not ok:
                     return None
+            # NVIDIA Sync links are point-to-point. Bind the candidate to the
+            # physical peer's MAC so overlapping Sync subnets cannot cross-pair.
+            if left.get("mac") and right.get("mac"):
+                for target, peer_ip, expected_mac in (
+                        (head["target"], right["ip"], right["mac"]),
+                        (worker["target"], left["ip"], left["mac"])):
+                    ok, neighbor = _host_text(target, ["ip", "neigh", "show", peer_ip])
+                    match = re.search(r"\blladdr\s+([0-9a-fA-F:]{17})\b", neighbor)
+                    if not ok or not match or match.group(1).lower() != expected_mac:
+                        return None
     return {
         "head": head["alias"],
         "worker": worker["alias"],
+        "head_machine_id": head["machine_id"],
+        "worker_machine_id": worker["machine_id"],
         "fabric": {
             "interfaces": interfaces,
             "ucx_devices": [head["fabric"][name]["ucx_device"] for name in interfaces],
@@ -2268,8 +2284,18 @@ def _cluster_registered_for_pair(clusters, candidate, hosts, machine_ids):
     return False
 
 
-def auto_register_dgx_cluster(hosts=None, prompt=input):
-    """Discover one unambiguous NVIDIA Sync pair from the registered DGX hosts."""
+def _available_cluster_name(clusters, head, worker):
+    base = _safe_cluster_name(f"{head}-{worker}")
+    if not any(name.casefold() == base.casefold() for name in clusters):
+        return base
+    index = 2
+    while any(name.casefold() == f"{base}-{index}".casefold() for name in clusters):
+        index += 1
+    return f"{base}-{index}"
+
+
+def auto_register_dgx_cluster(hosts=None, preferred_aliases=None):
+    """Discover and automatically name one identity-verified NVIDIA Sync pair."""
     hosts = load_hosts() if hosts is None else hosts
     discovered = []
     machine_ids = {}
@@ -2291,7 +2317,11 @@ def auto_register_dgx_cluster(hosts=None, prompt=input):
                 candidates.append(candidate)
     clusters = load_clusters()
     candidates = [candidate for candidate in candidates
-                  if not _cluster_registered_for_pair(clusters, candidate, hosts, machine_ids)]
+                   if not _cluster_registered_for_pair(clusters, candidate, hosts, machine_ids)]
+    preferred = set(preferred_aliases or ())
+    if preferred:
+        candidates = [candidate for candidate in candidates
+                      if preferred.intersection((candidate["head"], candidate["worker"]))]
     if not candidates:
         return []
     if len(candidates) != 1:
@@ -2302,25 +2332,11 @@ def auto_register_dgx_cluster(hosts=None, prompt=input):
     candidate = candidates[0]
     print(f"-> discovered DGX cluster fabric: {candidate['head']} + {candidate['worker']} "
           f"on {', '.join(candidate['fabric']['interfaces'])}")
-    try:
-        name = prompt("   Name this cluster once (blank to skip): ").strip()
-    except EOFError:
-        name = ""
-    if not name:
-        print("   cluster registration skipped.")
-        return []
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
-        print("WARNING: cluster name must contain only letters, digits, dot, underscore, "
-              "or dash; registration skipped.", file=sys.stderr)
-        return []
-    existing_names = [current for current in clusters if current.casefold() == name.casefold()]
-    if existing_names:
-        print(f"WARNING: cluster name '{name}' already exists; registration skipped.",
-              file=sys.stderr)
-        return []
+    name = _available_cluster_name(clusters, candidate["head"], candidate["worker"])
     clusters[name] = candidate
     save_clusters(clusters)
     print(f"-> registered cluster '{name}' in {CLUSTERS_FILE}")
+    print(f"   Rename it with `{_cli_name()} cluster rename {name} <new-name>`.")
     return [name]
 
 
@@ -3001,6 +3017,208 @@ print(json.dumps({"sha256": aggregate.hexdigest(), "files": len(files),
         return None, detail
 
 
+def _deepseek_profile_fingerprint(profile):
+    canonical = json.dumps(_deepseek_manifest_inputs(profile), sort_keys=True,
+                           separators=(",", ":")).encode()
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _deepseek_certificate_path(target, profile):
+    fingerprint = _deepseek_profile_fingerprint(profile)
+    return os.path.join(remote_home(target), ".local", "share", "otools", "artifacts",
+                        "deepseek", fingerprint, "certificate.json")
+
+
+def _read_host_json(target, path):
+    result = _host_exec(target, ["cat", path], capture=True)
+    if result.returncode != 0:
+        return None
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _write_host_json(target, path, value):
+    body = json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
+    script = ("import json,os,pathlib,sys,tempfile; p=pathlib.Path(sys.argv[1]); "
+              "p.parent.mkdir(parents=True,exist_ok=True); "
+              "fd,tmp=tempfile.mkstemp(prefix='.certificate-',dir=p.parent,text=True); "
+              "os.write(fd,(sys.argv[2]+'\\n').encode()); os.close(fd); os.chmod(tmp,0o600); "
+              "os.replace(tmp,p)")
+    _host_exec(target, ["python3", "-c", script, path, body.rstrip("\n")], check=True)
+
+
+def _deepseek_snapshot_identity(target, profile):
+    repo = profile["model"].replace("/", "--")
+    snapshot = os.path.join(remote_home(target), ".cache", "huggingface", "hub",
+                            f"models--{repo}", "snapshots", profile["revision"])
+    script = '''
+import hashlib, json, pathlib, sys
+p=pathlib.Path(sys.argv[1]); files=sorted(x for x in p.rglob("*") if x.is_file())
+shards=[x for x in files if x.name.startswith("model-") and x.suffix==".safetensors"]
+metadata=hashlib.sha256()
+for x in files:
+    resolved=x.resolve(); stat=resolved.stat()
+    metadata.update(str(x.relative_to(p)).encode()); metadata.update(b"\\0")
+    metadata.update(str(resolved).encode()); metadata.update(b"\\0")
+    metadata.update(str(stat.st_size).encode()); metadata.update(b"\\0")
+    metadata.update(str(stat.st_mtime_ns).encode()); metadata.update(b"\\0")
+print(json.dumps({"files":len(files),"shards":len(shards),
+                  "size":sum(x.resolve().stat().st_size for x in files),
+                  "metadata_sha256":metadata.hexdigest()},sort_keys=True))
+'''
+    result = _host_exec(target, ["python3", "-c", script, snapshot], capture=True)
+    if result.returncode != 0:
+        return None
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+def _deepseek_certificate_valid(target, profile, certificate):
+    if not certificate or certificate.get("profile_fingerprint") != _deepseek_profile_fingerprint(profile):
+        return False
+    machine_id = _host_exec(target, ["cat", "/etc/machine-id"], capture=True)
+    image_id = _host_exec(target, ["docker", "image", "inspect", "--format", "{{.Id}}",
+                                   profile["image"]], capture=True)
+    if (machine_id.returncode != 0 or image_id.returncode != 0
+            or certificate.get("machine_id") != machine_id.stdout.strip()
+            or certificate.get("image_id") != image_id.stdout.strip()
+            or (profile.get("image_signature")
+                and certificate.get("image_signature") != profile["image_signature"])):
+        return False
+    identity = _deepseek_snapshot_identity(target, profile)
+    expected = {"files": profile["model_file_count"], "shards": profile["model_shards"],
+                "size": profile["model_size"]}
+    return (identity and all(identity.get(key) == value for key, value in expected.items())
+            and certificate.get("snapshot_identity") == identity
+            and certificate.get("model_signature"))
+
+
+def _certify_deepseek_node(target, role, profile):
+    inspected = _host_exec(target, ["docker", "image", "inspect", "--format", "{{.Id}}",
+                                    profile["image"]], capture=True)
+    if inspected.returncode != 0:
+        raise RuntimeError(f"reviewed DeepSeek image is missing on {role}")
+    image_signature = _deepseek_image_signature(target, profile["image"])
+    if profile.get("image_signature") and image_signature != profile["image_signature"]:
+        raise RuntimeError(f"reviewed DeepSeek image content mismatch on {role}")
+    runtime_signature, detail = _deepseek_runtime_signature(target, profile["image"])
+    if not runtime_signature:
+        raise RuntimeError(f"DeepSeek runtime smoke failed on {role}: {detail}")
+    model_signature, detail = _deepseek_model_signature(target, profile)
+    if not model_signature:
+        raise RuntimeError(f"DeepSeek model verification failed on {role}: {detail}")
+    machine_id = _host_exec(target, ["cat", "/etc/machine-id"], capture=True, check=True)
+    certificate = {
+        "schema": 1,
+        "profile_fingerprint": _deepseek_profile_fingerprint(profile),
+        "machine_id": machine_id.stdout.strip(),
+        "image_id": inspected.stdout.strip(),
+        "image_signature": image_signature,
+        "runtime_signature": runtime_signature,
+        "model_signature": model_signature,
+        "snapshot_identity": _deepseek_snapshot_identity(target, profile),
+    }
+    _write_host_json(target, _deepseek_certificate_path(target, profile), certificate)
+    return role, certificate
+
+
+def _transfer_deepseek_image(source, target, image):
+    print(f"Copying reviewed DeepSeek image from {_host_label(source)} to {_host_label(target)} ...")
+    save = "docker save %s | zstd -T0 -3" % shlex.quote(image)
+    load = "zstd -dc | docker load"
+    producer = subprocess.Popen(ssh_argv(source, batch=True) + [save], stdout=subprocess.PIPE)
+    try:
+        consumer = subprocess.run(ssh_argv(target, batch=True) + [load], stdin=producer.stdout)
+    finally:
+        if producer.stdout:
+            producer.stdout.close()
+    source_status = producer.wait()
+    if source_status != 0 or consumer.returncode != 0:
+        raise RuntimeError("reviewed DeepSeek image peer transfer failed")
+
+
+def _find_deepseek_image_donor(profile, excluded):
+    for _, target in load_hosts():
+        if target in excluded:
+            continue
+        if _deepseek_image_signature(target, profile["image"]) == profile.get("image_signature"):
+            return target
+    return None
+
+
+def _ensure_deepseek_deployment(cfg, profile):
+    head, worker = _cluster_targets(cfg)
+    roles = {"head": head, "worker": worker}
+    expected_snapshot = {"files": profile["model_file_count"],
+                         "shards": profile["model_shards"], "size": profile["model_size"]}
+    missing_weights = []
+    for target in roles.values():
+        identity = _deepseek_snapshot_identity(target, profile)
+        if not identity or any(identity.get(key) != value
+                               for key, value in expected_snapshot.items()):
+            missing_weights.append(target)
+    if missing_weights:
+        print("Downloading the pinned DeepSeek snapshot on missing nodes ...")
+        selected = [(role, target) for role, target in roles.items()
+                    if target in missing_weights]
+        _download_cluster_snapshot(cfg, profile, profile["download_image"], "DeepSeek",
+                                   roles=selected)
+    missing = [target for target in roles.values()
+               if _host_exec(target, ["docker", "image", "inspect", profile["image"]],
+                             capture=True).returncode != 0]
+    if missing:
+        donor = next((target for target in roles.values() if target not in missing
+                      and _deepseek_image_signature(target, profile["image"])
+                      == profile.get("image_signature")), None)
+        donor = donor or _find_deepseek_image_donor(profile, set(roles.values()))
+        if not donor:
+            raise RuntimeError("reviewed DeepSeek image is unavailable on registered hosts; "
+                               "publish/pull the pinned image or run the reviewed source build")
+        for target in missing:
+            _transfer_deepseek_image(donor, target, profile["image"])
+
+    certificates = {}
+    stale = []
+    for role, target in roles.items():
+        certificate = _read_host_json(target, _deepseek_certificate_path(target, profile))
+        if _deepseek_certificate_valid(target, profile, certificate):
+            certificates[role] = certificate
+        else:
+            stale.append((role, target))
+    if stale:
+        print("Certifying DeepSeek runtime and exact model snapshot on "
+              + ", ".join(role for role, _ in stale) + " ...")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(stale)) as executor:
+            futures = [executor.submit(_certify_deepseek_node, target, role, profile)
+                       for role, target in stale]
+            for future in concurrent.futures.as_completed(futures):
+                role, certificate = future.result()
+                certificates[role] = certificate
+    if len({json.dumps(value["model_signature"], sort_keys=True)
+            for value in certificates.values()}) != 1:
+        raise RuntimeError("DeepSeek model snapshots differ between roles")
+    if len({value["runtime_signature"] for value in certificates.values()}) != 1:
+        raise RuntimeError("DeepSeek runtime contents differ between roles")
+    root = _deepseek_build_dir(profile)
+    os.makedirs(root, exist_ok=True)
+    manifest = _deepseek_manifest_inputs(profile)
+    manifest["built_images"] = {role: value["image_id"] for role, value in certificates.items()}
+    manifest["image_signatures"] = {role: value["image_signature"]
+                                    for role, value in certificates.items()}
+    manifest["runtime_signatures"] = {role: value["runtime_signature"]
+                                      for role, value in certificates.items()}
+    manifest["model_signatures"] = {role: value["model_signature"]
+                                    for role, value in certificates.items()}
+    with open(os.path.join(root, "manifest.json"), "w") as stream:
+        json.dump(manifest, stream, indent=2); stream.write("\n")
+    return certificates
+
+
 def _prepare_deepseek(cfg, profile, build=False, weights=False, dry=False):
     if profile.get("runtime_lane") == "c8r":
         context = _clone_reviewed_runtime(profile, dry=dry)
@@ -3169,6 +3387,20 @@ def _record_deepseek_runtime(cfg, profile):
     if len({json.dumps(value, sort_keys=True) for value in model_signatures.values()}) != 1:
         raise RuntimeError("DeepSeek model snapshots differ between head and worker")
 
+    for role, target in (("head", head), ("worker", worker)):
+        machine_id = _host_exec(target, ["cat", "/etc/machine-id"], capture=True, check=True)
+        certificate = {
+            "schema": 1,
+            "profile_fingerprint": _deepseek_profile_fingerprint(profile),
+            "machine_id": machine_id.stdout.strip(),
+            "image_id": built_images[role],
+            "image_signature": image_signatures[role],
+            "runtime_signature": runtime_signatures[role],
+            "model_signature": model_signatures[role],
+            "snapshot_identity": _deepseek_snapshot_identity(target, profile),
+        }
+        _write_host_json(target, _deepseek_certificate_path(target, profile), certificate)
+
     root = _deepseek_build_dir(profile)
     os.makedirs(root, exist_ok=True)
     manifest = _deepseek_manifest_inputs(profile)
@@ -3273,12 +3505,15 @@ def _sync_cluster_key(cfg):
                             os.path.join(remote, "authorized_keys")], check=True)
 
 
-def _download_cluster_snapshot(cfg, profile, image, family, dry=False):
+def _download_cluster_snapshot(cfg, profile, image, family, dry=False, roles=None):
     head, worker = _cluster_targets(cfg)
+    selected = roles or (("head", head), ("worker", worker))
     if dry:
-        print(f"  would download {profile['model']} at {profile['revision']} on both nodes")
+        print(f"  would download {profile['model']} at {profile['revision']} on "
+              + ", ".join(role for role, _ in selected))
         return
-    for role, target in (("head", head), ("worker", worker)):
+
+    def download(role, target):
         cache = os.path.join(remote_home(target), ".cache", "huggingface")
         _host_exec(target, ["mkdir", "-p", cache], check=True)
         print(f"Downloading official {family} snapshot on {role} ({target or 'local'}) ...")
@@ -3293,15 +3528,12 @@ def _download_cluster_snapshot(cfg, profile, image, family, dry=False):
         cmd += [image, "download", profile["model"], "--revision", profile["revision"],
                 "--max-workers", "4"]
         if _host_exec(target, cmd).returncode != 0:
-            print(f"ERROR: model download failed on {role}; rerun to resume.", file=sys.stderr)
-            sys.exit(1)
+            raise RuntimeError(f"model download failed on {role}; rerun to resume")
         repo = profile["model"].replace("/", "--")
         snapshot = os.path.join(cache, "hub", f"models--{repo}", "snapshots",
                                 profile["revision"])
         if _host_exec(target, ["test", "-d", snapshot], capture=True).returncode != 0:
-            print(f"ERROR: exact snapshot {profile['revision']} missing on {role} after download.",
-                  file=sys.stderr)
-            sys.exit(1)
+            raise RuntimeError(f"exact snapshot {profile['revision']} missing on {role} after download")
         if family == "Qwen":
             # TRT-LLM probes the default revision before applying --revision.
             # Point that offline-only probe at the same immutable commit.
@@ -3313,7 +3545,12 @@ def _download_cluster_snapshot(cfg, profile, image, family, dry=False):
             _host_exec(target, ["docker", "run", "--rm", "--network", "none",
                                 "--entrypoint", "python3", "-v",
                                 f"{cache}:/root/.cache/huggingface", image,
-                                "-c", script, ref, profile["revision"]], check=True)
+                                 "-c", script, ref, profile["revision"]], check=True)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(selected)) as executor:
+        futures = [executor.submit(download, role, target) for role, target in selected]
+        for future in concurrent.futures.as_completed(futures):
+            future.result()
 
 
 def _prepare_qwen(cfg, profile, build=False, weights=False, dry=False):
@@ -3783,6 +4020,53 @@ def cmd_cluster_list(args):
 def cmd_cluster_show(args):
     cfg = cluster_config(args.name)
     print(json.dumps(cfg, indent=2))
+
+
+def cmd_cluster_rename(args):
+    cfg = cluster_config(args.name)
+    old_name = cfg["name"]
+    new_name = _safe_cluster_name(args.new_name, "new cluster name")
+    clusters = load_clusters()
+    if any(name.casefold() == new_name.casefold() for name in clusters):
+        print(f"ERROR: cluster '{new_name}' already exists.", file=sys.stderr)
+        sys.exit(1)
+    head, worker = _cluster_targets(cfg)
+    for role, target in (("head", head), ("worker", worker)):
+        ok, running = _host_text(target, ["docker", "ps", "-q", "--filter",
+                                                f"label={LABEL_CLUSTER}={old_name}"])
+        if not ok:
+            print(f"ERROR: cannot check {role} before renaming the cluster.", file=sys.stderr)
+            sys.exit(1)
+        if running:
+            print(f"ERROR: stop cluster '{old_name}' before renaming it.", file=sys.stderr)
+            sys.exit(1)
+    old_local = _cluster_state_dir(old_name)
+    new_local = _cluster_state_dir(new_name)
+    if os.path.exists(new_local):
+        print(f"ERROR: cached state already exists for '{new_name}'.", file=sys.stderr)
+        sys.exit(1)
+    for target in (head, worker):
+        if target is None:
+            continue
+        old_remote = _cluster_state_dir(old_name, target)
+        new_remote = _cluster_state_dir(new_name, target)
+        if _host_exec(target, ["test", "-e", old_remote], capture=True).returncode != 0:
+            continue
+        if _host_exec(target, ["test", "!", "-e", new_remote], capture=True).returncode != 0:
+            print(f"ERROR: cached state already exists for '{new_name}' on {target or 'local'}.",
+                  file=sys.stderr)
+            sys.exit(1)
+        _host_exec(target, ["mkdir", "-p", os.path.dirname(new_remote)], check=True)
+        result = _host_exec(target, ["mv", old_remote, new_remote], capture=True)
+        if result.returncode != 0:
+            print(f"ERROR: could not rename cached state on {target or 'local'}.", file=sys.stderr)
+            sys.exit(1)
+    if os.path.exists(old_local):
+        os.makedirs(os.path.dirname(new_local), exist_ok=True)
+        os.replace(old_local, new_local)
+    clusters[new_name] = clusters.pop(old_name)
+    save_clusters(clusters)
+    print(f"Renamed cluster '{old_name}' to '{new_name}'.")
 
 
 def cmd_cluster_remove(args):
@@ -4384,6 +4668,13 @@ def _launch_deepseek_cluster(profile_key, profile, cfg, dry=False, startup_timeo
             print(format_run(argv, target))
         return
 
+    if profile.get("runtime_lane") == "c8r":
+        try:
+            _ensure_deepseek_deployment(cfg, profile)
+        except (RuntimeError, subprocess.CalledProcessError, OSError) as e:
+            print(f"ERROR: DeepSeek deployment preparation failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
     lane = profile.get("runtime_lane", "cand7")
     manifest_root = (_deepseek_build_dir(profile) if lane == "c8r" else
                      os.path.join(CLUSTER_DATA_DIR, "builds", "deepseek-v4-flash-0731"))
@@ -4444,9 +4735,10 @@ def _launch_deepseek_cluster(profile_key, profile, cfg, dry=False, startup_timeo
         if signature != expected_signatures[role]:
             print(f"ERROR: {role} DeepSeek runtime signature mismatch: {detail}", file=sys.stderr)
             sys.exit(1)
-        model_signature, detail = _deepseek_model_signature(target, profile)
-        if model_signature != expected_models[role]:
-            print(f"ERROR: {role} DeepSeek model snapshot mismatch: {detail}", file=sys.stderr)
+        certificate = _read_host_json(target, _deepseek_certificate_path(target, profile))
+        if (not _deepseek_certificate_valid(target, profile, certificate)
+                or certificate.get("model_signature") != expected_models[role]):
+            print(f"ERROR: {role} DeepSeek model snapshot certificate mismatch.", file=sys.stderr)
             sys.exit(1)
         runtime_cache = os.path.join(remote_home(target), ".cache", "otools",
                                      f"deepseek-v4-flash-0731-{lane}")
@@ -5248,7 +5540,7 @@ def cmd_install(args):
         print(f"-> registered {len(connected)} host(s) for `ps` / `--host` in {HOSTS_FILE}:")
         for a, t in connected:
             print(f"     {a:<12} {t}" if a != t else f"     {t}")
-        auto_register_dgx_cluster(merged)
+        auto_register_dgx_cluster(merged, preferred_aliases=[a for a, _ in connected])
     sys.exit(0 if all_ready else 1)
 
 
@@ -5637,6 +5929,11 @@ def main():
     p.add_argument("name")
     p.set_defaults(func=cmd_cluster_show)
 
+    p = cluster_sub.add_parser("rename", help="rename a stopped cluster and its cached state")
+    p.add_argument("name", help="current cluster name")
+    p.add_argument("new_name", help="new cluster name")
+    p.set_defaults(func=cmd_cluster_rename)
+
     p = cluster_sub.add_parser("remove", help="remove a cluster definition, preserving caches")
     p.add_argument("name")
     p.set_defaults(func=cmd_cluster_remove)
@@ -5691,9 +5988,9 @@ def main():
                        help="bootstrap/register hosts and discover DGX cluster pairs")
     p.add_argument("target", nargs="?",
                    help="USER@HOST to install (default: this machine); comma-separate several "
-                        "(a,b) when giving no alias. "
-                        "Reachable hosts are saved to ~/.config/otools/hosts so `ps` and `--host` "
-                        "find them; an unambiguous DGX pair prompts once for a cluster name.")
+                         "(a,b) when giving no alias. "
+                         "Reachable hosts are saved to ~/.config/otools/hosts so `ps` and `--host` "
+                         "find them; an identity-verified NVIDIA Sync pair is registered automatically.")
     p.add_argument("alias", nargs="?",
                    help="short name for this host, e.g. dgx1 (then `launch <model> --host dgx1`)")
     p.add_argument("--fix", action="store_true", help="remediate failures (installs docker, adds "

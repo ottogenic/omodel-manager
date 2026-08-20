@@ -147,7 +147,8 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 0)
         setup.assert_called_once_with("user@192.0.2.101", True)
         save.assert_called_once_with([("dgx1", "user@192.0.2.101")])
-        discover.assert_called_once_with([("dgx1", "user@192.0.2.101")])
+        discover.assert_called_once_with([("dgx1", "user@192.0.2.101")],
+                                         preferred_aliases=["dgx1"])
 
     def test_local_setup_skips_ssh_prerequisites(self):
         def setup_ok(target, cmd):
@@ -255,6 +256,8 @@ class DgxClusterDiscoveryTests(unittest.TestCase):
                 ("ibdev2netdev",):
                     (True, "rocep1s0f1 port 1 ==> enp1s0f1np1 (Up)"),
                 ("ip", "-j", "address", "show"): (True, json.dumps(links)),
+                ("cat", "/sys/class/net/enp1s0f1np1/address"):
+                    (True, "fc:9d:05:13:86:8d"),
             }
             return responses[tuple(args)]
 
@@ -286,7 +289,19 @@ class DgxClusterDiscoveryTests(unittest.TestCase):
                                side_effect=[(True, ""), (False, "unreachable")]):
             self.assertIsNone(mm._dgx_pair_config(head, worker))
 
-    def test_registers_one_discovered_pair_after_name_prompt(self):
+    def test_pair_is_rejected_when_neighbor_mac_is_not_candidate_peer(self):
+        head = self.host("dgx3", "otto@dgx3", "three", 2)
+        worker = self.host("dgx4", "otto@dgx4", "four", 1)
+        for host, mac in ((head, "aa:aa:aa:aa:aa:03"),
+                          (worker, "aa:aa:aa:aa:aa:04")):
+            for fabric in host["fabric"].values():
+                fabric["mac"] = mac
+        responses = [(True, ""), (True, ""),
+                     (True, "10.100.176.1 lladdr bb:bb:bb:bb:bb:bb REACHABLE")]
+        with mock.patch.object(mm, "_host_text", side_effect=responses):
+            self.assertIsNone(mm._dgx_pair_config(head, worker))
+
+    def test_registers_one_discovered_pair_with_deterministic_name(self):
         found = {
             "otto@dgx3": self.host("dgx3", "otto@dgx3", "three", 2),
             "otto@dgx4": self.host("dgx4", "otto@dgx4", "four", 1),
@@ -294,11 +309,13 @@ class DgxClusterDiscoveryTests(unittest.TestCase):
         with mock.patch.object(mm, "_dgx_cluster_host",
                                side_effect=lambda alias, target: found[target]), \
                 mock.patch.object(mm, "_host_text", return_value=(True, "")):
-            added = mm.auto_register_dgx_cluster(
-                self.hosts, prompt=lambda message: "Beebo")
-        self.assertEqual(added, ["Beebo"])
-        self.assertEqual(mm.load_clusters()["Beebo"]["head"], "dgx3")
-        self.assertEqual(mm.load_clusters()["Beebo"]["worker"], "dgx4")
+            added = mm.auto_register_dgx_cluster(self.hosts)
+        self.assertEqual(added, ["dgx3-dgx4"])
+        saved = mm.load_clusters()["dgx3-dgx4"]
+        self.assertEqual(saved["head"], "dgx3")
+        self.assertEqual(saved["worker"], "dgx4")
+        self.assertEqual(saved["head_machine_id"], "three")
+        self.assertEqual(saved["worker_machine_id"], "four")
 
     def test_existing_pair_is_not_prompted_or_overwritten(self):
         existing = {"Beebo": {"head": "dgx3", "worker": "dgx4", "fabric": {}}}
@@ -307,14 +324,12 @@ class DgxClusterDiscoveryTests(unittest.TestCase):
             "otto@dgx3": self.host("dgx3", "otto@dgx3", "three", 2),
             "otto@dgx4": self.host("dgx4", "otto@dgx4", "four", 1),
         }
-        prompt = mock.Mock(return_value="replacement")
         with mock.patch.object(mm, "_dgx_cluster_host",
                                side_effect=lambda alias, target: found[target]), \
                 mock.patch.object(mm, "_host_text", return_value=(True, "")):
-            added = mm.auto_register_dgx_cluster(self.hosts, prompt=prompt)
+            added = mm.auto_register_dgx_cluster(self.hosts)
         self.assertEqual(added, [])
         self.assertEqual(mm.load_clusters(), existing)
-        prompt.assert_not_called()
 
     def test_existing_pair_matches_alternate_aliases_by_machine_id(self):
         hosts = [("dgx3", "otto@dgx3-mgmt"), ("dgx3-fabric", "otto@dgx3-fabric"),
@@ -326,13 +341,11 @@ class DgxClusterDiscoveryTests(unittest.TestCase):
                               2 if "dgx3" in target else 1)
             for alias, target in hosts
         }
-        prompt = mock.Mock(return_value="duplicate")
         with mock.patch.object(mm, "_dgx_cluster_host",
                                side_effect=lambda alias, target: found[target]), \
                 mock.patch.object(mm, "_host_text", return_value=(True, "")):
-            added = mm.auto_register_dgx_cluster(hosts, prompt=prompt)
+            added = mm.auto_register_dgx_cluster(hosts)
         self.assertEqual(added, [])
-        prompt.assert_not_called()
 
     def test_multiple_possible_pairs_are_not_guessed(self):
         hosts = self.hosts + [("dgx5", "otto@dgx5")]
@@ -340,16 +353,26 @@ class DgxClusterDiscoveryTests(unittest.TestCase):
             target: self.host(alias, target, alias, index)
             for index, (alias, target) in enumerate(hosts, 1)
         }
-        prompt = mock.Mock(return_value="ambiguous")
         err = io.StringIO()
         with mock.patch.object(mm, "_dgx_cluster_host",
                                side_effect=lambda alias, target: found[target]), \
                 mock.patch.object(mm, "_host_text", return_value=(True, "")), \
                 contextlib.redirect_stderr(err):
-            added = mm.auto_register_dgx_cluster(hosts, prompt=prompt)
+            added = mm.auto_register_dgx_cluster(hosts)
         self.assertEqual(added, [])
         self.assertIn("multiple possible", err.getvalue())
-        prompt.assert_not_called()
+
+    def test_preferred_new_host_disambiguates_multiple_pairs(self):
+        hosts = self.hosts + [("dgx5", "otto@dgx5")]
+        found = {
+            target: self.host(alias, target, alias, index)
+            for index, (alias, target) in enumerate(hosts, 1)
+        }
+        with mock.patch.object(mm, "_dgx_cluster_host",
+                               side_effect=lambda alias, target: found[target]), \
+                mock.patch.object(mm, "_host_text", return_value=(True, "")):
+            added = mm.auto_register_dgx_cluster(hosts, preferred_aliases=["dgx5"])
+        self.assertEqual(added, [])  # dgx5 still has two possible peers, so remains safe.
 
 
 class NonBlockingLaunchTests(unittest.TestCase):
@@ -1323,6 +1346,77 @@ class ClusterRegistryTests(unittest.TestCase):
         cfg["worker"] = "localhost"
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             mm._cluster_targets(cfg)
+
+    def test_cluster_rename_moves_registry_and_cached_state(self):
+        cfg = self.config()
+        stored = dict(cfg)
+        stored.pop("name")
+        mm.save_clusters({"spark": stored})
+        old_state = mm._cluster_state_dir("spark")
+        os.makedirs(old_state)
+        with open(os.path.join(old_state, "marker"), "w") as stream:
+            stream.write("ok")
+        args = SimpleNamespace(name="spark", new_name="studio")
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with mock.patch.object(mm, "_host_text", return_value=(True, "")), \
+                mock.patch.object(mm, "_host_exec", return_value=completed), \
+                mock.patch.object(mm, "remote_home", return_value="/home/user"), \
+                contextlib.redirect_stdout(io.StringIO()):
+            mm.cmd_cluster_rename(args)
+        self.assertNotIn("spark", mm.load_clusters())
+        self.assertIn("studio", mm.load_clusters())
+        self.assertTrue(os.path.isfile(os.path.join(mm._cluster_state_dir("studio"), "marker")))
+
+    def test_certificate_fast_path_uses_inventory_without_full_hash(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        snapshot_identity = {"files": 74, "shards": 48, "size": 166898660330,
+                             "metadata_sha256": "b" * 64}
+        certificate = {
+            "profile_fingerprint": mm._deepseek_profile_fingerprint(profile),
+            "machine_id": "machine-a",
+            "image_id": "sha256:image",
+            "image_signature": profile["image_signature"],
+            "model_signature": {"sha256": "a" * 64, "files": 74,
+                                "shards": 48, "size": 166898660330},
+            "snapshot_identity": snapshot_identity,
+        }
+        responses = [
+            SimpleNamespace(returncode=0, stdout="machine-a\n", stderr=""),
+            SimpleNamespace(returncode=0, stdout="sha256:image\n", stderr=""),
+        ]
+        with mock.patch.object(mm, "_host_exec", side_effect=responses), \
+                mock.patch.object(mm, "_deepseek_snapshot_identity",
+                                  return_value=snapshot_identity):
+            self.assertTrue(mm._deepseek_certificate_valid("user@host", profile, certificate))
+
+    def test_ensure_deepseek_rebuilds_local_manifest_from_host_certificates(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        cfg = self.config()
+        cfg["head"] = "user@head"
+        cfg["worker"] = "user@worker"
+        model_signature = {"sha256": "a" * 64, "files": 74,
+                           "shards": 48, "size": 166898660330}
+        certificates = {
+            "user@head": {"image_id": "sha256:head", "image_signature": profile["image_signature"],
+                          "runtime_signature": "runtime", "model_signature": model_signature},
+            "user@worker": {"image_id": "sha256:worker", "image_signature": profile["image_signature"],
+                            "runtime_signature": "runtime", "model_signature": model_signature},
+        }
+        image_present = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with mock.patch.object(mm, "_deepseek_snapshot_identity", return_value={
+                "files": 74, "shards": 48, "size": 166898660330}), \
+                mock.patch.object(mm, "_host_exec", return_value=image_present), \
+                mock.patch.object(mm, "_read_host_json",
+                                  side_effect=lambda target, path: certificates[target]), \
+                mock.patch.object(mm, "_deepseek_certificate_valid", return_value=True), \
+                mock.patch.object(mm, "_download_cluster_snapshot") as download, \
+                mock.patch.object(mm, "_certify_deepseek_node") as certify:
+            result = mm._ensure_deepseek_deployment(cfg, profile)
+        self.assertEqual(set(result), {"head", "worker"})
+        download.assert_not_called()
+        certify.assert_not_called()
+        path = os.path.join(mm._deepseek_build_dir(profile), "manifest.json")
+        self.assertTrue(os.path.isfile(path))
 
     def test_qwen_argv_keeps_rdma_and_socket_devices_separate(self):
         cfg = self.config()

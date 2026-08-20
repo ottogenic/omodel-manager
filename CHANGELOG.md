@@ -87,6 +87,12 @@ All notable changes to this project are documented here. The format follows
   unchanged.
 
 ### Added
+
+- **Two-command DGX cluster onboarding and recoverable DeepSeek deploys.** Installing the second
+  NVIDIA Sync DGX now identity-verifies and automatically names its physical pair; stopped clusters
+  can be renamed with `cluster rename`. DeepSeek launch acquires missing pinned weights, reuses the
+  reviewed image from registered DGXs, stores node-resident content certificates, reconstructs lost
+  local manifests, and avoids full model rehashes when immutable identities remain unchanged.
 - **Muse Glimmer 30B NVFP4 for one DGX Spark.** Added the 128K multimodal model with
   paired reasoning/tool parsers, DFlash speculative decoding, eight sequence slots, and
   card-recommended sampling. On-box validation covered reasoning, ATEM tools, images,
