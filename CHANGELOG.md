@@ -88,6 +88,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Reproducible Intel Arc Pro B70 pre-arrival kit.** A separate stdlib utility now
+  dry-runs or applies the pinned OMIX 0.3.0 / llama.cpp b10425 setup, checks Ubuntu,
+  `xe`, PCIe, render-node, Level Zero, and SYCL state, downloads an immutable
+  size/SHA-256-verified GGUF, launches isolated Qwen3.8 smoke/production/Q5 experiment
+  profiles, and emits or installs a loopback-bound systemd user service without
+  changing the NVIDIA manager path.
 - **Two-command DGX cluster onboarding and recoverable DeepSeek deploys.** Installing the second
   NVIDIA Sync DGX now identity-verifies and automatically names its physical pair; stopped clusters
   can be renamed with `cluster rename`. DeepSeek launch acquires missing pinned weights, reuses the

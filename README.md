@@ -44,6 +44,48 @@ command prints a **Next steps** block so you never have to memorize the vocabula
 
 Optional: `python omodel-manager shell-init` adds an `omm` shell alias.
 
+## Intel Arc B70 bring-up (experimental)
+
+The NVIDIA/Docker manager does not pretend to support Intel GPUs. A separate
+stdlib utility provides the pre-hardware kit for Qwen3.8-27B on an Arc Pro B70:
+
+```bash
+# Safe dry-run: inspect the pinned OMIX 0.3.0 / llama.cpp b10425 setup.
+python3 utils/arc_b70_setup.py install
+
+# On the Ubuntu 26.04 B70 host: inspect hardware, then perform setup explicitly.
+python3 utils/arc_b70_setup.py preflight --stage hardware
+python3 utils/arc_b70_setup.py install --apply
+sudo reboot
+
+# After reboot: require xe, PCIe x4 capability, render access, Level Zero, and SYCL0.
+python3 utils/arc_b70_setup.py preflight
+
+# Download the immutable GGUF revision and require its reviewed size/SHA-256.
+python3 utils/arc_b70_setup.py download --profile production
+
+# Prove correctness/offload briefly, then launch the long-context candidate.
+python3 utils/arc_b70_setup.py serve --profile smoke
+python3 utils/arc_b70_setup.py serve --profile production
+```
+
+`production` is the hardware-unverified Q4_K_S, 262,144-token, Q8-KV candidate;
+`q5-experiment` deliberately tests the tighter Q5 fit after
+`python3 utils/arc_b70_setup.py download --profile q5-experiment`. All profiles
+disable host fallback and vision, use one slot, serve the distinct
+`qwen3.8-27b-arc-gguf` ID, verify the local GGUF on every launch, and bind
+`127.0.0.1` unless a non-loopback `--host` is explicitly requested. Print or
+install a user service with
+`python3 utils/arc_b70_setup.py systemd [--install]`; installation does not start
+the model unless `--start` is also passed and enables user lingering for boot-time
+operation.
+
+After correctness passes, benchmark 50K, 100K, and 200K prompts with
+`utils/benchmark_concurrent.py` locally on the B70 host, then run a representative
+OpenCode task. See
+[`ARC_B70_QWEN38_SETUP.md`](ARC_B70_QWEN38_SETUP.md) for the arrival-day gates,
+security warning, and results worksheet.
+
 ## Commands
 
 | Command | What it does |
