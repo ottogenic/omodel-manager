@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- **Card and eGPU qualification moved to `omodel-card`.** Native SYCL/CUDA
+  builds, Intel Arc B70 and RTX 4090 OCuLink setup, and hardware experiment logs
+  now evolve independently from this stable Docker/vLLM manager.
 - **`ps` now shows `HOST` and `CLUSTER` as its first two columns.** Distributed ranks
   expose their cluster label directly, while idle, pulling, and one-node rows derive
   membership from the cluster registry. Suggested follow-up commands use the cluster name
@@ -87,13 +90,6 @@ All notable changes to this project are documented here. The format follows
   unchanged.
 
 ### Added
-
-- **Reproducible Intel Arc Pro B70 pre-arrival kit.** A separate stdlib utility now
-  dry-runs or applies the pinned OMIX 0.3.0 / llama.cpp b10425 setup, checks Ubuntu,
-  `xe`, PCIe, render-node, Level Zero, and SYCL state, downloads an immutable
-  size/SHA-256-verified GGUF, launches isolated Qwen3.8 smoke/production/Q5 experiment
-  profiles, and emits or installs a loopback-bound systemd user service without
-  changing the NVIDIA manager path.
 - **Two-command DGX cluster onboarding and recoverable DeepSeek deploys.** Installing the second
   NVIDIA Sync DGX now identity-verifies and automatically names its physical pair; stopped clusters
   can be renamed with `cluster rename`. DeepSeek launch acquires missing pinned weights, reuses the
