@@ -13,9 +13,8 @@ releases traceable without ceremony.
   - `fix/<slug>` — a bug fix (e.g. `fix/resolve-target-leading-slash`)
   - `chore/<slug>` / `docs/<slug>` / `refactor/<slug>` — everything else
 - Keep a branch focused on one change. Rebase on `main` before merging.
-- After publishing, verify the canonical checkout at
-  `/mnt/c/Users/Otto/Documents/Projects/omodel-manager` and `origin/main` point to the same commit;
-  pushing remote `main` from another worktree is not sufficient.
+- After publishing, verify the current checkout, local `main`, and `origin/main` point to the same
+  commit; pushing remote `main` from another worktree is not sufficient.
 
 ## Commits — Conventional Commits
 

@@ -43,11 +43,10 @@ task-specific lives in a **skill** (see the index at the bottom) that loads on d
   Use a branch/worktree only when explicitly requested, when concurrent work is actually active,
   or when isolation protects a working version. Always start clean, stage **explicit paths**
   (never `git add -A`), and inspect status, diff, and recent history before committing or pushing.
-- **Publishing is not complete until the live checkout is current.** If work happened on a branch
-  or worktree, integrate it into the canonical checkout, push the requested destination, and verify
-  the canonical `HEAD`, local `main`, and `origin/main` agree. Do not tell the maintainer to run
-  `omm` until `/mnt/c/Users/Otto/Documents/Projects/omodel-manager` contains the published change.
-  Test with `python3 ./omodel-manager …` before integration; verify the alias only afterward.
+- **Publishing is not complete until the current checkout is synchronized.** If work happened on a
+  branch or worktree, integrate it into the canonical checkout, push the requested destination, and
+  verify the current `HEAD`, local `main`, and `origin/main` agree. Test with
+  `python3 ./omodel-manager …` before integration; verify the alias only afterward.
 
 ## Skills — load the one matching your task first
 
