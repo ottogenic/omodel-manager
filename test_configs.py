@@ -130,6 +130,15 @@ class ConfigValidityTests(unittest.TestCase):
         self.assertEqual(cfg["capabilities"]["vision"], {
             "input": ["text", "image", "video"], "output": ["text"],
         })
+        # thinking_control is `enable_thinking`, so the variants are the think-level
+        # surface adapters expose: three reasoning_effort steps plus a direct-response
+        # mode. Guard both the set and the two payload shapes.
+        self.assertEqual(cfg["capabilities"]["thinking_control"], "enable_thinking")
+        self.assertEqual(set(cfg["variants"]), {"xhigh", "medium", "low", "no-think"})
+        self.assertEqual(cfg["variants"]["xhigh"]["options"],
+                         {"reasoning_effort": "xhigh"})
+        self.assertEqual(cfg["variants"]["no-think"]["options"]["chat_template_kwargs"],
+                         {"enable_thinking": False})
 
     def test_muse_config_matches_observed_capabilities_and_sampling(self):
         cfg = _load(CONFIGS / "muse-glimmer-30b-nvfp4.toml")
