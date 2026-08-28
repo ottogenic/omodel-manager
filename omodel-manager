@@ -688,9 +688,8 @@ DEFAULT_CONFIG = {
                 "QUALITY-FIRST default without MTP: 6.9 tok/s at ~55K context (34.4s TTFT) "
                 "and 6.6 tok/s at ~110K (53.8s TTFT). Use the -mtp sibling only when its "
                 "decode-speed gain outweighs the observed quality and long-prefill regressions.",
-                "NVFP4 intentionally omitted: no first-party Qwen or NVIDIA Qwen3.8-27B "
-                "NVFP4 checkpoint existed at validation time; current artifacts are third-party "
-                "and lack matched quality plus GB10 stability evidence.",
+                "For the separately qualified third-party NVFP4 plus DFlash2 speed profile, "
+                "see qwen3.8-27b-nvfp4-vllm-dflash2.",
             ],
             "model": "Qwen/Qwen3.8-27B-FP8",
             "port": 8000,
@@ -730,6 +729,54 @@ DEFAULT_CONFIG = {
                 "served-model-name": "qwen3.8-27b-fp8-mtp",
                 "no-enable-prefix-caching": True,
                 "speculative-config": '{"method":"mtp","num_speculative_tokens":3}',
+            },
+        },
+        "qwen3.8-27b-nvfp4-vllm-dflash2": {
+            "tok_s": 27,
+            # Official ARM64 image containing merged vLLM DFlash2 support; pin the
+            # physically qualified manifest and both third-party model snapshots.
+            "image": ("vllm/vllm-openai@"
+                      "sha256:6630695e452bd4d167f3b8bc3bf3151f93977997ff5dc7cd7d6086037f42a052"),
+            "notes": [
+                "Qwen3.8-27B NVFP4 with DFlash2 speculative decoding. The RadixArk target "
+                "and Inco draft are third-party Safetensors repositories pinned by immutable "
+                "revisions; their launch-relevant files are declarative and remote code is disabled.",
+                "Official ARM64 vLLM image built from a9a17e7095a66ef6c6685a1c7ddd657781a78d3c, "
+                "129 commits after merged DFlash2 PR #52816. VALIDATED on DGX Spark 2026-08-26: "
+                "NVFP4 CUTLASS, fused CUDA GDN decode, vision, thinking on/off, low/xhigh effort, "
+                "timeout recovery, non-repetitive long generation, and restart all passed.",
+                "QUALITY: three-run battery passed 12/12 structured-tool and 12/12 executable-code "
+                "cases. Exact three-needle retrieval passed at 139,450, 250,404, and 261,733 prompt "
+                "tokens without clamping. FP8 KV uses scale 1.0 because the checkpoint has no "
+                "calibrated scales; retain the qualified image, revisions, and settings together.",
+                "PERFORMANCE: median 26.8 tok/s at ~55K prose (43.5s TTFT), 26.0 tok/s on ~55K "
+                "code, and 23.3 tok/s at ~110K. Target-only measured 11.6 tok/s, so DFlash2 is "
+                "load-bearing. SINGLE-USER PROFILE: this model is memory-intensive, so "
+                "max-num-seqs=1 deliberately queues concurrent sessions. At N=4 each active "
+                "decode held 23.7-28.8 tok/s; allowing four active sequences collapsed three "
+                "decodes to 3.0-3.4 tok/s.",
+            ],
+            "model": "RadixArk/Qwen3.8-27B-NVFP4",
+            "port": 8000,
+            "usecase": ["Coding", "Agentic", "Reasoning", "Vision", "Long-context"],
+            "vllm_args": {
+                "revision": "319f741cce68d7914884900c138a1fbb70a42f30",
+                "trust-remote-code": False,
+                "served-model-name": "qwen3.8-27b-nvfp4-vllm-dflash2",
+                "tensor-parallel-size": 1,
+                "dtype": "bfloat16",
+                "kv-cache-dtype": "fp8",
+                "gpu-memory-utilization": 0.8,
+                "max-model-len": 262144,
+                "max-num-seqs": 1,
+                "enable-chunked-prefill": True,
+                "speculative-config": ('{"method":"dflash","model":"incoai/Qwen3.8-27B-DFlash2",'
+                                       '"revision":"dedf8df68adfb1afeaf7b7480c0a0243108177b4",'
+                                       '"num_speculative_tokens":7}'),
+                "enable-auto-tool-choice": True,
+                "tool-call-parser": "qwen3_coder",
+                "reasoning-parser": "qwen3",
+                "enable-log-requests": True,
             },
         },
         "qwen3.8-27b-bf16": {

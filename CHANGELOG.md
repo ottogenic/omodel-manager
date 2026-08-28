@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Qwen3.8-27B NVFP4 with DFlash2 speculative decoding.** The new DGX Spark profile
+  pins the official ARM64 vLLM runtime plus reviewed RadixArk target and Inco draft
+  snapshots. It preserves native 262K context, passed the full quality and feature
+  gates, and sustains roughly 27 tok/s at a real ~55K context with predictable queued
+  concurrency.
+
 ### Changed
 - **Card and eGPU qualification moved to `omodel-card`.** Native SYCL/CUDA
   builds, Intel Arc B70 and RTX 4090 OCuLink setup, and hardware experiment logs

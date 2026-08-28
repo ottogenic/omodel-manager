@@ -895,6 +895,32 @@ class Qwen38Bf16ProfileTests(unittest.TestCase):
         self.assertNotIn("language-model-only", args)
 
 
+class Qwen38Nvfp4DflashProfileTests(unittest.TestCase):
+    def setUp(self):
+        self.cfg = json.loads(json.dumps(mm.DEFAULT_CONFIG))
+
+    def test_profile_keeps_qualified_pins_and_scheduler(self):
+        profile = mm.merge_model(self.cfg, "qwen3.8-27b-nvfp4-vllm-dflash2")
+        args = profile["vllm_args"]
+        self.assertEqual(
+            self.cfg["models"]["qwen3.8-27b-nvfp4-vllm-dflash2"]["tok_s"], 27)
+        self.assertEqual(profile["model"], "RadixArk/Qwen3.8-27B-NVFP4")
+        self.assertEqual(
+            profile["image"],
+            "vllm/vllm-openai@sha256:6630695e452bd4d167f3b8bc3bf3151f93977997ff5dc7cd7d6086037f42a052")
+        self.assertEqual(args["revision"],
+                         "319f741cce68d7914884900c138a1fbb70a42f30")
+        self.assertFalse(args["trust-remote-code"])
+        self.assertEqual(args["max-model-len"], 262144)
+        self.assertEqual(args["max-num-seqs"], 1)
+        self.assertEqual(json.loads(args["speculative-config"]), {
+            "method": "dflash",
+            "model": "incoai/Qwen3.8-27B-DFlash2",
+            "revision": "dedf8df68adfb1afeaf7b7480c0a0243108177b4",
+            "num_speculative_tokens": 7,
+        })
+
+
 class ExtendsTests(unittest.TestCase):
     def setUp(self):
         # Test against the committed source of truth (DEFAULT_CONFIG), NOT load_config()

@@ -120,6 +120,17 @@ class ConfigValidityTests(unittest.TestCase):
         })
         self.assertEqual(cfg["capabilities"]["concurrency"], 2)
 
+    def test_qwen38_nvfp4_config_matches_qualified_profile(self):
+        cfg = _load(CONFIGS / "qwen3.8-27b-nvfp4-vllm-dflash2.toml")
+        self.assertEqual(set(cfg["match"]), {
+            "qwen3.8-27b-nvfp4-vllm-dflash2", "RadixArk/Qwen3.8-27B-NVFP4",
+        })
+        self.assertEqual(cfg["context"]["native"], 262144)
+        self.assertEqual(cfg["capabilities"]["concurrency"], 1)
+        self.assertEqual(cfg["capabilities"]["vision"], {
+            "input": ["text", "image", "video"], "output": ["text"],
+        })
+
     def test_muse_config_matches_observed_capabilities_and_sampling(self):
         cfg = _load(CONFIGS / "muse-glimmer-30b-nvfp4.toml")
         self.assertEqual(cfg["capabilities"]["vision"], {
