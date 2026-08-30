@@ -56,7 +56,7 @@ results return here only as production-ready launch profiles.
 | Command | What it does |
 |---|---|
 | `list` (alias `models`) | Table of profiles: context, concurrency, use-case |
-| `launch <profile> [host\|cluster]` | Start a profile (detached) on an optional host, or launch a two-node profile on a registered cluster. Single-host options: `--foreground`, `--keep`, `--force`, `--wait`, `--local`; `--dry-run` works for both. Uncached image → pulls in the background and returns immediately |
+| `launch <profile> [host\|cluster]` | Start a profile (detached) on an optional host, or launch a two-node profile on a registered cluster. Single-host options: `--foreground`, `--keep`, `--force`, `--wait`, `--local`; `vllm-mp` cluster launches also accept `--keep`; `--dry-run` works for both. For single-host launches, an uncached image pulls in the background and returns immediately |
 | `pull <profile>` | Pre-pull a profile's image so `launch` starts instantly |
 | `pull-status <profile\|host>` | Progress of a backgrounded launch/pull |
 | `logs <profile\|host> [-f]` | Show/follow a container's logs (Ctrl-C detaches cleanly) |
@@ -151,6 +151,15 @@ omm cluster stop spark2 -y
 ```
 
 The explicit `omm cluster launch spark2 qwen3-235b-a22b-fp4` form remains available.
+Qwen3.8 Flash Next requires explicit preparation on first use before its `--keep` launch:
+
+```bash
+omm cluster prepare CLUSTER qwen3.8-flash-next-fp8 --build --weights
+omm cluster launch CLUSTER qwen3.8-flash-next-fp8 --keep
+```
+
+Use `--keep` so failed ranks and their crash logs survive for `cluster logs`; `cluster status`
+and `cluster stop` include those retained containers.
 
 The Qwen path uses official NVIDIA checkpoints pinned to exact Hugging Face revisions and
 ARM64 TensorRT-LLM bases pinned by digest. The manager builds the small SSH/MPI derivatives

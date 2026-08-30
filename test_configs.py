@@ -140,6 +140,21 @@ class ConfigValidityTests(unittest.TestCase):
         self.assertEqual(cfg["variants"]["no-think"]["options"]["chat_template_kwargs"],
                          {"enable_thinking": False})
 
+    def test_qwen38_flash_next_config_matches_cluster_baseline(self):
+        cfg = _load(CONFIGS / "qwen3.8-flash-next-fp8.toml")
+        self.assertEqual(set(cfg["match"]), {
+            "qwen3.8-flash-next-fp8", "Qwen/Qwen3.8-Flash-Next-FP8",
+        })
+        self.assertEqual(cfg["context"]["native"], 262144)
+        self.assertEqual(cfg["capabilities"]["concurrency"], 1)
+        self.assertEqual(cfg["capabilities"]["vision"], {
+            "input": ["text", "image"], "output": ["text"],
+        })
+        self.assertEqual(cfg["capabilities"]["thinking_control"], "enable_thinking")
+        self.assertEqual(cfg["presets"]["plan"]["max_output"], 131072)
+        self.assertEqual(cfg["presets"]["build"]["max_output"], 131072)
+        self.assertEqual(set(cfg["variants"]), {"xhigh", "medium", "low", "no-think"})
+
     def test_muse_config_matches_observed_capabilities_and_sampling(self):
         cfg = _load(CONFIGS / "muse-glimmer-30b-nvfp4.toml")
         self.assertEqual(cfg["capabilities"]["vision"], {

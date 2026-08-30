@@ -533,6 +533,11 @@ class LaunchClusterDispatchTests(unittest.TestCase):
             mm.cmd_launch(self.args(host=None, remote="beebo"))
         self.assertEqual(launch.call_args.args[0].name, "beebo")
 
+    def test_vllm_cluster_profile_forwards_keep(self):
+        with mock.patch.object(mm, "cmd_cluster_launch") as launch:
+            mm.cmd_launch(self.args(key="qwen3.8-flash-next-fp8", keep=True))
+        self.assertTrue(launch.call_args.args[0].keep)
+
     def test_cluster_status_uses_canonical_name_for_labels(self):
         cfg = {"name": "Beebo", "head": "dgx3", "worker": "dgx4"}
         row = {"Names": "rank", "Labels": f"{mm.LABEL_CLUSTER}=Beebo", "Status": "Up"}
@@ -557,6 +562,8 @@ class LaunchClusterDispatchTests(unittest.TestCase):
     def test_cluster_profile_rejects_single_host_options(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             mm.cmd_launch(self.args(foreground=True))
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            mm.cmd_launch(self.args(keep=True))
 
 
 class ListManagedTests(unittest.TestCase):
@@ -584,6 +591,13 @@ class ListManagedTests(unittest.TestCase):
         mm._docker_on = lambda t, a, capture=False: SimpleNamespace(
             returncode=0, stdout=row + "\n", stderr="")
         self.assertEqual(mm.list_managed(remote="user@a")[0]["Names"], "otools-vllm-x")
+
+    def test_include_stopped_adds_all_flag(self):
+        calls = []
+        mm._docker_on = lambda t, a, capture=False: (
+            calls.append(a) or SimpleNamespace(returncode=0, stdout="", stderr=""))
+        mm.list_managed(remote="user@a", include_stopped=True)
+        self.assertIn("-a", calls[0])
 
 
 class PsUnreachableTests(unittest.TestCase):
@@ -1294,6 +1308,24 @@ class ClusterProfileTests(unittest.TestCase):
                          "otools/vllm-deepseek-v4-flash-0731:cand7-reviewed")
         self.assertFalse(profile["enable_prefix_caching"])
 
+    def test_qwen38_flash_next_uses_only_pinned_official_artifacts(self):
+        profile = mm.CLUSTER_PROFILES["qwen3.8-flash-next-fp8"]
+        self.assertEqual(profile["backend"], "vllm-mp")
+        self.assertEqual(profile["model"], "Qwen/Qwen3.8-Flash-Next-FP8")
+        self.assertEqual(profile["revision"],
+                         "970c569adaca6b35532111fd6b27351b2baefe50")
+        self.assertEqual(profile["model_size"], 185553536918)
+        self.assertEqual(
+            profile["image"],
+            "vllm/vllm-openai@sha256:fc120ece0a388cc0aa1caad4a9f1cd92113484ab7ec2fd0efadd62585be05bf8")
+        self.assertEqual(profile["arm64_image_digest"],
+                         "sha256:3b0e188ffceb3d07e09c3cb5215433a0020eacf02d7f882ed3a8bfd15454477e")
+        self.assertEqual(profile["image_signature"],
+                         "483da4d4cdbd8cb6b2094ef3a9b205307b65d8e61120f043db61a4156a750d0b")
+        self.assertEqual(profile["vllm_version"], "0.1.dev20073+g8e685d198")
+        self.assertEqual(profile["tok_s"], 20)
+        self.assertEqual(profile["status"], "validated")
+
     def test_deepseek_build_uses_only_verified_local_archives(self):
         profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731-cand7"]
         dockerfile = mm._deepseek_dockerfile(
@@ -1359,6 +1391,55 @@ class ClusterRegistryTests(unittest.TestCase):
             },
         }
 
+    def vllm_identity_fixture(self):
+        profile = dict(mm.CLUSTER_PROFILES["qwen3.8-flash-next-fp8"])
+        metadata = {
+            "Architecture": "arm64",
+            "Os": "linux",
+            "RepoDigests": [profile["image"]],
+            "Id": "sha256:local-store-id",
+            "Config": {"Entrypoint": ["vllm", "serve"], "Env": ["A=B"]},
+            "RootFS": {"Type": "layers", "Layers": ["sha256:layer"]},
+        }
+        content = {
+            "architecture": metadata["Architecture"],
+            "os": metadata["Os"],
+            "config": metadata["Config"],
+            "rootfs": metadata["RootFS"],
+        }
+        profile["image_signature"] = mm.hashlib.sha256(
+            json.dumps(content, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        return profile, metadata
+
+    def test_vllm_image_identity_accepts_pinned_canonical_content(self):
+        profile, metadata = self.vllm_identity_fixture()
+        responses = [
+            SimpleNamespace(returncode=0, stdout=json.dumps([metadata]), stderr=""),
+            SimpleNamespace(returncode=0, stdout=profile["vllm_version"] + "\n", stderr=""),
+        ]
+        with mock.patch.object(mm, "_host_exec", side_effect=responses):
+            identity = mm._vllm_image_identity("user@host", profile)
+        self.assertEqual(identity, {
+            "id": "sha256:local-store-id",
+            "content_sha256": profile["image_signature"],
+        })
+
+    def test_vllm_image_identity_rejects_missing_pinned_digest(self):
+        profile, metadata = self.vllm_identity_fixture()
+        metadata["RepoDigests"] = []
+        inspected = SimpleNamespace(returncode=0, stdout=json.dumps([metadata]), stderr="")
+        with mock.patch.object(mm, "_host_exec", return_value=inspected), \
+                self.assertRaisesRegex(RuntimeError, "pinned registry digest"):
+            mm._vllm_image_identity("user@host", profile)
+
+    def test_vllm_image_identity_rejects_changed_content(self):
+        profile, metadata = self.vllm_identity_fixture()
+        metadata["Config"]["Env"].append("CHANGED=1")
+        inspected = SimpleNamespace(returncode=0, stdout=json.dumps([metadata]), stderr="")
+        with mock.patch.object(mm, "_host_exec", return_value=inspected), \
+                self.assertRaisesRegex(RuntimeError, "image content mismatch"):
+            mm._vllm_image_identity("user@host", profile)
+
     def test_roundtrip_and_local_head_resolution(self):
         cfg = self.config()
         stored = dict(cfg)
@@ -1392,6 +1473,20 @@ class ClusterRegistryTests(unittest.TestCase):
         self.assertNotIn("spark", mm.load_clusters())
         self.assertIn("studio", mm.load_clusters())
         self.assertTrue(os.path.isfile(os.path.join(mm._cluster_state_dir("studio"), "marker")))
+
+    def test_cluster_rename_checks_stopped_rank_containers(self):
+        cfg = self.config()
+        stored = dict(cfg)
+        stored.pop("name")
+        mm.save_clusters({"spark": stored})
+        probe = mock.Mock(return_value=(True, "retained-rank-id"))
+        args = SimpleNamespace(name="spark", new_name="studio")
+        with mock.patch.object(mm, "_host_text", probe), \
+                contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            mm.cmd_cluster_rename(args)
+        self.assertEqual(probe.call_args.args[1], [
+            "docker", "ps", "-a", "-q", "--filter", f"label={mm.LABEL_CLUSTER}=spark",
+        ])
 
     def test_certificate_fast_path_uses_inventory_without_full_hash(self):
         profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
@@ -1462,6 +1557,203 @@ class ClusterRegistryTests(unittest.TestCase):
         self.assertNotIn("UCX_NET_DEVICES=enP7s7", argv)
         self.assertIn("otools.cluster=spark", argv)
         self.assertIn(profile["runtime_image"], argv)
+
+    def test_vllm_mp_argv_is_pinned_conservative_and_role_aware(self):
+        cfg = self.config()
+        profile = mm.CLUSTER_PROFILES["qwen3.8-flash-next-fp8"]
+        with mock.patch.object(mm, "remote_home", return_value="/home/user"):
+            _, head = mm.build_vllm_cluster_argv(
+                "qwen3.8-flash-next-fp8", profile, cfg, "head", None)
+            _, worker = mm.build_vllm_cluster_argv(
+                "qwen3.8-flash-next-fp8", profile, cfg, "worker", "user@worker")
+        self.assertIn(profile["image"], head)
+        self.assertIn(mm._vllm_snapshot_path(profile), head)
+        self.assertNotIn("--trust-remote-code", head)
+        self.assertNotIn("--speculative-config", head)
+        self.assertIn("VLLM_USE_DEEP_GEMM=0", head)
+        self.assertIn("NCCL_NET=IB", head)
+        self.assertIn("NCCL_IB_HCA==mlx5_0:1", head)
+        self.assertIn("NCCL_SOCKET_IFNAME==enP7s7", head)
+        self.assertIn("GLOO_SOCKET_IFNAME=enP7s7", head)
+        self.assertIn("--enable-expert-parallel", head)
+        self.assertIn("--no-enable-prefix-caching", head)
+        self.assertIn("--no-async-scheduling", head)
+        self.assertIn("--no-enable-flashinfer-autotune", head)
+        self.assertIn("--enforce-eager", head)
+        self.assertIn("--enable-log-requests", head)
+        self.assertEqual(head[head.index("--tool-call-parser") + 1], "qwen3_xml")
+        self.assertEqual(head[head.index("--reasoning-parser") + 1], "qwen3")
+        self.assertEqual(head[head.index("--node-rank") + 1], "0")
+        self.assertEqual(worker[worker.index("--node-rank") + 1], "1")
+        self.assertNotIn("--headless", head)
+        self.assertIn("--headless", worker)
+        self.assertIn("--rm", head)
+        with mock.patch.object(mm, "remote_home", return_value="/home/user"):
+            _, kept = mm.build_vllm_cluster_argv(
+                "qwen3.8-flash-next-fp8", profile, cfg, "head", None, keep=True)
+        self.assertNotIn("--rm", kept)
+
+    def test_vllm_mp_warmups_cover_reasoning_tools_vision_and_streaming(self):
+        profile = mm.CLUSTER_PROFILES["qwen3.8-flash-next-fp8"]
+        requests = mm._vllm_warmup_requests(profile)
+        self.assertEqual([label for label, _, _ in requests],
+                         ["direct chat", "reasoning", "tool parser", "vision", "streaming"])
+        payloads = {label: payload for label, _, payload in requests}
+        self.assertFalse(payloads["direct chat"]["chat_template_kwargs"]["enable_thinking"])
+        self.assertEqual(payloads["reasoning"]["reasoning_effort"], "low")
+        image = payloads["vision"]["messages"][0]["content"][0]["image_url"]["url"]
+        self.assertTrue(image.startswith("data:image/png;base64,"))
+        self.assertTrue(payloads["streaming"]["stream"])
+
+    def test_vllm_warmup_rejects_non_object_tool_arguments(self):
+        profile = mm.CLUSTER_PROFILES["qwen3.8-flash-next-fp8"]
+        for raw_arguments in ("[]", "null"):
+            body = json.dumps({"choices": [{"message": {"tool_calls": [{
+                "function": {"name": "get_weather", "arguments": raw_arguments},
+            }]}}]})
+            with self.subTest(arguments=raw_arguments), \
+                    mock.patch.object(mm, "_vllm_warmup_requests", return_value=[
+                        ("tool parser", 10, {})]), \
+                    mock.patch.object(mm, "_host_text", return_value=(True, body)), \
+                    mock.patch.object(mm.time, "monotonic", return_value=0), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    self.assertRaisesRegex(RuntimeError, "invalid arguments"):
+                mm._warm_vllm_cluster(None, profile, deadline=10)
+
+    def test_vllm_warmup_caps_curl_at_launch_deadline(self):
+        profile = mm.CLUSTER_PROFILES["qwen3.8-flash-next-fp8"]
+        body = json.dumps({"choices": [{"message": {"content": "ok"}}]})
+        with mock.patch.object(mm, "_vllm_warmup_requests", return_value=[
+                ("direct chat", 300, {})]), \
+                mock.patch.object(mm, "_host_text", return_value=(True, body)) as request, \
+                mock.patch.object(mm.time, "monotonic", side_effect=[10.0, 10.3]), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                self.assertRaisesRegex(RuntimeError, "deadline exhausted during direct chat"):
+            mm._warm_vllm_cluster(None, profile, deadline=10.2)
+        argv = request.call_args.args[1]
+        self.assertLessEqual(float(argv[argv.index("--max-time") + 1]), 0.2)
+
+    def test_vllm_warmup_rejects_finish_only_stream(self):
+        profile = mm.CLUSTER_PROFILES["qwen3.8-flash-next-fp8"]
+        body = ("data: " + json.dumps({"choices": [{
+            "delta": {}, "finish_reason": "stop",
+        }]}) + "\n\ndata: [DONE]\n")
+        with mock.patch.object(mm, "_vllm_warmup_requests", return_value=[
+                ("streaming", 10, {"stream": True})]), \
+                mock.patch.object(mm, "_host_text", return_value=(True, body)), \
+                mock.patch.object(mm.time, "monotonic", return_value=0), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                self.assertRaisesRegex(RuntimeError, "incomplete stream"):
+            mm._warm_vllm_cluster(None, profile, deadline=10)
+
+    def test_vllm_launch_rejects_existing_rank_before_verification(self):
+        cfg = self.config()
+        profile = mm.CLUSTER_PROFILES["qwen3.8-flash-next-fp8"]
+        existing = SimpleNamespace(returncode=0, stdout="[]", stderr="")
+        stderr = io.StringIO()
+        with mock.patch.object(mm, "cluster_preflight", return_value=(True, {})), \
+                mock.patch.object(mm, "_ensure_cluster_idle"), \
+                mock.patch.object(mm, "remote_home", return_value="/home/user"), \
+                mock.patch.object(mm, "_host_exec", return_value=existing) as execute, \
+                mock.patch.object(mm, "_vllm_image_identity") as verify, \
+                mock.patch.object(mm, "_drop_caches") as drop, \
+                contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            mm._launch_vllm_cluster("qwen3.8-flash-next-fp8", profile, cfg)
+        commands = [call.args[1] for call in execute.call_args_list]
+        self.assertTrue(commands)
+        self.assertTrue(all(command[:3] == ["docker", "container", "inspect"]
+                            for command in commands))
+        self.assertIn("cluster stop spark -y", stderr.getvalue())
+        verify.assert_not_called()
+        drop.assert_not_called()
+
+    def test_vllm_keep_failure_stops_without_removing_ranks(self):
+        cfg = self.config()
+        profile = mm.CLUSTER_PROFILES["qwen3.8-flash-next-fp8"]
+        commands = []
+
+        def execute(target, argv, capture=False, check=False, tty=False):
+            commands.append(argv)
+            if argv[:3] == ["docker", "container", "inspect"]:
+                return SimpleNamespace(returncode=1, stdout="", stderr="not found")
+            if argv[:3] == ["docker", "inspect", "--format"]:
+                return SimpleNamespace(returncode=0, stdout="true\n", stderr="")
+            if argv[:2] == ["docker", "logs"]:
+                return SimpleNamespace(returncode=0, stdout="NCCL NET/IB\n", stderr="")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        stderr = io.StringIO()
+        with mock.patch.object(mm, "cluster_preflight", return_value=(True, {})), \
+                mock.patch.object(mm, "_ensure_cluster_idle"), \
+                mock.patch.object(mm, "remote_home", return_value="/home/user"), \
+                mock.patch.object(mm, "_host_exec", side_effect=execute), \
+                mock.patch.object(mm, "_vllm_image_identity", return_value={
+                    "id": "sha256:image", "content_sha256": "same"}), \
+                mock.patch.object(mm, "_drop_caches"), \
+                mock.patch.object(mm, "_host_text", return_value=(True, "ok")), \
+                mock.patch.object(mm, "_warm_vllm_cluster",
+                                  side_effect=RuntimeError("malformed warmup")), \
+                mock.patch.object(mm.time, "sleep"), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            mm._launch_vllm_cluster(
+                "qwen3.8-flash-next-fp8", profile, cfg, startup_timeout=10, keep=True)
+        stopped = {command[-1] for command in commands if command[:2] == ["docker", "stop"]}
+        self.assertEqual(stopped, {
+            "otools-vllm-qwen3.8-flash-next-fp8-spark-head",
+            "otools-vllm-qwen3.8-flash-next-fp8-spark-worker",
+        })
+        self.assertFalse(any(command[:3] == ["docker", "rm", "-f"] for command in commands))
+        self.assertIn("Retained rank containers", stderr.getvalue())
+        self.assertIn("cluster stop spark -y", stderr.getvalue())
+
+    def test_vllm_default_cleanup_accepts_auto_removed_rank(self):
+        cfg = self.config()
+        profile = mm.CLUSTER_PROFILES["qwen3.8-flash-next-fp8"]
+        commands = []
+
+        def execute(target, argv, capture=False, check=False, tty=False):
+            commands.append(argv)
+            name = argv[-1]
+            missing = f"Error response from daemon: No such container: {name}\n"
+            if argv[:3] == ["docker", "container", "inspect"]:
+                return SimpleNamespace(returncode=1, stdout="", stderr="not found")
+            if argv[:3] == ["docker", "inspect", "--format"]:
+                return SimpleNamespace(returncode=1, stdout="", stderr=missing)
+            if argv[:4] == ["docker", "logs", "--tail", "160"]:
+                return SimpleNamespace(returncode=1, stdout="", stderr=missing)
+            if argv[:3] == ["docker", "rm", "-f"]:
+                return SimpleNamespace(returncode=1, stdout="", stderr=missing)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        stderr = io.StringIO()
+        with mock.patch.object(mm, "cluster_preflight", return_value=(True, {})), \
+                mock.patch.object(mm, "_ensure_cluster_idle"), \
+                mock.patch.object(mm, "remote_home", return_value="/home/user"), \
+                mock.patch.object(mm, "_host_exec", side_effect=execute), \
+                mock.patch.object(mm, "_vllm_image_identity", return_value={
+                    "id": "sha256:image", "content_sha256": "same"}), \
+                mock.patch.object(mm, "_drop_caches"), \
+                mock.patch.object(mm.time, "sleep"), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            mm._launch_vllm_cluster(
+                "qwen3.8-flash-next-fp8", profile, cfg, startup_timeout=10)
+        removed = [command for command in commands if command[:3] == ["docker", "rm", "-f"]]
+        self.assertEqual(removed, [[
+            "docker", "rm", "-f", "otools-vllm-qwen3.8-flash-next-fp8-spark-worker",
+        ]])
+        self.assertNotIn("cleanup could not remove", stderr.getvalue())
+
+    def test_cluster_launch_dispatches_vllm_without_deepseek_fallback(self):
+        args = SimpleNamespace(name="spark", profile="qwen3.8-flash-next-fp8",
+                               dry_run=True, startup_timeout=1800)
+        with mock.patch.object(mm, "cluster_config", return_value=self.config()), \
+                mock.patch.object(mm, "_launch_vllm_cluster") as vllm_launch, \
+                mock.patch.object(mm, "_launch_deepseek_cluster") as deepseek_launch:
+            mm.cmd_cluster_launch(args)
+        vllm_launch.assert_called_once()
+        deepseek_launch.assert_not_called()
 
     def test_qwen_warmups_cover_chat_tools_and_streaming(self):
         profile = mm.CLUSTER_PROFILES["qwen3-235b-a22b-fp4"]

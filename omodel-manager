@@ -257,6 +257,32 @@ CLUSTER_PROFILES = {
         "notes": ("First rollback rung: reviewed cand7 thin overlay with isolated cand7 "
                   "compile caches. Prefix caching remains disabled after the observed hang."),
     },
+    "qwen3.8-flash-next-fp8": {
+        "backend": "vllm-mp",
+        "model": "Qwen/Qwen3.8-Flash-Next-FP8",
+        "revision": "970c569adaca6b35532111fd6b27351b2baefe50",
+        "model_size": 185553536918,
+        "image": ("vllm/vllm-openai@sha256:"
+                  "fc120ece0a388cc0aa1caad4a9f1cd92113484ab7ec2fd0efadd62585be05bf8"),
+        "arm64_image_digest": ("sha256:"
+                               "3b0e188ffceb3d07e09c3cb5215433a0020eacf02d7f882ed3a8bfd15454477e"),
+        "image_signature": "483da4d4cdbd8cb6b2094ef3a9b205307b65d8e61120f043db61a4156a750d0b",
+        "vllm_version": "0.1.dev20073+g8e685d198",
+        "served_model_name": "qwen3.8-flash-next-fp8",
+        "port": 8000,
+        "master_port": 50000,
+        "max_model_len": 262144,
+        "max_num_seqs": 1,
+        "max_num_batched_tokens": 8192,
+        "gpu_memory_utilization": 0.83,
+        "tok_s": 20,
+        "tool_parser": "qwen3_xml",
+        "reasoning_parser": "qwen3",
+        "status": "validated",
+        "notes": ("Pinned official FP8 checkpoint and preview image; validated on two DGX "
+                  "Sparks for text, image, reasoning, tools, 240K context, and serialized "
+                  "concurrency. Video is excluded after a decoder crash."),
+    },
 }
 
 DEEPSEEK_VLLM_PREIMAGES = {
@@ -1847,15 +1873,19 @@ def docker(args, capture=False, check=False, tty=False):
     return subprocess.run(argv, text=True, check=check, capture_output=capture)
 
 
-def list_managed(include_all=False, remote=_UNSET):
-    """Return list of dicts for running containers (managed, or all vllm if include_all),
-    or None when the host can't be queried at all (SSH/docker failure) -- so callers can
-    tell 'unreachable' from 'idle'. When remote is omitted, uses the global REMOTE;
-    pass None for local only."""
+def list_managed(include_all=False, remote=_UNSET, include_stopped=False):
+    """Return managed containers (running by default), or all vLLM when requested.
+
+    Return None when the host cannot be queried so callers can distinguish unreachable
+    from idle. When remote is omitted, use the global REMOTE; pass None for local only.
+    """
     if remote is _UNSET:
         remote = REMOTE
     fmt = "{{json .}}"
-    args = ["ps", "--format", fmt]
+    args = ["ps"]
+    if include_stopped:
+        args.append("-a")
+    args += ["--format", fmt]
     if not include_all:
         args += ["--filter", f"label={LABEL_MANAGER}={LABEL_VALUE}"]
     res = _docker_on(remote, args, capture=True)
@@ -3646,6 +3676,85 @@ def _prepare_qwen(cfg, profile, build=False, weights=False, dry=False):
         _download_cluster_snapshot(cfg, profile, image, "Qwen")
 
 
+def _vllm_snapshot_path(profile):
+    repo = profile["model"].replace("/", "--")
+    return f"/cache/huggingface/hub/models--{repo}/snapshots/{profile['revision']}"
+
+
+def _vllm_runtime_cache(target, profile):
+    return os.path.join(remote_home(target), ".cache", "otools", profile["served_model_name"])
+
+
+def _vllm_image_identity(target, profile):
+    inspected = _host_exec(target, ["docker", "image", "inspect", profile["image"]],
+                           capture=True)
+    if inspected.returncode != 0:
+        raise RuntimeError("pinned vLLM image is missing")
+    try:
+        metadata = json.loads(inspected.stdout)[0]
+    except (IndexError, TypeError, json.JSONDecodeError) as e:
+        raise RuntimeError("cannot parse pinned vLLM image metadata") from e
+    if metadata.get("Architecture") != "arm64" or metadata.get("Os") != "linux":
+        raise RuntimeError("pinned vLLM image is not Linux ARM64")
+    if profile["image"] not in metadata.get("RepoDigests", []):
+        raise RuntimeError("local vLLM image is not bound to the pinned registry digest")
+    content = {
+        "architecture": metadata.get("Architecture"),
+        "os": metadata.get("Os"),
+        "config": metadata.get("Config"),
+        "rootfs": metadata.get("RootFS"),
+    }
+    content_sha256 = hashlib.sha256(
+        json.dumps(content, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if content_sha256 != profile["image_signature"]:
+        raise RuntimeError("pinned vLLM image content mismatch")
+    version = _host_exec(target, [
+        "docker", "run", "--rm", "--network", "none", "--entrypoint", "python3",
+        profile["image"], "-c", "import vllm; print(vllm.__version__)",
+    ], capture=True)
+    if version.returncode != 0 or version.stdout.strip() != profile["vllm_version"]:
+        detail = (version.stdout or version.stderr or "unavailable").strip()
+        raise RuntimeError(f"unexpected vLLM runtime version: {detail}")
+    return {"id": metadata.get("Id"), "content_sha256": content_sha256}
+
+
+def _prepare_vllm(cfg, profile, build=False, weights=False, dry=False):
+    if dry:
+        if build:
+            print(f"  would pull and verify {profile['image']} on both nodes")
+        if weights:
+            _download_cluster_snapshot(cfg, profile, profile["image"], "Qwen", dry=True)
+        return
+    head, worker = _cluster_targets(cfg)
+    roles = (("head", head), ("worker", worker))
+    if build:
+        def pull(role, target):
+            print(f"Pulling pinned vLLM preview image on {role} ({target or 'local'}) ...")
+            if _host_exec(target, ["docker", "pull", profile["image"]]).returncode != 0:
+                raise RuntimeError(f"pinned vLLM image pull failed on {role}")
+            return role, _vllm_image_identity(target, profile)
+
+        identities = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(pull, role, target) for role, target in roles]
+            for future in concurrent.futures.as_completed(futures):
+                role, identity = future.result()
+                identities[role] = identity
+        signatures = {identity["content_sha256"] for identity in identities.values()}
+        if len(signatures) != 1:
+            raise RuntimeError("pinned vLLM image contents differ between nodes")
+        print(f"  verified vLLM {profile['vllm_version']} "
+              f"(content sha256:{signatures.pop()}) on both nodes")
+    if weights:
+        if not build:
+            for role, target in roles:
+                try:
+                    _vllm_image_identity(target, profile)
+                except RuntimeError as e:
+                    raise RuntimeError(f"{role}: {e}; rerun with --build") from e
+        _download_cluster_snapshot(cfg, profile, profile["image"], "Qwen")
+
+
 def _cluster_container_name(profile_key, cluster_name, role):
     raw = f"{profile_key}-{cluster_name}-{role}"
     safe = re.sub(r"[^a-zA-Z0-9_.-]", "-", raw)
@@ -3697,6 +3806,63 @@ def build_qwen_cluster_argv(profile_key, profile, cfg, role, target):
              "-v", f"{os.path.join(remote_home(target), '.cache', 'huggingface')}"
                    ":/root/.cache/huggingface",
              profile["runtime_image"], "sh", "/opt/otools/trtllm-mn-entrypoint.sh"]
+    return name, argv
+
+
+def build_vllm_cluster_argv(profile_key, profile, cfg, role, target, keep=False):
+    fabric = cfg["fabric"]
+    interfaces = ",".join(fabric["interfaces"])
+    hcas = ",".join(fabric["ucx_devices"])
+    role_ips = fabric["head_ips"] if role == "head" else fabric["worker_ips"]
+    name = _cluster_container_name(profile_key, cfg["name"], role)
+    home = remote_home(target)
+    runtime_cache = _vllm_runtime_cache(target, profile)
+    argv = ["run", "-d"]
+    if not keep:
+        argv.append("--rm")
+    argv += ["--name", name]
+    argv += _cluster_docker_labels(profile_key, cfg, role, profile["backend"],
+                                   profile["port"] if role == "head" else None)
+    argv += ["--gpus", "all", "--network", "host", "--ipc=host", "--shm-size", "64g",
+             "--cap-add", "IPC_LOCK", "--cap-add", "SYS_NICE",
+             "--ulimit", "memlock=-1", "--ulimit", "stack=67108864",
+             "--device", "/dev/infiniband:/dev/infiniband",
+             "-v", f"{os.path.join(home, '.cache', 'huggingface')}:/cache/huggingface:ro",
+             "-v", f"{runtime_cache}:/cache/runtime",
+             "-e", "HF_HOME=/cache/huggingface", "-e", "HF_HUB_OFFLINE=1",
+             "-e", "TRANSFORMERS_OFFLINE=1", "-e", "HF_HUB_DISABLE_XET=1",
+             "-e", "VLLM_CACHE_ROOT=/cache/runtime/vllm",
+             "-e", "TRITON_CACHE_DIR=/cache/runtime/triton",
+             "-e", "VLLM_USE_DEEP_GEMM=0", "-e", "VLLM_ALLOW_LONG_MAX_MODEL_LEN=0",
+             "-e", "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True", "-e", "DO_NOT_TRACK=1",
+             "-e", "NCCL_NET=IB", "-e", "NCCL_IB_DISABLE=0", "-e", f"NCCL_IB_HCA=={hcas}",
+             "-e", f"NCCL_SOCKET_IFNAME=={interfaces}",
+             "-e", f"GLOO_SOCKET_IFNAME={fabric['interfaces'][0]}",
+             "-e", "NCCL_IB_ADDR_FAMILY=AF_INET", "-e", "NCCL_IB_ROCE_VERSION_NUM=2",
+             "-e", "NCCL_CROSS_NIC=1", "-e", "NCCL_IB_MERGE_NICS=1",
+             "-e", "NCCL_CUMEM_ENABLE=0", "-e", "NCCL_NVLS_ENABLE=0",
+             "-e", "NCCL_DEBUG=INFO", "-e", f"VLLM_HOST_IP={role_ips[0]}",
+             profile["image"], _vllm_snapshot_path(profile),
+             "--served-model-name", profile["served_model_name"],
+             "--host", "127.0.0.1", "--port", str(profile["port"]),
+             "--distributed-executor-backend", "mp", "--tensor-parallel-size", "2",
+             "--enable-expert-parallel", "--all2all-backend", "allgather_reducescatter",
+             "--load-format", "safetensors", "--safetensors-load-strategy", "lazy",
+             "--dtype", "bfloat16", "--max-model-len", str(profile["max_model_len"]),
+             "--max-num-seqs", str(profile["max_num_seqs"]), "--max-num-batched-tokens",
+             str(profile["max_num_batched_tokens"]), "--gpu-memory-utilization",
+             str(profile["gpu_memory_utilization"]), "--enable-chunked-prefill",
+             "--no-enable-prefix-caching", "--no-async-scheduling",
+             "--no-enable-flashinfer-autotune", "--enforce-eager",
+             "--enable-auto-tool-choice", "--tool-call-parser", profile["tool_parser"],
+             "--reasoning-parser", profile["reasoning_parser"], "--generation-config", "vllm",
+             "--enable-prompt-tokens-details", "--enable-log-requests",
+             "--distributed-timeout-seconds", "900",
+             "--cpu-distributed-timeout-seconds", "900", "--nnodes", "2", "--node-rank",
+             "0" if role == "head" else "1", "--master-addr", fabric["head_ips"][0],
+             "--master-port", str(profile["master_port"])]
+    if role == "worker":
+        argv.append("--headless")
     return name, argv
 
 
@@ -4079,8 +4245,8 @@ def cmd_cluster_rename(args):
         sys.exit(1)
     head, worker = _cluster_targets(cfg)
     for role, target in (("head", head), ("worker", worker)):
-        ok, running = _host_text(target, ["docker", "ps", "-q", "--filter",
-                                                f"label={LABEL_CLUSTER}={old_name}"])
+        ok, running = _host_text(target, ["docker", "ps", "-a", "-q", "--filter",
+                                         f"label={LABEL_CLUSTER}={old_name}"])
         if not ok:
             print(f"ERROR: cannot check {role} before renaming the cluster.", file=sys.stderr)
             sys.exit(1)
@@ -4155,13 +4321,23 @@ def cmd_cluster_prepare(args):
     print(f"Preparing '{args.profile}' for cluster '{cfg['name']}' ...")
     if profile["backend"] == "trtllm-mpi":
         _prepare_qwen(cfg, profile, build=args.build, weights=args.weights, dry=args.dry_run)
-    else:
+    elif profile["backend"] == "vllm-mp":
+        try:
+            _prepare_vllm(cfg, profile, build=args.build, weights=args.weights,
+                          dry=args.dry_run)
+        except (RuntimeError, subprocess.CalledProcessError, OSError) as e:
+            print(f"ERROR: vLLM preparation failed: {e}", file=sys.stderr)
+            sys.exit(1)
+    elif profile["backend"] == "deepseek-vllm-mp":
         try:
             _prepare_deepseek(cfg, profile, build=args.build, weights=args.weights,
                               dry=args.dry_run)
         except (RuntimeError, subprocess.CalledProcessError, OSError) as e:
             print(f"ERROR: DeepSeek preparation failed: {e}", file=sys.stderr)
             sys.exit(1)
+    else:
+        print(f"ERROR: unsupported cluster backend: {profile['backend']}", file=sys.stderr)
+        sys.exit(1)
     print("Preparation stage complete.")
 
 
@@ -4475,6 +4651,307 @@ def _launch_qwen_cluster(profile_key, profile, cfg, dry=False, startup_timeout=1
         sys.exit(1)
     print(f"READY: '{profile_key}' passed generation, parser, streaming, and NCCL NET/IB "
           f"checks across '{cfg['name']}'; head API port {profile['port']}.")
+
+
+def _vllm_warmup_requests(profile):
+    model = profile["served_model_name"]
+    no_think = {"enable_thinking": False}
+    tool = {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get current weather for a location",
+            "parameters": {
+                "type": "object",
+                "properties": {"location": {"type": "string"}},
+                "required": ["location"],
+            },
+        },
+    }
+    blue_png = ("data:image/png;base64,"
+                "iVBORw0KGgoAAAANSUhEUgAAAAQAAAABCAIAAAB2XpiaAAAADUlEQVR4nGNgYPgPRwAV9wP9eJEBOw"
+                "AAAABJRU5ErkJggg==")
+    return [
+        ("direct chat", 300, {
+            "model": model,
+            "messages": [{"role": "user", "content": "Reply with the single word ok."}],
+            "max_tokens": 64,
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "presence_penalty": 1.5,
+            "chat_template_kwargs": no_think,
+        }),
+        ("reasoning", 600, {
+            "model": model,
+            "messages": [{"role": "user", "content": "What is 17 multiplied by 19?"}],
+            "max_tokens": 2048,
+            "temperature": 1.0,
+            "top_p": 0.95,
+            "top_k": 20,
+            "reasoning_effort": "low",
+            "chat_template_kwargs": {"enable_thinking": True},
+        }),
+        ("tool parser", 600, {
+            "model": model,
+            "messages": [{"role": "user", "content": (
+                "Call get_weather exactly once with location Tokyo. Do not answer directly.")}],
+            "tools": [tool],
+            "tool_choice": "auto",
+            "max_tokens": 512,
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "presence_penalty": 1.5,
+            "chat_template_kwargs": no_think,
+        }),
+        ("vision", 600, {
+            "model": model,
+            "messages": [{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": blue_png}},
+                {"type": "text", "text": (
+                    "This image is one solid primary color. Reply with that lowercase color word.")},
+            ]}],
+            "max_tokens": 64,
+            "temperature": 0,
+            "chat_template_kwargs": no_think,
+        }),
+        ("streaming", 300, {
+            "model": model,
+            "messages": [{"role": "user", "content": "Write three short words."}],
+            "max_tokens": 64,
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "presence_penalty": 1.5,
+            "chat_template_kwargs": no_think,
+            "stream": True,
+        }),
+    ]
+
+
+def _warm_vllm_cluster(head, profile, deadline):
+    endpoint = f"http://127.0.0.1:{profile['port']}/v1/chat/completions"
+    for label, timeout, payload in _vllm_warmup_requests(profile):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError(f"Qwen3.8 warmup deadline exhausted before {label}")
+        print(f"Warming Qwen3.8 Flash Next {label} path ...")
+        ok, body = _host_text(head, [
+            "curl", "--fail-with-body", "-sS", "--max-time", str(min(timeout, remaining)),
+            "-H", "Content-Type: application/json", "--data-binary",
+            json.dumps(payload, separators=(",", ":")), endpoint,
+        ])
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"Qwen3.8 warmup deadline exhausted during {label}")
+        if not ok:
+            detail = body[-500:].replace("\n", " ")
+            raise RuntimeError(f"Qwen3.8 {label} warmup failed: {detail}")
+        if payload.get("stream"):
+            done_seen = body.count("data: [DONE]") == 1
+            finish_seen = False
+            content_seen = False
+            for line in body.splitlines():
+                if not line.startswith("data: ") or line == "data: [DONE]":
+                    continue
+                try:
+                    event = json.loads(line[6:])
+                except json.JSONDecodeError as e:
+                    raise RuntimeError(f"Qwen3.8 {label} warmup returned invalid SSE: {e}") from e
+                if not isinstance(event, dict):
+                    raise RuntimeError(f"Qwen3.8 {label} warmup returned a non-object SSE event")
+                if event.get("error"):
+                    raise RuntimeError(f"Qwen3.8 {label} warmup returned an error event")
+                choices = event.get("choices", [])
+                if (not isinstance(choices, list)
+                        or any(not isinstance(choice, dict) for choice in choices)):
+                    raise RuntimeError(f"Qwen3.8 {label} warmup returned malformed SSE choices")
+                for choice in choices:
+                    delta = choice.get("delta", {})
+                    if not isinstance(delta, dict):
+                        raise RuntimeError(f"Qwen3.8 {label} warmup returned a malformed SSE delta")
+                    content = delta.get("content")
+                    if content is not None and not isinstance(content, str):
+                        raise RuntimeError(
+                            f"Qwen3.8 {label} warmup returned malformed SSE content")
+                    content_seen = content_seen or bool(content)
+                finish_seen = finish_seen or any(
+                    choice.get("finish_reason") for choice in choices)
+            if not done_seen or not finish_seen or not content_seen:
+                raise RuntimeError(f"Qwen3.8 {label} warmup returned an incomplete stream")
+            continue
+        try:
+            response = json.loads(body)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Qwen3.8 {label} warmup returned invalid JSON: {e}") from e
+        if not isinstance(response, dict):
+            raise RuntimeError(f"Qwen3.8 {label} warmup returned a non-object response")
+        choices = response.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise RuntimeError(f"Qwen3.8 {label} warmup returned no choices")
+        if not isinstance(choices[0], dict):
+            raise RuntimeError(f"Qwen3.8 {label} warmup returned a malformed choice")
+        message = choices[0].get("message")
+        if not isinstance(message, dict):
+            raise RuntimeError(f"Qwen3.8 {label} warmup returned a malformed message")
+        reasoning = message.get("reasoning") or message.get("reasoning_content")
+        content = message.get("content")
+        if label == "direct chat":
+            if reasoning:
+                raise RuntimeError("Qwen3.8 direct warmup ignored enable_thinking=false")
+            if not isinstance(content, str) or not content:
+                raise RuntimeError("Qwen3.8 direct warmup emitted no content")
+        elif label == "reasoning":
+            if (not isinstance(reasoning, str) or not reasoning
+                    or not isinstance(content, str) or not content):
+                raise RuntimeError("Qwen3.8 reasoning warmup did not separate reasoning and content")
+        elif label == "tool parser":
+            calls = message.get("tool_calls")
+            if not isinstance(calls, list) or len(calls) != 1:
+                raise RuntimeError("Qwen3.8 tool warmup did not emit exactly one tool call")
+            if not isinstance(calls[0], dict):
+                raise RuntimeError("Qwen3.8 tool warmup emitted a malformed tool call")
+            function = calls[0].get("function")
+            if not isinstance(function, dict):
+                raise RuntimeError("Qwen3.8 tool warmup emitted a malformed function")
+            try:
+                arguments = json.loads(function.get("arguments", ""))
+            except (TypeError, json.JSONDecodeError) as e:
+                raise RuntimeError("Qwen3.8 tool warmup emitted invalid arguments") from e
+            if not isinstance(arguments, dict):
+                raise RuntimeError("Qwen3.8 tool warmup emitted invalid arguments")
+            if function.get("name") != "get_weather" or arguments.get("location") != "Tokyo":
+                raise RuntimeError("Qwen3.8 tool warmup emitted the wrong call")
+        elif label == "vision":
+            if not isinstance(content, str) or "blue" not in content.casefold():
+                raise RuntimeError("Qwen3.8 vision warmup did not identify the blue image")
+
+
+def _launch_vllm_cluster(profile_key, profile, cfg, dry=False, startup_timeout=1800, keep=False):
+    head, worker = _cluster_targets(cfg)
+    if not dry:
+        if not cluster_preflight(cfg, require_fabric=True)[0]:
+            sys.exit(1)
+        _ensure_cluster_idle(cfg)
+    commands = []
+    for role, target in (("worker", worker), ("head", head)):
+        name, argv = build_vllm_cluster_argv(profile_key, profile, cfg, role, target, keep=keep)
+        commands.append((role, target, name, argv))
+    if dry:
+        print("--- DRY RUN: worker starts before head; live fabric preflight not performed ---")
+        for role, target, _, argv in commands:
+            print(f"\n# {role}")
+            print(format_run(argv, target))
+        return
+
+    existing = []
+    for role, target, name, _ in commands:
+        inspected = _host_exec(target, ["docker", "container", "inspect", name], capture=True)
+        if inspected.returncode == 0:
+            existing.append(f"{role} {name}")
+    if existing:
+        print("ERROR: cluster rank container(s) already exist: " + ", ".join(existing) + ". "
+              f"Run `{_cli_name()} cluster stop {cfg['name']} -y` before relaunching.",
+              file=sys.stderr)
+        sys.exit(1)
+
+    identities = {}
+    for role, target, _, _ in commands:
+        try:
+            identities[role] = _vllm_image_identity(target, profile)
+        except RuntimeError as e:
+            print(f"ERROR: {role}: {e}; run `omm cluster prepare {cfg['name']} {profile_key} "
+                  "--build --weights` while both nodes are idle.", file=sys.stderr)
+            sys.exit(1)
+        repo = profile["model"].replace("/", "--")
+        snapshot = os.path.join(remote_home(target), ".cache", "huggingface", "hub",
+                                f"models--{repo}", "snapshots", profile["revision"])
+        if _host_exec(target, ["test", "-d", snapshot], capture=True).returncode != 0:
+            print(f"ERROR: exact model snapshot is missing on {role}; run cluster prepare "
+                  "with --weights.", file=sys.stderr)
+            sys.exit(1)
+        _host_exec(target, ["mkdir", "-p", _vllm_runtime_cache(target, profile)], check=True)
+    if len({identity["content_sha256"] for identity in identities.values()}) != 1:
+        print("ERROR: pinned vLLM image contents differ between nodes.", file=sys.stderr)
+        sys.exit(1)
+
+    for _, target, _, _ in commands:
+        _drop_caches(target)
+    started = []
+    try:
+        for role, target, name, argv in commands:
+            print(f"Starting vLLM {role} container {name} on {target or 'local'} ...")
+            result = _host_exec(target, ["docker"] + argv)
+            if result.returncode != 0:
+                raise RuntimeError(f"vLLM {role} container failed to start")
+            started.append((role, target, name))
+            time.sleep(3)
+            running = _host_exec(target, ["docker", "inspect", "--format", "{{.State.Running}}",
+                                          name], capture=True)
+            if running.returncode != 0 or running.stdout.strip() != "true":
+                raise RuntimeError(f"vLLM {role} container exited during rendezvous")
+        deadline = time.monotonic() + startup_timeout
+        while time.monotonic() < deadline:
+            for role, target, name, _ in commands:
+                running = _host_exec(target, ["docker", "inspect", "--format",
+                                              "{{.State.Running}}", name], capture=True)
+                if running.returncode != 0 or running.stdout.strip() != "true":
+                    raise RuntimeError(f"vLLM {role} container exited during model loading")
+            healthy, _ = _host_text(head, ["curl", "-fsS", "--max-time", "5",
+                                           f"http://127.0.0.1:{profile['port']}/v1/models"])
+            if healthy:
+                ib_ready = True
+                for _, target, name, _ in commands:
+                    logs = _host_exec(target, ["docker", "logs", name], capture=True)
+                    body = (logs.stdout or "") + (logs.stderr or "")
+                    if logs.returncode != 0 or "NET/IB" not in body:
+                        ib_ready = False
+                        break
+                if ib_ready:
+                    _warm_vllm_cluster(head, profile, deadline)
+                    break
+            time.sleep(10)
+        else:
+            raise RuntimeError(f"vLLM did not become healthy on NET/IB within {startup_timeout}s")
+    except (RuntimeError, subprocess.CalledProcessError, OSError, KeyboardInterrupt) as e:
+        reason = "launch interrupted" if isinstance(e, KeyboardInterrupt) else str(e)
+        if keep:
+            print(f"ERROR: {reason}; stopping started vLLM peers and retaining rank containers "
+                  "for diagnostics.", file=sys.stderr)
+        else:
+            print(f"ERROR: {reason}; rolling back vLLM rank containers.", file=sys.stderr)
+        for role, target, name in started:
+            diagnostic = _host_exec(target, ["docker", "logs", "--tail", "160", name],
+                                    capture=True)
+            body = ((diagnostic.stdout or "") + (diagnostic.stderr or "")).strip()
+            if body:
+                print(f"--- vLLM {role} diagnostics ---\n{body}", file=sys.stderr)
+        failures = []
+        for _, target, name in reversed(started):
+            try:
+                cleanup = ["docker", "stop", name] if keep else ["docker", "rm", "-f", name]
+                cleaned = _host_exec(target, cleanup, capture=True)
+                if cleaned.returncode != 0:
+                    detail = (((getattr(cleaned, "stdout", "") or "") + "\n"
+                               + (getattr(cleaned, "stderr", "") or "")).strip())
+                    absent = (not keep and detail ==
+                              f"Error response from daemon: No such container: {name}")
+                    if not absent:
+                        failures.append(name)
+            except OSError:
+                failures.append(name)
+        if failures:
+            action = "stop retained" if keep else "remove"
+            print(f"ERROR: cleanup could not {action}: " + ", ".join(failures), file=sys.stderr)
+        if keep and started:
+            print(f"Retained rank containers. Inspect with `{_cli_name()} cluster logs "
+                  f"{cfg['name']} {profile_key} --role head` (or `--role worker`), then remove "
+                  f"them with `{_cli_name()} cluster stop {cfg['name']} -y`.", file=sys.stderr)
+        if isinstance(e, KeyboardInterrupt):
+            raise
+        sys.exit(1)
+    print(f"READY: '{profile_key}' passed direct, reasoning, tool, vision, streaming, and "
+          f"NCCL NET/IB checks across '{cfg['name']}'; head API port {profile['port']}.")
 
 
 def _deepseek_manifest_inputs(profile):
@@ -4853,12 +5330,25 @@ def _launch_deepseek_cluster(profile_key, profile, cfg, dry=False, startup_timeo
 def cmd_cluster_launch(args):
     cfg = cluster_config(args.name)
     profile = cluster_profile(args.profile)
+    keep = getattr(args, "keep", False)
+    if keep and profile["backend"] != "vllm-mp":
+        print("ERROR: --keep is currently supported only by vllm-mp profiles.", file=sys.stderr)
+        sys.exit(1)
     if profile["backend"] == "trtllm-mpi":
         _launch_qwen_cluster(args.profile, profile, cfg, dry=args.dry_run,
                              startup_timeout=args.startup_timeout)
         return
-    _launch_deepseek_cluster(args.profile, profile, cfg, dry=args.dry_run,
-                             startup_timeout=args.startup_timeout)
+    if profile["backend"] == "vllm-mp":
+        _launch_vllm_cluster(args.profile, profile, cfg, dry=args.dry_run,
+                             startup_timeout=args.startup_timeout,
+                             keep=keep)
+        return
+    if profile["backend"] == "deepseek-vllm-mp":
+        _launch_deepseek_cluster(args.profile, profile, cfg, dry=args.dry_run,
+                                 startup_timeout=args.startup_timeout)
+        return
+    print(f"ERROR: unsupported cluster backend: {profile['backend']}", file=sys.stderr)
+    sys.exit(1)
 
 
 def cmd_cluster_status(args):
@@ -4868,7 +5358,7 @@ def cmd_cluster_status(args):
     print(f"{'ROLE':<8} {'HOST':<18} {'CONTAINER':<55} STATUS")
     for role, target in (("head", head), ("worker", worker)):
         label = _host_label(target) or "localhost"
-        rows = list_managed(remote=target)
+        rows = list_managed(remote=target, include_stopped=True)
         if rows is None:
             print(f"{role:<8} {label:<18} {'—':<55} unreachable")
             continue
@@ -4897,7 +5387,7 @@ def cmd_cluster_stop(args):
             print("Aborted."); return
     stopped, failures = 0, []
     for role, target in (("head", head), ("worker", worker)):
-        rows = list_managed(remote=target)
+        rows = list_managed(remote=target, include_stopped=True)
         if rows is None:
             failures.append(f"{role} unreachable")
             continue
@@ -5167,15 +5657,18 @@ def cmd_launch(args):
                   file=sys.stderr)
             sys.exit(1)
         single_host_options = [flag for attr, flag in (
-            ("foreground", "--foreground"), ("keep", "--keep"), ("force", "--force"),
+            ("foreground", "--foreground"), ("force", "--force"),
             ("no_fetch", "--no-fetch"), ("refresh", "--refresh"), ("wait", "--wait"),
         ) if getattr(args, attr, False)]
+        if args.keep and CLUSTER_PROFILES[args.key]["backend"] != "vllm-mp":
+            single_host_options.append("--keep")
         if single_host_options:
             print("ERROR: these options apply only to single-host profiles: "
                   + ", ".join(single_host_options), file=sys.stderr)
             sys.exit(1)
         cluster_args = argparse.Namespace(name=cluster_name, profile=args.key,
-                                          dry_run=args.dry_run, startup_timeout=1800)
+                                          dry_run=args.dry_run, startup_timeout=1800,
+                                          keep=args.keep)
         cmd_cluster_launch(cluster_args)
         return
     cfg = load_config()
@@ -6007,6 +6500,8 @@ def main():
     p.add_argument("--dry-run", action="store_true", help="print rank commands without host changes")
     p.add_argument("--startup-timeout", type=int, default=1800, metavar="SECONDS",
                    help="cluster health, generation, and NET/IB deadline (default: 1800)")
+    p.add_argument("--keep", action="store_true",
+                   help="retain exited vllm-mp rank containers so crash logs survive")
     p.set_defaults(func=cmd_cluster_launch)
 
     p = cluster_sub.add_parser("status", help="show managed rank containers on both nodes")

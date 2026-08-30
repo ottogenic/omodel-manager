@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Qwen3.8-Flash-Next FP8 on two DGX Sparks.** Added a digest- and revision-pinned
+  `vllm-mp` profile validated on a two-Spark cluster for text, image, reasoning, tools, 240K
+  retrieval, and 20 tok/s decode at approximately 50K context. Video is excluded
+  after the pinned preview runtime crashed on a two-frame input.
 - **Qwen3.8-27B NVFP4 with DFlash2 speculative decoding.** The new DGX Spark profile
   pins the official ARM64 vLLM runtime plus reviewed RadixArk target and Inco draft
   snapshots. It preserves native 262K context, passed the full quality and feature
@@ -14,6 +18,8 @@ All notable changes to this project are documented here. The format follows
   concurrency.
 
 ### Changed
+- **Qwen3.8-Flash-Next output headroom now matches Qwen3.8-27B.** Plan and Build use a
+  131,072-token combined reasoning-and-response ceiling, verified against the live endpoint.
 - **Card and eGPU qualification moved to `omodel-card`.** Native SYCL/CUDA
   builds, Intel Arc B70 and RTX 4090 OCuLink setup, and hardware experiment logs
   now evolve independently from this stable Docker/vLLM manager.
@@ -41,6 +47,9 @@ All notable changes to this project are documented here. The format follows
   loopback-bound and are unchanged.
 
 ### Fixed
+- **vLLM cluster crashes can retain diagnostics.** `cluster launch --keep` omits
+  Docker auto-removal for `vllm-mp` ranks, while cluster status and stop now include
+  exited managed containers.
 - **Concurrent benchmarks now measure reasoning streams and defeat cross-run prefix-cache
   reuse.** `benchmark_concurrent.py` recognizes both vLLM reasoning field names and adds a
   unique run nonce, preventing empty-output errors and misleading near-zero repeated TTFTs.
