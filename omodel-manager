@@ -94,15 +94,6 @@ LABEL_CLUSTER = "otools.cluster"
 LABEL_ROLE = "otools.role"
 LABEL_BACKEND = "otools.backend"
 NAME_PREFIX = "otools-vllm-"
-# Base image: `vllm/vllm-openai:nightly` -- the tag NVIDIA's Qwen3.6-NVFP4 model card
-# recommends. It's MULTI-ARCH (amd64 + arm64), so Docker auto-selects the arm64 build on
-# the GB10/sm_121 Spark. Do NOT use `:nightly-aarch64` -- that arm64-only variant is a
-# separate build line that regressed this model to pure-garbage output (see SPARK_NOTES).
-#
-# This is a ROLLING tag: a future nightly can roll in a regression, so RE-VALIDATE
-# generation after a pull. If a build breaks, pin the last-known-good one by digest.
-# Known-good fallback (== vLLM 0.23.1rc1.dev552, validated 2026-07-03 for Qwen3.6-NVFP4):
-#     vllm/vllm-openai@sha256:7feb2a09304e3b2d38e224a100316e84fe3205faa7605060609e2c02179cbca6
 DEFAULT_IMAGE = "vllm/vllm-openai:nightly"
 
 # Two-node profiles are deliberately separate from DEFAULT_CONFIG: normal profiles
@@ -113,7 +104,6 @@ CLUSTER_PROFILES = {
         "backend": "trtllm-mpi",
         "model": "nvidia/Qwen3-235B-A22B-FP4",
         "revision": "21cfa2c9e152032eb60647ee7b46a2bbcd8d76d2",
-        # rc8 includes CUTLASS's Blackwell TMA fix (TensorRT-LLM #11956).
         "image": ("nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc8@"
                   "sha256:c7297fdfb2e947296a4b29c8bdf8f5122e565179d65f806f85ff8fb4a478606e"),
         "runtime_image": "otools/trtllm-mpi:1.3.0rc8-reviewed",
@@ -129,13 +119,12 @@ CLUSTER_PROFILES = {
         "reasoning_parser": "qwen3",
         "conservative_fp4_startup": True,
         "status": "validated",
-        "notes": "NVIDIA playbook model; physically qualified on two GB10 Sparks.",
+        "notes": "NVIDIA playbook model; physically qualified on two nodes.",
     },
     "qwen3-235b-a22b-instruct-2507-nvfp4": {
         "backend": "trtllm-mpi",
         "model": "nvidia/Qwen3-235B-A22B-Instruct-2507-NVFP4",
         "revision": "1c4ec35802abf3a20672be7e5c51a098796f71d6",
-        # rc8 includes CUTLASS's Blackwell TMA fix (TensorRT-LLM #11956).
         "image": ("nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc8@"
                   "sha256:c7297fdfb2e947296a4b29c8bdf8f5122e565179d65f806f85ff8fb4a478606e"),
         "runtime_image": "otools/trtllm-mpi:1.3.0rc8-reviewed",
@@ -149,13 +138,12 @@ CLUSTER_PROFILES = {
         "reasoning_parser": None,
         "conservative_fp4_startup": True,
         "status": "validated",
-        "notes": "Official NVIDIA checkpoint; physically qualified on two GB10 Sparks.",
+        "notes": "Official NVIDIA checkpoint; physically qualified on two nodes.",
     },
     "qwen3-235b-a22b-thinking-2507-nvfp4": {
         "backend": "trtllm-mpi",
         "model": "nvidia/Qwen3-235B-A22B-Thinking-2507-NVFP4",
         "revision": "963445d1b9d3318cae13a4477bdfae4c2c6dab1e",
-        # rc8 includes CUTLASS's Blackwell TMA fix (TensorRT-LLM #11956).
         "image": ("nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc8@"
                   "sha256:c7297fdfb2e947296a4b29c8bdf8f5122e565179d65f806f85ff8fb4a478606e"),
         "runtime_image": "otools/trtllm-mpi:1.3.0rc8-reviewed",
@@ -171,13 +159,6 @@ CLUSTER_PROFILES = {
         "conservative_fp4_startup": True,
         "disable_flashinfer_sampling": True,
         "status": "validated",
-        "notes": ("Official NVIDIA checkpoint; rc8 CUTLASS fix. Aggressive two-Spark agent "
-                  "profile targets the repeatable 48,064-token resident context, four requests, "
-                  "a 16K scheduler budget, and 95% "
-                  "of profiled free memory for KV cache. The cublasLt/no-autotuner/no-graph "
-                  "guard remains required after the SM120 TMA failure reproduced at startup; "
-                  "32K scheduler warmup hung during KV-capacity profiling. A 61,344-token trial "
-                  "worked once but later auto-reduced to 48,064 as UMA headroom varied."),
     },
     "deepseek-v4-flash-0731": {
         "backend": "deepseek-vllm-mp",
@@ -203,7 +184,6 @@ CLUSTER_PROFILES = {
                             "sha256:fd231812c9cacc3cf41eb159a4ec8efefbd998ec51e43337bb9b3b65e559a944"),
         "image": "otools/vllm-deepseek-v4-flash-0731:c8r-reviewed",
         "image_signature": "f4cccdf85c55cc164e0d6143e0aed73beda3a369e22685e83934b1197f5fffdb",
-        # "dspark" is the upstream DGX Spark API alias, not a decoder choice.
         "served_model_name": "deepseek-v4-flash-dspark",
         "port": 8000,
         "max_model_len": 1048576,
@@ -215,10 +195,6 @@ CLUSTER_PROFILES = {
         "kv_cache_memory_bytes": 21316272128,
         "enable_prefix_caching": True,
         "status": "validated",
-        "notes": ("Official DeepSeek weights and c8r full-source runtime; qualified on a "
-                  "dual-Spark pair "
-                  "with dual-rail warmups, real OpenCode tool churn, prefix caching, and a "
-                  "20K-token stream. Cand7 remains an explicit rollback profile."),
     },
     "deepseek-v4-flash-0731-cand7": {
         "backend": "deepseek-vllm-mp",
@@ -254,8 +230,6 @@ CLUSTER_PROFILES = {
         "kv_cache_memory_bytes": 21316272128,
         "enable_prefix_caching": False,
         "status": "rollback",
-        "notes": ("First rollback rung: reviewed cand7 thin overlay with isolated cand7 "
-                  "compile caches. Prefix caching remains disabled after the observed hang."),
     },
     "qwen3.8-flash-next-fp8": {
         "backend": "vllm-mp",
@@ -329,7 +303,7 @@ DEFAULT_CONFIG = {
         # Set "host": "0.0.0.0" on a profile to expose it to the LAN on purpose.
         "host": "127.0.0.1",
         "gpus": "all",
-        "remote": None,                     # e.g. "user@192.0.2.101" to run on the DGX;
+        "remote": None,                     # e.g. "user@192.0.2.101" to run remotely;
                                             #      null = local. Override per-model or with --remote.
         "hf_cache": "~/.cache/huggingface",
         "env": {
@@ -360,12 +334,12 @@ DEFAULT_CONFIG = {
                 "General",
             ],
             "notes": [
-                "BROKEN ON CURRENT NIGHTLY (v0.23.1rc1.dev748, tested 2026-07-19): emits pure '!!!!' garbage despite clean startup (MARLIN NvFp4 MoE selected). Isolated to the NVFP4-MoE Marlin kernel miscompiling for the nvidia/modelopt checkpoint -- persists with fp8-KV and forced-FP8-Marlin removed. The unsloth checkpoint on the SAME nightly is clean. DO NOT USE until a nightly fixes it; re-validate GENERATION (not just startup) before trusting.",
+                "BROKEN on the 2026-07-19 vLLM nightly: generation collapsed to repeated "
+                "punctuation despite a clean load. Prefer the Unsloth sibling until this exact "
+                "checkpoint and runtime are revalidated.",
                 "Qwen3.6-35B-A3B-NVFP4 (nvidia/ModelOpt): hybrid GDN/Mamba MoE, mixed NVFP4 (MLP) + FP8 (attention). Multimodal, reasoning, tool-calling.",
-                "GB10/sm_121 NVFP4: pin MoE to Marlin (--moe-backend marlin) -- the CUTLASS/FlashInfer FP4 MoE path yields degenerate '!!!!' output on Spark (no native FP4 MoE kernels; this qwen3_5_moe+GDN checkpoint is in the blast radius). Leave NVFP4 linear GEMM on auto. FP8 linear/GEMM->Marlin (VLLM_TEST_FORCE_FP8_MARLIN=1 -- affects the FP8 linear path, NOT attention); kill broken E8M0 FP8-MoE (VLLM_USE_DEEP_GEMM=0). See SPARK_NOTES.",
-                "QUALITY-FIRST: MTP speculative decode is DISABLED. vLLM #47087 documents MTP degenerating into repetition/garbage loops on deep agentic convos for this exact model (depth 2 AND 3); #47194 shows MTP+prefix-caching leaks tool-call XML as plain text + kills recall; #44734 crashes on NVFP4+MTP+fp8KV/Blackwell. Removing MTP is the sourced fix for looping/failed tool calls. Prefix-caching also removed (unsafe with the hybrid Mamba/GDN state under spec-decode).",
+                "QUALITY-FIRST: MTP speculative decode is DISABLED. vLLM #47087 documents MTP degenerating into repetition/garbage loops on deep agentic convos for this exact model (depth 2 AND 3); #47194 shows MTP+prefix-caching leaks tool-call XML as plain text + kills recall. Removing MTP is the sourced fix for looping/failed tool calls. Prefix-caching also removed (unsafe with the hybrid Mamba/GDN state under spec-decode).",
                 "tool-call-parser qwen3_xml == qwen3_coder in vLLM (same class, PR #48922); parser choice is cosmetic. reasoning-parser qwen3. Anti-loop sampling lives in the config TOML presets (harness-side), not here.",
-                "First launch with --keep so a startup crash's logs survive. Validate GENERATION (not just startup) on every image bump -- nightly regressed NVFP4 to garbage before.",
             ],
             "env": {
                 "VLLM_TEST_FORCE_FP8_MARLIN": "1",
@@ -401,11 +375,9 @@ DEFAULT_CONFIG = {
             ],
             "notes": [
                 "Qwen3.6-35B-A3B-NVFP4 (unsloth): compressed-tensors mixed FP8(dynamic/token)+NVFP4(dynamic), W4A4. Same base as the nvidia NVFP4 + FP8 siblings. ~26.5GB. Multimodal, reasoning, tool-calling. MTP module bundled. Quant auto-detected -> DO NOT pass --quantization.",
-                "GB10/sm_121 CRITICAL: force --moe-backend marlin. Unsloth's card says 'do NOT use Marlin (2x slower)' but that is a B200/SM100 claim that does NOT transfer to GB10 -- on sm_121 there are no working native FP4 MoE kernels and the CUTLASS/FlashInfer FP4 MoE path produces '!!!!' garbage (qwen3_5_moe+GDN is doubly affected). Marlin runs it as W4A16: slower, numerically safe. Quality > speed. VLLM_NVFP4_GEMM_BACKEND does NOT cover the MoE path -- the --moe-backend flag does.",
-                "Do NOT pass --linear-backend flashinfer_b12x (startup-fatal on stock image: 'no flashinfer_b12x kernel exists for this layer type'). --moe-backend flashinfer_b12x is ~within margin of Marlin on speed and risks garbage -> use Marlin. CUTE_DSL_ARCH=sm_121a set (harmless; lights up b12x if a future nightly supports it).",
                 "max-num-batched-tokens 16384: the default 2048 < GDN/Mamba block_size 2096 -> AssertionError at startup (35B-A3B-specific). enable-prefix-caching left OFF (MiaAI reports NoneType crash with Mamba layers; build-dependent -- enable only after validating).",
                 "QUALITY-FIRST: MTP disabled on bring-up (see nvidia sibling notes / vLLM #47087). Add '{\"method\":\"mtp\",\"num_speculative_tokens\":2,\"moe_backend\":\"triton\"}' only after clean output confirmed; MTP is quality-neutral (speed only).",
-                "NO IMAGE PIN (rolling nightly, per operator). Garbage-output is a live risk on every image bump: send a fixed smoke prompt on startup and assert output isn't degenerate (!!!!/repeats/empty-after-thinking) before routing traffic. reasoning-parser qwen3; tool-call-parser qwen3_coder (matches Unsloth template+OpenCode; A/B vs qwen3_xml if tools break).",
+                "reasoning-parser qwen3; tool-call-parser qwen3_coder (matches Unsloth template+OpenCode; A/B vs qwen3_xml if tools break).",
                 "VLLM_TEST_FORCE_FP8_MARLIN NOT set here (unlike the nvidia sibling): this checkpoint FP8-quantizes lm_head, and forcing FP8->Marlin drags ParallelLMHead into prepare_fp8_layer_for_marlin -> AttributeError 'output_size_per_partition' at load (observed 2026-07-19, nightly). --moe-backend marlin already routes the MoE correctly; FP8 attention takes the working non-forced path.",
             ],
             "env": {
@@ -434,8 +406,6 @@ DEFAULT_CONFIG = {
             "image": "vllm/vllm-openai:nightly",
             "notes": [
                 "Qwen3.6-35B-A3B FP8 (e4m3): hybrid GDN/Mamba MoE (qwen3_5_moe), multimodal, reasoning, tool-calling. Requires vLLM >= 0.19.0.",
-                "Blackwell/DGX Spark (sm_121): VLLM_USE_DEEP_GEMM=0 (defensive) -- E8M0 FP8-MoE weight processing has crashed at load on sm_121 (#37804); MoE falls back to TRITON. Research could not confirm it's strictly required on current nightlies; verify kernel path in boot log, harmless if DeepGEMM isn't selected.",
-                "max-num-batched-tokens 16384: best-measured QoS knob on GB10 for this arch (DocAI: -74% single-user P99 TTFT vs 65536) and clears any low-default mamba-align assertion.",
                 "QUALITY-FIRST: MTP disabled to match the NVFP4 siblings for a clean A/B (vLLM #47087 looping). MTP depth 2 (never 3) is the speed option; re-add after quality validated.",
                 "tool-call-parser qwen3_coder (official Qwen card for THIS checkpoint; qwen3_xml is the nvidia-NVFP4 pairing but resolves to the same vLLM class). Anti-loop sampling is harness-side (config TOML presets).",
                 "First launch with --keep so a startup crash's logs survive.",
@@ -489,8 +459,8 @@ DEFAULT_CONFIG = {
                 "max-model-len": 262144,
                 "max-num-seqs": 2,
                 "enable-chunked-prefill": True,
-                "speculative-config": ('{"method":"mtp","num_speculative_tokens":2,'  # GB10: 2 > 3 (accept. falls off)
-                                       '"moe_backend":"triton"}'),
+                "speculative-config": ('{"method":"mtp","num_speculative_tokens":2,'
+                                        '"moe_backend":"triton"}'),
                 "enable-auto-tool-choice": True,
                 "tool-call-parser": "qwen3_coder",
                 "reasoning-parser": "qwen3",
@@ -501,8 +471,6 @@ DEFAULT_CONFIG = {
             "tok_s": 11,
             "image": "vllm/vllm-openai:nightly",
             "notes": [
-                "Rolling nightly-aarch64 image (GB10/sm_121, CUDA 13); NVIDIA's Spark "
-                "cookbook ships cu130-nightly -- switch to that if nemotron_h fails to load.",
                 "super_v3_reasoning_parser.py is auto-downloaded (see assets) and "
                 "mounted to /app -- no need to have it in your cwd.",
                 "256K context, up to 4 concurrent users (max-num-seqs 4). ~4KB/token KV "
@@ -625,8 +593,8 @@ DEFAULT_CONFIG = {
             "tok_s": 7,
             "image": "vllm/vllm-openai:nightly",
             "notes": ["Official Qwen Qwen3.6-27B FP8 (e4m3) -- dense 27B parameter model, 256K native context. "
-                      "No MoE, so no VLLM_USE_DEEP_GEMM needed. Reasoning model (thinking ON by default), tool-calling. "
-                      "~18GB weights on disk, ~20-30GB runtime memory, very comfortable on GB10.",
+                       "No MoE, so no VLLM_USE_DEEP_GEMM needed. Reasoning model (thinking ON by default), tool-calling. "
+                       "~18GB weights on disk, ~20-30GB runtime memory.",
                       "QUALITY-FIRST rework 2026-07-23 (NOT yet re-validated on hardware): fp8 KV cache "
                       "REMOVED -- Qwen FP8 checkpoints ship no k/v/q scales, so fp8 KV runs uncalibrated "
                       "scale-1.0 attention (vLLM warns 'may cause accuracy issues'; observed live on the "
@@ -696,15 +664,13 @@ DEFAULT_CONFIG = {
         },
         "qwen3.8-27b-fp8": {
             "tok_s": 7,
-            # Dedicated Qwen3.8 build tested on GB10; pin the multi-arch manifest so
-            # Docker selects its physically validated ARM64 image deterministically.
             "image": ("vllm/vllm-openai@"
                       "sha256:4a2f33a884222f7049b983263ad9976f89452bb81affecf5b67d89ad35c1bc31"),
             "notes": [
                 "Official Qwen Qwen3.8-27B FP8 (e4m3), native multimodal hybrid "
                 "Gated DeltaNet/full-attention model with 262K context. Dedicated qwen38 "
                 "image is pinned at vLLM 0.1.dev19754+g3a0914114; quantization is auto-detected.",
-                "VALIDATED on DGX Spark 2026-08-15: CUTLASS FP8 linear, Triton GDN, "
+                "VALIDATED 2026-08-15: CUTLASS FP8 linear, Triton GDN, "
                 "FlashAttention 2, BF16 KV, reasoning on/off, xhigh/low effort, structured "
                 "qwen3_coder tools, vision (blue PNG), long code, and four-way concurrency pass. "
                 "The three-run quality battery passed 12/12 tool and 12/12 executable code cases.",
@@ -748,7 +714,7 @@ DEFAULT_CONFIG = {
                 "solution failed a hidden test.",
                 "MTP reduces the BF16-KV pool to 1,113,917 tokens, still 4.25 full 262K "
                 "sequences. vLLM disables effective min_p/logit_bias under speculative decode.",
-                "Do not raise max-num-batched-tokens to 8192 on Spark: repeated ~55K prefill "
+                "Do not raise max-num-batched-tokens to 8192: repeated ~55K prefill "
                 "fell from ~1,500-1,600 to ~790 tok/s. Leave the scheduler's 2048 default.",
             ],
             "vllm_args": {
@@ -759,16 +725,14 @@ DEFAULT_CONFIG = {
         },
         "qwen3.8-27b-nvfp4-vllm-dflash2": {
             "tok_s": 27,
-            # Official ARM64 image containing merged vLLM DFlash2 support; pin the
-            # physically qualified manifest and both third-party model snapshots.
             "image": ("vllm/vllm-openai@"
                       "sha256:6630695e452bd4d167f3b8bc3bf3151f93977997ff5dc7cd7d6086037f42a052"),
             "notes": [
                 "Qwen3.8-27B NVFP4 with DFlash2 speculative decoding. The RadixArk target "
                 "and Inco draft are third-party Safetensors repositories pinned by immutable "
                 "revisions; their launch-relevant files are declarative and remote code is disabled.",
-                "Official ARM64 vLLM image built from a9a17e7095a66ef6c6685a1c7ddd657781a78d3c, "
-                "129 commits after merged DFlash2 PR #52816. VALIDATED on DGX Spark 2026-08-26: "
+                "vLLM image built from a9a17e7095a66ef6c6685a1c7ddd657781a78d3c, "
+                "129 commits after merged DFlash2 PR #52816. VALIDATED 2026-08-26: "
                 "NVFP4 CUTLASS, fused CUDA GDN decode, vision, thinking on/off, low/xhigh effort, "
                 "timeout recovery, non-repetitive long generation, and restart all passed.",
                 "QUALITY: three-run battery passed 12/12 structured-tool and 12/12 executable-code "
@@ -812,8 +776,7 @@ DEFAULT_CONFIG = {
             "notes": [
                 "Official Qwen/Qwen3.8-27B BF16 revision "
                 "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0, native multimodal hybrid "
-                "Gated DeltaNet/full-attention model with 262K context. Validated on DGX "
-                "Spark 2026-08-16.",
+                "Gated DeltaNet/full-attention model with 262K context. Validated 2026-08-16.",
                 "Quality-first profile uses BF16 weights and KV cache, MTP disabled, 0.85 "
                 "memory utilization, and two sequence slots. Vision (solid-blue PNG), "
                 "thinking on/off, structured tools, and executable code all pass; the "
@@ -853,7 +816,7 @@ DEFAULT_CONFIG = {
             "extends": "qwen3.8-27b-bf16",
             "notes": [
                 "Validated speed variant of qwen3.8-27b-bf16: built-in MTP at depth 2 "
-                "with prefix caching disabled. On DGX Spark 2026-08-16 it measured 7.0 "
+                "with prefix caching disabled. On 2026-08-16 it measured 7.0 "
                 "tok/s at ~55K input (50.0s TTFT, 1,094 prefill tok/s), versus the base "
                 "profile's 4.2 tok/s.",
                 "The three-run quality battery passed 12/12 structured-tool and 12/12 "
@@ -874,8 +837,8 @@ DEFAULT_CONFIG = {
         },
         "glm-4.7-flash": {
             "tok_s": 18,
-            "notes": ["zai-org/GLM-4.7-Flash on the nightly aarch64 image (DGX Spark = ARM); "
-                      "MLA attention (VLLM_ATTENTION_BACKEND=TRITON_MLA); high concurrency "
+            "notes": ["zai-org/GLM-4.7-Flash; MLA attention "
+                      "(VLLM_ATTENTION_BACKEND=TRITON_MLA); high concurrency "
                       "(max-num-seqs 64). Recipe has no port -> defaults to 8000."],
             "image": "vllm/vllm-openai:nightly-aarch64",
             "model": "zai-org/GLM-4.7-Flash",
@@ -901,14 +864,8 @@ DEFAULT_CONFIG = {
             "notes": [
                 "Gemma 4 31B IT NVFP4 (4-bit MLP/embeddings via ModelOpt; attention stays "
                 "BF16 -> real footprint ~30GB). Multimodal (text+image), reasoning + tools.",
-                "Needs the Gemma4-specific image (Gemma4ForConditionalGeneration / "
-                "transformers ~5.5); rolling gemma4-cu130 tag.",
                 "Do NOT pass --quantization; vLLM auto-detects (explicit reportedly errors -- but the "
                 "#40291 cite is an unrelated OOM bug, no ValueError issue located; auto-detect is safe).",
-                "kv-cache fp8 intentionally OMITTED on Spark (predictability + sm121 FP8-kernel "
-                "risk; ~30GB model leaves KV room).",
-                "DENSE 31B is bandwidth-heavy on GB10 (~7 tok/s); the gemma4-26b-a4b MoE "
-                "profile (~52 tok/s) is a better Spark fit for latency-sensitive work.",
             ],
             "image": "vllm/vllm-openai:gemma4-cu130",
             "model": "nvidia/Gemma-4-31B-IT-NVFP4",
@@ -935,26 +892,7 @@ DEFAULT_CONFIG = {
                 "Gemma 4 26B-A4B NVFP4 -- the MoE sibling of the dense 31B: 25.2B total / "
                 "3.8B active per token (8 of 128 experts + 1 shared, 1024-tok sliding window). "
                 "Multimodal (text+image), reasoning + tool-calling. 256K context.",
-                "The Spark's pick over the dense 31B: only 3.8B active params read per decode "
-                "step on the 273 GB/s bus -> ~52 tok/s vs the 31B's ~7 (ai-muninn DGX Spark "
-                "benchmark). ~16.5GB weights leave ~82GB for KV cache.",
-                "IMAGE = standard vllm/vllm-openai:nightly (Gemma4 is now native in mainline vLLM "
-                "-- no gemma4-cu130, no patch shim). The old gemma4-cu130 pin (vLLM 0.19.x) could "
-                "NOT load this NVFP4 quant (per-expert scale KeyError, PR #41683); the mainline "
-                "nightly loads it cleanly. Do NOT pass --quantization (compressed-tensors "
-                "auto-detected; explicit reportedly errors).",
-                "sm_121 has no native FP4 MoE kernels: --moe-backend marlin forces the working "
-                "Marlin FP4 dequant path (the CUTLASS/FlashInfer FP4 MoE path yields '!!!!' garbage "
-                "on GB10). Leave the linear GEMM on auto (FlashInfer CUTLASS). (Was the deprecated "
-                "VLLM_USE_FLASHINFER_MOE_FP4=0 env form of the same pin.) TP=1 only in vLLM here.",
-                "KV cache: the nightly auto-selects fp8_e4m3 from the model config (we pass no "
-                "--kv-cache-dtype) -> ~7.5M-token KV pool; output verified coherent with it. Card "
-                "sampling: temp 1.0, top_p 0.95.",
-                "VALIDATED on-box dgx-3 2026-07-26 (vllm/vllm-openai:nightly, GB10/sm_121): loads "
-                "(Resolved arch Gemma4ForConditionalGeneration, MARLIN NvFp4 MoE, TRITON_ATTN), and "
-                "clean code generation + gemma4 tool-calls both PASS (no '!!!!'). Decode 28 tok/s @ "
-                "53k ctx N=1 (TTFT 29s / prefill 1,833 tok/s); ~52 tok/s at short ctx (ai-muninn). "
-                "Weights load ~112s. Fixes the prior gemma4-cu130 launch failure.",
+                "Card sampling: temp 1.0, top_p 0.95.",
             ],
             "image": "vllm/vllm-openai:nightly",
             "model": "nvidia/Gemma-4-26B-A4B-NVFP4",
@@ -982,18 +920,6 @@ DEFAULT_CONFIG = {
                 "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic -- FP8 (compressed-tensors, per-channel "
                 "weight / per-token dynamic activation) MoE. 26B total / ~3.8B active. Multimodal "
                 "(text+image), reasoning + tools. Native in mainline vLLM (nightly).",
-                "VALIDATED on-box dgx-3 2026-07-26 (GB10/sm_121): 36 tok/s decode @ ~53k ctx N=1 "
-                "(TTFT ~29s / prefill ~1,880 tok/s); clean code gen + gemma4 tool-calls.",
-                "MoE backend = TRITON (native FP8 on GB10 via the mma.sync path). NOT marlin: GB10 "
-                "HAS native FP8 (unlike FP4), so marlin's weight-only dequant is the wrong path -- "
-                "it logs a 'no native FP8' warning and skips the FP8 tensor cores. At ~50k ctx "
-                "marlin and triton measure IDENTICAL (36) because decode is KV-bandwidth-bound, not "
-                "MoE-compute-bound; triton only pulls ahead in compute-bound regimes (short ctx / "
-                "high concurrency).",
-                "attention-backend TRITON_ATTN (FlashInfer has FP8 accuracy bugs on Blackwell). "
-                "kv-cache fp8 (~50% KV saving). DeepGEMM does NOT engage for this per-channel FP8 "
-                "(verified in-log) -- no VLLM_USE_DEEP_GEMM=0 needed (that's for block-quantized "
-                "FP8 like Qwen).",
                 "For CODING throughput, see gemma4-26b-fp8-mtp (MTP speculative decode: ~1.5x at "
                 "40k code, ~2.2x short).",
             ],
@@ -1061,13 +987,10 @@ DEFAULT_CONFIG = {
                 "token (512 experts, 10 active + 1 shared, DeltaNet architecture). NVFP4 "
                 "quantized (compressed-tensors). Pure text (no vision). 262K native "
                 "context, extendable to 1M via YaRN.",
-                "Pinned nightly-aarch64 image for sm_121 (GB10/Blackwell ARM64). sm_121 support "
-                "ships via the nightly/NGC builds; the in-tree support PR #31740 was still OPEN as "
-                "of 2026-07-22 (not a tagged release), so run a nightly and re-validate on bumps.",
                 "DeltaNet: only 12 full-attention layers (25%) maintain KV cache -> "
                 "dramatically less KV memory vs pure-attention 80B. KV cache @ 262K "
-                "context (FP8): ~61.7GB on GB10.",
-                "GB10/sm_121 Marlin backend gives ~34-62 tok/s depending on config. "
+                "context (FP8): ~61.7GB.",
+                "Marlin backend gives ~34-62 tok/s depending on config. "
                 "gpu-memory-utilization 0.90 (0.93 is risky with this context size).",
                 "No special thinking/reasoning mode -- standard causal LM. "
                 "tool-call-parser qwen3_coder.",
@@ -1103,37 +1026,13 @@ DEFAULT_CONFIG = {
                 "Qwen3-Coder-Next FP8: hybrid GDN/DeltaNet MoE (~80B total / ~3B active, "
                 "512 experts, 10 active + 1 shared). FP8 block-quantized (fine-grained, block size 128, "
                 "dynamic activation scheme). Pure text (no vision). 262K native context.",
-                "Blackwell / DGX Spark (sm_121): VLLM_USE_DEEP_GEMM=0 is REQUIRED -- DeepGEMM E8M0 FP8 "
-                "weight processing crashes at load. Disabled, FP8 falls back to TRITON, the working backend "
-                "on sm_121.",
                 "FP8 quant loaded via compressed-tensors auto-detection -- DO NOT pass --quantization flag "
                 "(crashes on qwen3_next gated DeltaNet due to cutlass_scaled_mm error with fused Q/K/V/Z "
                 "projection layout, vLLM #40934).",
                 "DeltaNet: only 12 full-attention layers (25%) maintain KV cache -> dramatically less KV "
-                "memory vs pure-attention 80B. ~64GB weights on GB10.",
+                "memory vs pure-attention 80B. ~64GB weights.",
                 "No thinking/reasoning mode -- standard causal LM. tool-call-parser qwen3_coder. "
                 "No MTP weights in this checkpoint -> speculative decode not available (correct to omit).",
-                "QUALITY-FIRST rework 2026-07-23, VALIDATED on-box same day (see the validation note "
-                "below): (1) fp8 KV cache REMOVED -- "
-                "checkpoint ships no k/v/q scales, so fp8 attention ran with uncalibrated scale 1.0 "
-                "(vLLM log: 'may cause accuracy issues'); bf16 KV keeps FULL 262144 context -- "
-                "measured on-box 2026-07-23: 1,050,664-token KV pool at 0.85 util (DeltaNet: only "
-                "12/48 layers hold KV), i.e. ~4 full-context seqs. (2) prefix caching REMOVED -- vLLM "
-                "labels Mamba/GDN 'align' mode experimental, ~zero reuse on hybrids, edge-case state-"
-                "corruption reports. (3) fastsafetensors REMOVED (load-time only; GDS unavailable on "
-                "UMA; NGC ImportError reports). (4) max-num-batched-tokens 16384 added (GDN mamba-align "
-                "block_size 2096 > old 2048 default, vLLM #36697; matches the 35B family's validated "
-                "QoS value). Attention stays flashinfer: with bf16 KV it runs fully-bf16 kernels "
-                "(log-confirmed) and is what the fast published Spark recipes use; triton_attn is the "
-                "fallback if quality still lags. VALIDATED on-box dgx-3 2026-07-23: startup log "
-                "clean (no uncalibrated-scale / experimental-cache warnings), functional PASS, "
-                "quality_eval 100% tool + 100% code (runs=2), 36.6 tok/s decode @ ~54k ctx N=1 "
-                "(was 42 with fp8 KV -- the ~13% is the bf16-KV price), TTFT 14.2s / prefill "
-                "3,835 tok/s (max-num-batched-tokens win).",
-                "MoE path (log-confirmed on 0.23.1 nightly): 'Using TRITON Fp8 MoE backend' -- correct "
-                "for sm_121. VLLM_MARLIN_USE_ATOMIC_ADD=1 is inert on TRITON but load-bearing if a "
-                "future nightly's auto-selection flips to MARLIN (known '!!!!' race without it).",
-                "First launch with --keep so a startup crash's logs survive.",
             ],
             "model": "Qwen/Qwen3-Coder-Next-FP8",
             "port": 8000,
@@ -1164,24 +1063,12 @@ DEFAULT_CONFIG = {
                 "dynamic activation scheme). Pure text (no vision). 262K native context.",
                 "unsloth quantized variant of Qwen/Qwen3-Coder-Next-FP8 (same architecture; shares the "
                 "qwen3-coder-next-fp8 config).",
-                "Blackwell / DGX Spark (sm_121): VLLM_USE_DEEP_GEMM=0 is REQUIRED -- DeepGEMM E8M0 FP8 "
-                "weight processing crashes at load. Disabled, FP8 falls back to TRITON, the working backend "
-                "on sm_121.",
                 "FP8 quant loaded via compressed-tensors auto-detection -- DO NOT pass --quantization flag "
                 "(crashes on qwen3_next gated DeltaNet due to cutlass_scaled_mm error with fused Q/K/V/Z "
                 "projection layout, vLLM #40934).",
                 "DeltaNet: only 12 full-attention layers (25%) maintain KV cache -> dramatically less KV "
-                "memory vs pure-attention 80B. ~64GB weights on GB10.",
+                "memory vs pure-attention 80B. ~64GB weights.",
                 "No thinking/reasoning mode -- standard causal LM. tool-call-parser qwen3_coder.",
-                "QUALITY-FIRST rework 2026-07-23, mirroring qwen3-coder-next-fp8 (same arch, same "
-                "evidence -- see that profile's notes for the full rationale; NOT yet re-validated on "
-                "hardware): fp8 KV cache / prefix caching / fastsafetensors removed; full 262144 "
-                "context retained (bf16 KV fits: 1.05M-token pool measured on the Qwen sibling); "
-                "max-num-batched-tokens 16384 (GDN mamba-align "
-                "guard, vLLM #36697); VLLM_MARLIN_USE_ATOMIC_ADD=1 as inert Marlin-race insurance "
-                "(current log-confirmed path is TRITON FP8 MoE). Was tok_s 46 @ ~50k ctx with fp8 KV "
-                "-- re-measure.",
-                "First launch with --keep so a startup crash's logs survive.",
             ],
             "model": "unsloth/Qwen3-Coder-Next-FP8",
             "port": 8000,
@@ -1214,7 +1101,7 @@ DEFAULT_CONFIG = {
                 "OpenAI gpt-oss-120b: 116.8B total / 5.1B active MoE, NATIVE MXFP4 experts (this IS "
                 "the release format -- no higher-precision 'original' upstream; every published eval "
                 "is at this precision). ~60GB weights. Harmony reasoning + tool-calling, 131K native "
-                "context. Validated on-box dgx-3 (GB10/sm_121) 2026-07-23: clean generation, "
+                "context. Validated 2026-07-23: clean generation, "
                 "reasoning-field separation + tool calls work; ~31.5 tok/s decode @ ~49k ctx N=1 "
                 "(~17/req @ N=4).",
                 "Serve the OPENAI checkpoint, NOT unsloth/gpt-oss-120b: Unsloth's Aug-2025 harmony/"
@@ -1222,16 +1109,6 @@ DEFAULT_CONFIG = {
                 "repo is unchanged since 2025-08-09 and has an OPEN vLLM tool-call failure report "
                 "(unslothai #5162). Weights are identical MXFP4 either way; Unsloth's value is now "
                 "fine-tuning only.",
-                "GB10/sm_121 MXFP4: the stock CUTLASS/FlashInfer FP4 MoE path emits SILENT '!!!!' "
-                "garbage. Force Marlin with the --moe-backend marlin FLAG (log confirms 'Using MARLIN "
-                "Mxfp4 MoE backend') + VLLM_MARLIN_USE_ATOMIC_ADD=1 (defuses a Marlin-MoE race that "
-                "prints '!!!!' at TP=1) + --attention-backend TRITON_ATTN. The VLLM_MXFP4_BACKEND env "
-                "is UNKNOWN on the 0.23.x nightly (ignored with a warning) -- the flag is the "
-                "mechanism. See SPARK_NOTES.",
-                "HARMONY VOCAB is shipped as an ASSET (o200k_base.tiktoken) mounted at "
-                "TIKTOKEN_RS_CACHE_DIR/<sha1(url)>: the DGX can't reach "
-                "openaipublic.blob.core.windows.net, so without it EVERY chat request 500s with "
-                "HarmonyError 'failed to download or load vocab file' (verified on-box 2026-07-23).",
                 "NEVER --enforce-eager (silently halves decode). Re-validate GENERATION (not just "
                 "startup) on image bumps. Optional speed lever: NVIDIA ships an EAGLE3 draft head "
                 "(nvidia/gpt-oss-120b-Eagle3-v3, in vLLM's gpt-oss recipe) for spec-decode -- A/B "
@@ -1332,7 +1209,7 @@ DEFAULT_CONFIG = {
             "extends": "laguna-s-2.1-nvfp4",
             "notes": [
                 "Optional DFlash variant of the pinned Laguna RC2 target. The matched 2.08 GiB RC2 "
-                "draft is pinned to b3b5921a; seven proposals is the conservative GB10 setting "
+                "draft is pinned to b3b5921a; seven proposals is the conservative setting "
                 "(the target card says 15, the draft card says 7). Target verification preserves "
                 "the target distribution, but keep this separate so spec-runtime regressions cannot "
                 "block the reliable target-only profile.",
@@ -1359,22 +1236,16 @@ DEFAULT_CONFIG = {
             },
         },
         "north-mini-code-w4a16": {
-            # LOCAL image, built on the Spark: `FROM vllm/vllm-openai:nightly` +
-            # `RUN pip install "cohere_melody>=0.9.0"`. Build it before first launch (omm
-            # won't be able to pull this tag). Rebuild when bumping the vLLM nightly.
             "image": "otools/vllm-cohere-melody:nightly",
             "model": "CohereLabs/North-Mini-Code-1.0-w4a16",
             "port": 8000,
             "usecase": ["Coding", "Agentic", "Reasoning"],
             "notes": [
-                "⚠️  ON-BOX 2026-07-26 (dgx-3, vLLM 0.23.1 dev748 nightly): FAILS TO LOAD -- "
-                "AttributeError: 'RoutedExperts' object has no attribute 'w2_bias' (vLLM's FusedMoE "
-                "loader lacks Cohere2Moe per-expert down-proj bias support). The config is CORRECT "
-                "(arch resolved natively with trust-remote-code off, MARLIN MoE selected, "
-                "compressed-tensors auto-detected, weights downloaded) -- this is an UPSTREAM gap: "
-                "Cohere says 'use vLLM main until a new release', and the stock nightly isn't new "
-                "enough. Do NOT launch until the melody image is rebuilt on a vLLM that supports "
-                "Cohere2Moe expert biases.",
+                "BLOCKED on the qualified runtime: loading fails because RoutedExperts lacks "
+                "w2_bias support. Do not launch until the image is rebuilt with compatible "
+                "Cohere2Moe expert-bias support.",
+                "Requires the local otools/vllm-cohere-melody image with cohere_melody installed; "
+                "the stock vLLM image does not provide the cohere_command4 parsers.",
                 "Cohere North-Mini-Code 1.0 (Cohere2MoeForCausalLM): 30B total / 3B active MoE "
                 "(128 experts, 8 active), 3:1 sliding-window/global attention, 256K native ctx / "
                 "64K max output. Apache-2.0, ungated. Interleaved thinking + agentic tool-use. "
@@ -1382,35 +1253,18 @@ DEFAULT_CONFIG = {
                 "Quant = CohereLabs/North-Mini-Code-1.0-w4a16 -- the OFFICIAL Cohere quant "
                 "(compressed-tensors nvfp4-pack, W4A16 = 4-bit weights / 16-bit activations, MoE "
                 "experts only, via Quantization-Aware Distillation; ~18-20GB). W4A16 IS the "
-                "--moe-backend marlin dequant path we force on sm_121 anyway, so ~no speed lost vs "
-                "a native-FP4 (W4A4) quant -- whose FP4 MoE path is the '!!!!' garbage one on GB10 "
-                "-- and it's a trusted publisher + a better quant method (QAD) than a third-party "
-                "PTQ. HumanEval ~90.2 class (bf16 90.9).",
+                "Marlin dequant format. It is a trusted publisher and uses Quantization-Aware "
+                "Distillation rather than third-party PTQ. HumanEval ~90.2 class (bf16 90.9).",
                 "TRUST / SECURITY: official CohereLabs repo, and config.json has NO auto_map -> "
                 "ZERO remote code. So trust-remote-code=False (set below) costs nothing: vLLM uses "
                 "its native Cohere2MoeForCausalLM impl + tokenizer.json + the tokenizer_config chat "
                 "template (all data, not code). Defense-in-depth even for a first-party quant. "
-                "(Chosen over the third-party XanuNetworks/...-NVFP4 the Spark-Arena forum "
+                "(Chosen over the third-party XanuNetworks/...-NVFP4 forum "
                 "benchmarked -- unvetted publisher.)",
-                "CUSTOM IMAGE REQUIRED. The cohere_command4 tool + reasoning parsers are NOT built "
-                "into vLLM -- they come from the cohere_melody plugin (vLLM tool-calling docs: "
-                "'requires the cohere_melody package, not installed by default'), and stock "
-                "vllm/vllm-openai images don't ship it. omm appends args to the image's `vllm "
-                "serve` entrypoint (no pip step), so bake it in: build otools/vllm-cohere-melody:"
-                "nightly on the Spark = `FROM vllm/vllm-openai:nightly` + `pip install "
-                "\"cohere_melody>=0.9.0\"`. Also needs vLLM >= 0.21 / main for Cohere2Moe (the "
-                "0.23.x nightly has the arch).",
-                "GB10/sm_121 MoE: --moe-backend marlin FLAG (the CUTLASS/FlashInfer FP4 MoE path "
-                "emits '!!!!' garbage on sm_121) + VLLM_MARLIN_USE_ATOMIC_ADD=1 (defuses the "
-                "Marlin-MoE TP=1 race that also prints '!!!!', per the gpt-oss-120b / coder-next "
-                "profiles). Cohere's own FP8 recipe uses --moe-backend triton -- A/B triton vs "
-                "marlin on-box. NOT YET VALIDATED ON HARDWARE.",
                 "Do NOT pass --quantization (compressed-tensors auto-detects nvfp4-pack-quantized). "
                 "bf16 KV cache (no --kv-cache-dtype): ~18-20GB weights leave ~100GB, so bf16 KV is "
                 "the quality-first default -- add kv-cache-dtype fp8 to reclaim memory if a longer "
                 "context needs it.",
-                "First launch with --keep so a startup crash's logs survive. Re-validate "
-                "GENERATION (not just startup) after any image rebuild.",
             ],
             "env": {
                 "VLLM_MARLIN_USE_ATOMIC_ADD": "1",
@@ -1446,16 +1300,8 @@ DEFAULT_CONFIG = {
                 "(merged 2026-08-14) for v0.27.0+; the required custom muse-glimmer image "
                 "currently identifies as v0.26.1rc1.dev608 while carrying that implementation.",
                 "QUANT = Inferact/Muse-Glimmer-30B-NVFP4-W4A4 (ModelOpt NVFP4, W4A4 gs16, "
-                "25.42 GB) -- the recipe's recommended Spark pick (leaves the shared pool for "
-                "KV + host vs the 59.6GB BF16). vLLM auto-detects (modelopt_fp4 "
-                "fused-activation), DO NOT pass --quantization. NVFP4 kernels are "
-                "Blackwell-only (fine on GB10/sm_121). The RedHatAI FP8-block (32.8GB) "
-                "triggers the DeepGEMM 'Unknown SF transformation' load crash on sm_121 "
-                "(#51884) -- avoid; NVFP4 loads fine with DeepGEMM defaults.",
-                "IMAGE PINNED to vllm/vllm-openai:muse-glimmer (by necessity, not preference): "
-                "the MuseGlimmer model code + muse_glimmer parsers are NOT in any released vLLM "
-                "wheel (nightly_required). Multi-arch (arm64 present). Re-validate GENERATION "
-                "(not just startup) on any image move.",
+                "25.42 GB). vLLM auto-detects modelopt_fp4 fused activation; do not pass "
+                "--quantization.",
                 "PARSERS ARE A PAIR -- run BOTH --reasoning-parser muse_glimmer AND "
                 "--tool-call-parser muse_glimmer: output is channel-scoped "
                 "(<|start|>assistant to=self/...to=<tool>...), reasoning surfaces on "
@@ -1518,37 +1364,22 @@ DEFAULT_CONFIG = {
                 "max_position_embeddings 1048576). Distilled from Nemotron 3 Ultra, trained "
                 "for agent harnesses. Release 2026-08-11.",
                 "QUANT = official NVFP4 (ModelOpt W4A16 gs16, FP8 on mamba in/out_proj, NVFP4 "
-                "on expert up/down_proj), ~25.2GB -- the intended DGX Spark deployment target "
-                "(NVIDIA validated 1M ctx on GB10). vLLM auto-detects (DO NOT pass "
+                "on expert up/down_proj), ~25.2GB. vLLM auto-detects (DO NOT pass "
                 "--quantization). BF16 sibling is 65.8GB reference only.",
-                "IMAGE PINNED vllm/vllm-openai:v0.27.1 (recipe-pinned known-good, "
-                "Spark-verified; multi-arch with arm64). min vLLM 0.27.1. The rolling nightly "
-                "is NOT yet vetted for this arch.",
-                "REQUIRED on Spark: --mamba-cache-mode align -- auto/selecting 'all' crashes at "
-                "CUDA-graph startup with MRv2+prefix-caching+DSpark on GB10/sm_121a (vLLM "
-                "#52317). Recipe base_args also pin --mamba-backend flashinfer and "
-                "--enable-prefix-caching. Note fp8 KV forces the scheduler block to 2304 tokens, "
-                "so prefixes under ~4.6K tokens never register cache hits (fine at agent-loop "
-                "sizes).",
-                "GB10/sm_121 NVFP4 MoE: --moe-backend marlin (W4A16 Marlin dequant is THE Spark "
-                "path -- no FP4 tensor-core route on GB10; recipe-pinned). kv-cache-dtype fp8 "
-                "(recipe NVFP4 default; capacity win). mamba_ssm_cache_dtype float32 explicit "
-                "(the float16+stochastic-rounding fast path is TRT-LLM-only and an accuracy risk "
-                "on vLLM -- NVIDIA Spark cookbook, see SPARK_NOTES).",
-                "SPEC-DECODE = DSpark (preferred on DGX Spark per recipe: lowest latency): "
+                "SPEC-DECODE = DSpark: "
                 "--speculative-config method dspark, draft nvidia/NVIDIA-Nemotron-3.5-Lightning-"
                 "30B-A3B-NVFP4-DSpark (967M total / 615M non-embedding, W4A16), "
-                "num_speculative_tokens 3. MTP (embedded, moe_backend triton on Blackwell) and "
+                "num_speculative_tokens 3. MTP (embedded, moe_backend triton) and "
                 "DFlash are alternates. On-box draft acceptance was roughly 80-90% in initial "
                 "requests.",
                 "AGGRESSIVE tuning validated on dgx4: gpu-memory-utilization 0.91 (NVIDIA "
-                "model-card Spark quickstart) + max-num-seqs 8 at 262144 ctx. ~49K N=1 measured "
+                "model-card value) + max-num-seqs 8 at 262144 ctx. ~49K N=1 measured "
                 "93.8 tok/s decode, 8.5s TTFT, and 6510 tok/s prefill. N=2/4/8 completed without "
                 "crashes; large prefills serialize heavily. The 1M sibling completed generation "
                 "at 1,034,771 input tokens: 764.8s TTFT / 1353 prefill tok/s / 221.8 decode tok/s "
                 "for a short output.",
                 "reasoning-parser nemotron_v3; tool-call-parser qwen3_coder (official NVIDIA "
-                "Spark command; matches OpenCode). enable_thinking and coding-agent "
+                "command; matches OpenCode). enable_thinking and coding-agent "
                 "force_nonempty_content are chat_template_kwargs (harness-side, config TOML). "
                 "Card sampling temp 1.0 / top_p 0.95. Thinking on/off, tools, and two-run quality "
                 "battery passed (tools and executable code 100%). Nonzero min_p is unsupported "
@@ -5573,10 +5404,9 @@ def _launch_log_path(key):
     return f"~/.config/otools/launch-{key}.log"
 
 
-# On UMA boxes (GB10 / DGX Spark) vLLM's cudaMemGetInfo can't see reclaimable page
-# cache, so a warm cache reads as "used" -> false OOM at load, or a system freeze
-# (vLLM #35313). Every launch drops the cache right before `docker run` to restore a
-# clean read -- no flag, no config; it's just how launch works. `install` sets up a
+# vLLM's memory query can miss reclaimable page cache, so a warm cache can cause a
+# false OOM at load (vLLM #35313). Every launch drops the cache right before
+# `docker run`. `install` sets up a
 # scoped NOPASSWD sudoers rule so `sudo -n` runs it unattended. `sudo -n` never
 # prompts: if the rule is missing it fails fast and we warn (best-effort, never aborts
 # the launch) instead of hanging on a password prompt.

@@ -48,20 +48,6 @@ models["qwen3-coder-next-q8-llamacpp"] = {
         "n-gpu-layers": 999,
         "trust-remote-code": False,
     },
-    "notes": [
-        "ENGINE: llama.cpp (NOT vllm) -- scitrera Spark build b10107, CUDA 13.1, pinned tag.",
-        "Purpose: quality-reference A/B vs vllm FP8 (obench loudmouth-likes-hates). Q8_0 GGUF "
-        "(84.8GB, unsloth) -- highest-precision variant that fits 128GB unified.",
-        "PROFILE HACKS (omm scaffold is vllm-shaped): `model` field carries `--jinja` because "
-        "the scaffold injects it positionally and llama-server takes no positional model; the "
-        "real GGUF path rides in vllm_args.model. --jinja enables the GGUF-embedded chat "
-        "template + native tool-call handling (no qwen3_coder/qwen3_xml parser layer).",
-        "parallel=1: full 131072 ctx in one slot; research fan-outs serialize. Raise "
-        "parallel only after verifying the GDN-hybrid recurrent state behaves with multi-slot.",
-        "Split GGUF: pass shard 00001; llama.cpp auto-loads the remaining shards.",
-        "trust-remote-code=false overrides the vllm-oriented default -- llama-server "
-        "rejects unknown flags and exits (caused the first launch failure).",
-    ],
 }
 json.dump(cfg, open(P, "w"), indent=1)
 print("profile added; gguf:", container_gguf)

@@ -6,14 +6,13 @@
 #
 # Attention layers stay BF16 (modelopt defaults exclude self-attention from quantization);
 # only MLP and token embeddings are NVFP4. Actual VRAM ~30GB despite "4-bit" label.
-# Requires Blackwell (B200/B300/sm_121+) for NVFP4 tensor cores.
 #
 # Thinking is controlled via chat_template_kwargs.enable_thinking (per-request) or
 # --default-chat-template-kwargs (server-wide). The model uses <|channel>thought\n...
 # <|channel|> delimiters for structured reasoning traces.
 #
 # Verified: model card benchmarks (GPQA Diamond 85.35%, AIME 2025 87.60%), vLLM recipe
-# at recipes.vllm.ai/Google/gemma-4-31B-it. Live validation TBD on Blackwell hardware.
+# at recipes.vllm.ai/Google/gemma-4-31B-it.
 
 match  = ["gemma4-31b-it-nvfp4", "nvidia/Gemma-4-31B-IT-NVFP4"]
 source = "https://huggingface.co/nvidia/Gemma-4-31B-IT-NVFP4"

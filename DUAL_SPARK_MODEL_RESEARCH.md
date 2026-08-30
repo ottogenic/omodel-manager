@@ -29,7 +29,7 @@ official NVIDIA support to credible but unvalidated community configurations.
 
 | OpenRouter ID | Total / active parameters | Practical checkpoint size | Two-Spark path | Assessment |
 |---|---:|---:|---|---|
-| `deepseek/deepseek-v4-flash-0731` | 284B / 13B | 166.9 GB mixed FP4/FP8 | Patched vLLM or SGLang, TP=2 | Excellent coding and agents; demonstrated on two GB10 systems |
+| `deepseek/deepseek-v4-flash-0731` | 284B / 13B | 166.9 GB mixed FP4/FP8 | Patched full-source vLLM TP=2 | Excellent coding and agents; demonstrated on two systems |
 | `deepseek/deepseek-v4-flash` | 284B / 13B | Similar | Same as 0731 | Older preview; prefer 0731 |
 | `~deepseek/deepseek-v4-flash-latest` | Alias | Same as current target | Same as current target | Currently aliases 0731; pin 0731 for reproducibility |
 | `qwen/qwen3-235b-a22b` | 235B / 22B | 134.1 GB NVFP4 | TensorRT-LLM TP=2 | Best officially documented two-Spark path |
@@ -37,7 +37,7 @@ official NVIDIA support to credible but unvalidated community configurations.
 | `qwen/qwen3-235b-a22b-thinking-2507` | 235B / 22B | 139.2 GB NVFP4 | TensorRT-LLM TP=2 | Strongest Qwen reasoning/coding option in this size class |
 | `qwen/qwen3-vl-235b-a22b-instruct` | 236B / 22B | 135.3 GB NVFP4 | vLLM TP=2 | Visual coding, screenshot, GUI, and document agents |
 | `qwen/qwen3-vl-235b-a22b-thinking` | 236B / 22B | 135.3 GB NVFP4 | vLLM TP=2 | Qualifies, but currently depends on a community quant |
-| `tencent/hy3` | 295B / 21B | 169.6 GB NVFP4 | veloGB10 TP=2 | Explicitly demonstrated on two DGX Sparks |
+| `tencent/hy3` | 295B / 21B | 169.6 GB NVFP4 | TP=2 | Explicitly demonstrated on two DGX Sparks |
 | `thinkingmachines/inkling-small` | 276B / 12B | 170.7 GB NVFP4 | vLLM or SGLang TP=2 | Strong multimodal coding and tool capability |
 | `z-ai/glm-4.5` | About 355B / 32B | About 192 GB IQ4/AWQ | llama.cpp RPC or vLLM | Good coding agent; community deployment path |
 | `z-ai/glm-4.6` | About 357B / 32B | About 201 GB NVFP4 | vLLM TP=2 | Fits with less context and runtime headroom |
@@ -58,10 +58,10 @@ not recommended as initial deployment targets.
 
 | OpenRouter ID | Conditional assessment |
 |---|---|
-| `minimax/minimax-m2.7` | AWQ/NVFP4 needs two Sparks, but an aggressive 101 GiB IQ4 build can fit one. The model license is non-commercial without authorization. |
-| `xiaomi/mimo-v2.5` | An approximately 185 GB GGUF fits two and the model is strongly agentic/multimodal. Optimized SGLang kernels do not support GB10, making experimental llama.cpp RPC the likely path. |
+| `minimax/minimax-m2.7` | The model license is non-commercial without authorization. |
+| `xiaomi/mimo-v2.5` | Strong agentic and multimodal capabilities, but no validated deployment is recorded. |
 | `arcee-ai/trinity-large-thinking` | Official W4A16 is approximately 213 GB. It may load, but runtime and long-context headroom are limited. |
-| `meta-llama/llama-4-maverick` | A prototype AWQ is approximately 215 GB. The more credible NVFP4 is approximately 234 GB and too tight. No validated Spark recipe was found. |
+| `meta-llama/llama-4-maverick` | Available checkpoints do not leave practical deployment headroom. |
 | `nousresearch/hermes-3-llama-3.1-405b` | Approximately 217 GB with IQ4_XS. Dense 405B decoding would be slow, and llama.cpp RPC remains experimental. |
 | `minimax/minimax-m3` | GPTQ is approximately 224 GB. A constrained test may work, but runtime support and useful context capacity remain questionable. |
 
@@ -72,8 +72,7 @@ agents on two Sparks.
 
 ## Recommended Test Order
 
-1. `deepseek/deepseek-v4-flash-0731` for coding-agent capability and fast MoE
-   decoding, accepting that the demonstrated GB10 route uses a patched runtime.
+1. `deepseek/deepseek-v4-flash-0731` for coding-agent capability and fast MoE decoding.
 2. `qwen/qwen3-235b-a22b-thinking-2507` for strong reasoning through the most
    NVIDIA-native model family in this capacity class.
 3. `qwen/qwen3-235b-a22b-2507` for lower-latency, non-thinking tool loops.
@@ -169,37 +168,8 @@ heavy preparation while either Spark is serving another model and refuses launch
 the configured peer route, jumbo ping, and active `mlx5` mapping all use the selected
 QSFP/RoCE interface.
 
-All three Qwen TensorRT-LLM profiles were physically qualified on a dual-Spark pair on 2026-08-11.
-Their official NVIDIA weights are pinned to exact revisions. All three use the rc8 ARM64 digest
-`sha256:c7297fdfb2e947296a4b29c8bdf8f5122e565179d65f806f85ff8fb4a478606e`,
-which includes TensorRT-LLM PR #11956's Blackwell CUTLASS TMA fix. The manager builds and
-records reviewed MPI derivatives separately for each immutable runtime. Base and Instruct
-originally passed structured tool calls, tool-result continuation, and 12,515-token coding streams
-on rc5, but Base later reproduced the upstream intermittent TMA descriptor crash and was moved to
-rc8 before requalification.
-Thinking passed reasoning/content separation, an automatic tool call and result loop, two
-12,515-token sampled streams, post-run generation health, and clean kernel logs on both nodes.
-Its final profile uses an explicit pinned tokenizer, disables FlashInfer sampling, reserves
-KV at 0.60, and retains a 32K sequence limit with 8K chunked prefill.
-
-DeepSeek V4 Flash 0731's current primary lane is c8r, pinned to the reviewed deployment kit at
-`46eb0fcbadf0e4e0be8838b18f6aa85087ed8839` and full-source vLLM at
-`48bada6ea49ad7f3ecbe03128aa76562089c8b00`. It carries 17 whole-file gx10 overlays,
-FlashInfer `0.6.16.post3`, DeepGEMM `a6b593d2`, and separate `-c8r` compile caches. The
-manager certifies matching image configuration/rootfs signatures and installed-content hashes
-across the nodes despite their different Docker storage backends. Both 74-file model snapshots
-must hash to the same 166,898,660,330-byte manifest. The prior cand7 source remains pinned at
-`15f29b7bd91d45a1678b3b8600a56512c36f13f2` as the first explicit rollback rung with isolated
-cache roots. Cand4 and cand7 stalled near 13.8K computed tokens under CUDA graphs, and later
-real-agent traffic also wedged cand7 after eager-mode qualification, so cand7 is not treated as
-the promoted stable lane. Worker-first launch refuses to run until the QSFP/RoCE route,
-MTU-sized ping, and active HCA mapping pass; it then requires API health, the complete agent
-warmup battery, and `NCCL NET/IB` evidence. No community model image or quant is used as a
-fallback. C8r subsequently passed those physical gates, a roughly 100K-context local OpenCode
-audit with repeated tools and 97% prefix-cache reuse, and a completed 20K-token stream with both
-ranks healthy afterward. The 20K numeric prompt exhausted its budget in coherent reasoning and
-returned empty visible content, matching the model's documented long numeric-constraint trait;
-this is a quality limitation, not a runtime hang.
+Build and qualification findings for implemented profiles belong in their corresponding
+`notes/<profile>.md` files rather than this model-selection survey.
 
 ## Primary Sources
 
@@ -219,7 +189,5 @@ this is a quality limitation, not a runtime hang.
 
 ## Maintenance Note
 
-Checkpoint availability, GB10 kernels, and distributed-serving support are
-changing quickly. Recheck model cards, artifact sizes, licenses, and the latest
-NVIDIA playbooks before implementing a profile or downloading hundreds of
-gigabytes of weights.
+Recheck model cards, artifact sizes, licenses, and current runtime documentation before
+implementing a profile. Record implementation findings in `notes/<profile>.md`.

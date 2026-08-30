@@ -45,11 +45,10 @@ vision           = false                  # text-only
 reasoning        = true                   # interleaved thinking (poolside_v1 reasoning parser)
 tool_call        = true                   # poolside_v1 tool parser; agentic-first model
 thinking_control = "enable_thinking"      # chat_template_kwargs; server default ON via launch flag
-concurrency      = 1                       # RC2's 99.7GB target leaves limited KV headroom on GB10
+concurrency      = 1
 
 [context]
-native = 229376                            # validated serving cap for the target-only Spark profile
-                                           # (RC2 arch/config supports 1M; card recipe uses 256K)
+native = 229376
 
 [presets.plan]                # planning - thinking on
 thinking   = true

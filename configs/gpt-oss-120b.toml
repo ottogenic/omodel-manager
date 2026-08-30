@@ -5,9 +5,6 @@
 # `reasoning_effort` (low | medium | high), not an on/off switch. Launch via the
 # omodel-manager `gpt-oss-120b` profile. Values are STARTING POINTS to sweep from.
 #
-# Validated on-box dgx-3 (GB10/sm_121) 2026-07-23: clean generation (no '!!!!'),
-# reasoning-field separation + tool calls both work. ~31.5 tok/s decode @ ~49k ctx (N=1).
-#
 # Card sampling: temperature=1.0, top_p=1.0 (OpenAI's gpt-oss default).
 
 match  = ["gpt-oss-120b", "openai/gpt-oss-120b"]

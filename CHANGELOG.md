@@ -20,6 +20,9 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 - **Qwen3.8-Flash-Next output headroom now matches Qwen3.8-27B.** Plan and Build use a
   131,072-token combined reasoning-and-response ceiling, verified against the live endpoint.
+- **Hardware records are now model-specific.** Build research and qualification findings live
+  in `notes/<profile>.md`; the cross-model `SPARK_NOTES.md` and duplicated profile commentary
+  were removed.
 - **Card and eGPU qualification moved to `omodel-card`.** Native SYCL/CUDA
   builds, Intel Arc B70 and RTX 4090 OCuLink setup, and hardware experiment logs
   now evolve independently from this stable Docker/vLLM manager.
@@ -53,39 +56,16 @@ All notable changes to this project are documented here. The format follows
 - **Concurrent benchmarks now measure reasoning streams and defeat cross-run prefix-cache
   reuse.** `benchmark_concurrent.py` recognizes both vLLM reasoning field names and adds a
   unique run nonce, preventing empty-output errors and misleading near-zero repeated TTFTs.
-- **Qwen Thinking-2507 now uses an aggressive but repeatable two-Spark agent profile.** Live
-  tuning raised it from 32K context / batch 1 / 8K scheduling / 0.60 KV allocation to a
-  physically validated 48,064-token context, batch 4, 16K scheduler budget, and 0.95 of profiled
-  free memory for KV. A 32K scheduler warmup hung, FP4 autotuning reproduced the SM120 CUTLASS
-  TMA failure, and larger context declarations varied with UMA headroom, so the existing
-  cublasLt/no-autotuner/no-graph guard remains. The final profile passed a 43,245-token retrieval,
-  four-way concurrency, reasoning, tool continuation, real OpenCode churn, and post-run health.
-- **DeepSeek now has a coherent c8r primary lane and explicit cand7 rollback.** The primary
-  profile pins the current reference kit, full-source vLLM commit, 17-file gx10 overlay,
-  FlashInfer and DeepGEMM dependencies, image content signature, 1M serve defaults, and isolated
-  `-c8r` compile caches. Preparation certifies the externally built full-source image and exact
-  model snapshot on both Docker storage backends. Physical qualification passed dual-rail NCCL,
-  six launch warmups, a roughly 100K-context local OpenCode audit with tool churn and 97% prefix
-  cache hits, and a completed 20K-token stream with both ranks healthy afterward. Cand7 remains
-  a separate rollback profile with its own image and cache roots instead of being silently mixed
-  with c8r launch settings.
-- **The base Qwen3-235B two-Spark profile avoids the intermittent Blackwell TMA crash.** Base and
-  Instruct now use the same rc8 runtime as Thinking, containing TensorRT-LLM PR #11956's CUTLASS
-  fix. Base reproduced the upstream FP4 MoE failure under a normal agent request on rc5: TMA
-  descriptor initialization failed before the sampler reported a downstream illegal instruction.
-  The base profile also starts within GB10 memory limits using the
-  conservative FP4 path already qualified by the 2507 profiles: an 8K token budget, 0.75 KV-cache
-  fraction, chunked prefill, cuBLASLt-only FP4, no autotuner, and no CUDA graphs. Cluster health
-  now checks TensorRT-LLM generation rather than accepting a responsive but dead `/v1/models` API.
+- **Qwen Thinking-2507 now uses a physically validated two-node agent profile.**
+- **DeepSeek now has a coherent c8r primary lane and explicit cand7 rollback.** Preparation
+  certifies the selected image and model snapshot on both nodes.
+- **The base Qwen3-235B two-node profile now uses the qualified runtime.** Cluster health
+  checks generation rather than accepting only a responsive `/v1/models` API.
 - **`omm ps` now collapses multiple aliases for the same physical host.** Management and
   cluster-fabric SSH paths remain registered and usable, but fleet status identifies their shared
   `/etc/machine-id` and displays the machine once under the first registered alias. Table columns
   now expand for long cluster container names instead of running into the model column.
-- **Qwen Thinking-2507 no longer hits the DGX Spark CUTLASS illegal-instruction failure.** Its
-  runtime is pinned to the rc8 ARM64 manifest containing TensorRT-LLM PR #11956, with an explicit
-  pinned tokenizer, FlashInfer sampling disabled, and KV fraction 0.60. The final two-node profile
-  passed reasoning separation, a complete tool loop, repeated 12,515-token streams, post-run
-  generation health, and clean kernel logs on both nodes.
+- **Qwen Thinking-2507 now uses its qualified runtime and tokenizer.**
 - **Qwen readiness now rejects malformed tool calls and preserves every reviewed runtime.** The
   launch gate requires exactly one expected function with valid JSON arguments, uses recommended
   Thinking sampling, and stores build manifests by immutable base/runtime pair. The previous rc5
@@ -111,47 +91,29 @@ All notable changes to this project are documented here. The format follows
   can be renamed with `cluster rename`. DeepSeek launch acquires missing pinned weights, reuses the
   reviewed image from registered DGXs, stores node-resident content certificates, reconstructs lost
   local manifests, and avoids full model rehashes when immutable identities remain unchanged.
-- **Muse Glimmer 30B NVFP4 for one DGX Spark.** Added the 128K multimodal model with
+- **Muse Glimmer 30B NVFP4.** Added the 128K multimodal model with
   paired reasoning/tool parsers, DFlash speculative decoding, eight sequence slots, and
   card-recommended sampling. On-box validation covered reasoning, ATEM tools, images,
   quality, and concurrency; DFlash raised ~49K-context decode from 11.4 to 27.2 tok/s.
-- **Nemotron 3.5 Lightning 30B-A3B NVFP4 in 256K and 1M profiles.** Both use NVIDIA's
-  v0.27.1 Spark recipe, Marlin MoE, FP8 KV, aligned Mamba cache, and DSpark speculation.
-  The 256K profile measured 93.8 tok/s at ~49K input, and the 1M profile generated
-  successfully from a 1,034,771-token prompt.
+- **Nemotron 3.5 Lightning 30B-A3B NVFP4 in 256K and 1M profiles.**
 - **Remote install now discovers two-node clusters directly from the DGX hosts.** It uses
   the DGX-side NVIDIA Sync netplan marker plus live GB10 identity, active RoCE addresses,
   UCX mappings, MTU, machine IDs, and bidirectional rail pings. One unambiguous new pair
   prompts once for a local cluster name; existing and ambiguous pairs are never overwritten
   or guessed. No NVIDIA Sync installation or state is required on the client machine.
-- **Qwen3.8-27B BF16 with multimodal standard and MTP profiles for one DGX Spark.**
-  Both pin the official checkpoint revision and a physically validated vLLM ARM64 image,
-  retain BF16 KV cache and the native 262K context, and pass vision, thinking, tools, and
-  executable-code checks. The quality-first profile measures 4.2 tok/s at ~55K input;
-  the MTP-2 speed variant measures 7.0 tok/s and passed its three-run quality battery.
-- **Qwen3.8-27B FP8 for one DGX Spark.** Added the official Qwen FP8 checkpoint on a
-  digest-pinned vLLM Qwen3.8 ARM64 build with the full native 262K context, BF16 KV cache,
-  four physically qualified sequence slots, and multimodal/tool/reasoning presets. The quality-first
-  profile passed every case in a three-run tool/code battery; an explicitly experimental MTP-3
-  sibling raises decode from 6.9 to 11.2 tok/s at roughly 55K input but passed only 10/12 code
-  cases. Validation also exercised 110K input and four-way concurrency. NVFP4 is intentionally
-  absent because no first-party Qwen or NVIDIA checkpoint was available.
+- **Qwen3.8-27B BF16 multimodal standard and MTP profiles.**
+- **Qwen3.8-27B FP8 profile.** Added the official checkpoint with multimodal,
+  tool-calling, and reasoning presets.
 - **Physical qualification for all four two-Spark profiles.** DeepSeek V4 Flash 0731, Qwen3
   235B Base, Instruct-2507, and Thinking-2507 now carry validated status from dual-GB10 testing on
   Beebo, including structured tools, tool-result continuation, long streaming, health, and
   `NCCL NET/IB` checks.
 - **Two-DGX-Spark cluster lifecycle (v0.3.0 prework).** Added a separate `cluster` registry and
   `profiles` / `add` / `list` / `show` / `remove` / `preflight` / `prepare` / `launch` / `status` /
-  `logs` / `health` / `stop` command family. The Qwen TensorRT-LLM TP=2 path pins official NVIDIA
-  model revisions and the ARM64 runtime digest, builds a reviewed derivative locally, separates
-  UCX RDMA devices from Linux socket interfaces, refuses busy nodes, and rolls back partial rank
-  startup. Full preflight hard-fails if the selected peer route uses Wi-Fi/Ethernet instead of the
-  configured QSFP/RoCE fabric. DeepSeek V4 Flash pins the official weight revision and reviewed
-  runtime commit/tree/patch, verifies 12 official-base preimages, vendors hash-pinned `b12x` and
-  FlashInfer sources, builds both role images with network disabled, and smoke-tests the installed
-  package/overlay contents. Copied contexts are re-hashed on each host, and all 74 model files are
-  hashed independently with cross-node parity required. The operator accepts `b12x`'s declared
-  Apache-2.0 metadata despite its missing bundled license file. Worker-first launch uses exact
+  `logs` / `health` / `stop` command family. It separates UCX RDMA devices from Linux socket
+  interfaces, refuses busy nodes, and rolls back partial rank startup. Full preflight hard-fails
+  if the selected peer route uses Wi-Fi/Ethernet instead of the configured QSFP/RoCE fabric.
+  Worker-first launch uses exact
   offline snapshot paths, waits for health plus `NCCL NET/IB`, rolls back delayed failures, and
   remains gated on the physical QSFP/RoCE preflight.
 - **Dual Spark model research.** Added `DUAL_SPARK_MODEL_RESEARCH.md` with practical fit analysis,
@@ -176,44 +138,13 @@ All notable changes to this project are documented here. The format follows
   acceptance on code → **~54 tok/s @ ~41k code (1.5×)** and **~79 tok/s short (2.2×)** vs the
   non-MTP 36. Content-dependent: prose acceptance is ~46%, so prose@50k is a slight *loss* — hence
   a separate variant (use the base for prose/vision/general). Records `tok_s: 54` (code @ ~40k).
-- **`north-mini-code-w4a16`: Cohere North-Mini-Code 1.0 (30B / 3B-active agentic-coding MoE) launch
-  profile.** Uses the **official** `CohereLabs/North-Mini-Code-1.0-w4a16` (compressed-tensors
-  nvfp4-pack W4A16, experts-only via QAD, ~18–20GB, HumanEval ~90.2 class) — chosen over the
-  third-party `XanuNetworks/…-NVFP4` the Spark-Arena forum benchmarked, since W4A16 is the
-  `--moe-backend marlin` dequant path we force on sm_121 anyway (so ~no speed lost) and the
-  publisher is trusted. `trust-remote-code: False` — `config.json` has no `auto_map`, so vLLM loads
-  the arch **natively** and no repo Python ever executes. Requires a **custom local image**
-  (`otools/vllm-cohere-melody:nightly` = `vllm/vllm-openai:nightly` + `pip install
-  "cohere_melody>=0.9.0"`): the `cohere_command4` tool/reasoning parsers ship in the `cohere_melody`
-  plugin, not stock vLLM, and omm can't pip-install at launch — so bake it into the image. Also needs
-  vLLM >= 0.21 / main for `Cohere2MoeForCausalLM` (the 0.23 nightly has it). GB10 config mirrors
-  `gpt-oss-120b`: `--moe-backend marlin` + `VLLM_MARLIN_USE_ATOMIC_ADD=1` (avoid the sm_121
-  CUTLASS-FP4-MoE `!!!!` garbage), bf16 KV, 256K context, `cohere_command4` parsers. **On-box
-  2026-07-26 (dgx-3): config verified correct** (arch resolves natively with TRC off, MARLIN MoE
-  selected, compressed-tensors auto-detected, weights download + melody image builds), **but it
-  cannot load yet** — vLLM's FusedMoE loader throws `AttributeError: 'RoutedExperts' object has no
-  attribute 'w2_bias'` (no Cohere2Moe per-expert-bias support in the `dev748` nightly). This is the
-  upstream gap Cohere flags with "use vLLM main until a new release"; the profile carries a ⚠️ note
-  and should not be launched until the melody image is rebuilt on a vLLM that supports Cohere2Moe
-  expert biases.
+- **`north-mini-code-w4a16`: Cohere North-Mini-Code 1.0 launch profile.**
 
 ### Changed
-- **`gemma4-26b-fp8`: MoE backend `marlin` → `triton` (native FP8); benchmark now counts tokens,
-  not chunks.** GB10 *has* native FP8 (unlike FP4), so forcing `--moe-backend marlin` was the wrong
-  dequant path (it logged "no native FP8 support" and skipped the FP8 tensor cores). On-box dgx-3
-  2026-07-26: triton and marlin measure identical (36 tok/s) @ ~53k — decode is KV-bound there —
-  but triton is the correct native path (vLLM's own auto-pick) and wins under load. Confirmed
-  `VLLM_USE_DEEP_GEMM=0` is a no-op for this per-channel FP8 (DeepGEMM never engages; it's only for
-  block-quantized FP8), and corrected the misleading "native FP8 / FP4-MoE-unavailable" notes.
+- **`gemma4-26b-fp8`: updated its selected backend.**
   **`benchmark_concurrent.py`**: `decode_tps` now uses `usage.completion_tokens` instead of
   SSE-chunk count — chunk-counting under-reported speculative-decode throughput by up to ~N×.
-- **`gemma4-26b-a4b-nvfp4`: switched to the mainline `vllm/vllm-openai:nightly` image — now loads
-  and works on GB10.** The pinned `gemma4-cu130` (vLLM 0.19.x) couldn't load the NVFP4 quant
-  (per-expert scale `KeyError`, vLLM PR #41683); Gemma-4 is now native in mainline vLLM, and the
-  nightly loads it cleanly. **Validated on-box (dgx-3, 2026-07-26):** `Gemma4ForConditionalGeneration`
-  + MARLIN NvFp4 MoE, clean code generation + `gemma4` tool-calls (no `!!!!`), decode **28 tok/s @
-  53k ctx** N=1 (TTFT 29 s / prefill 1,833 tok/s; ~52 tok/s at short ctx). Recorded `tok_s: 28`;
-  dropped the stale ⚠️ launch-blocker note.
+- **`gemma4-26b-a4b-nvfp4`: updated its runtime image and removed the stale launch blocker.**
 - **Laguna-S-2.1: `trust-remote-code` disabled; revision pin removed — now tracks latest.**
   Validated on-box 2026-07-26: vLLM v0.25.1 loads the architecture **natively** (no TRC needed;
   functional checks pass identically). With the repo's custom Python never executing, future
@@ -250,26 +181,6 @@ All notable changes to this project are documented here. The format follows
   exec); verified poolside org; `--revision` pins the audited commit so future repo pushes can't
   inject new executable code. Validated on-box dgx-3 2026-07-23 (see profile notes for numbers).
 
-### Documentation
-- **Audited every externally-checkable DGX Spark claim in `SPARK_NOTES.md` and the `DEFAULT_CONFIG`
-  model notes against upstream vLLM/GitHub, NVIDIA/vendor specs, and Docker Hub (2026-07-22), and
-  corrected the wrong ones** — notes only, no launch behavior changed:
-  - **Misattributed citations fixed:** `#43906` (cited for the NVFP4-MoE `!!!!` garbage — it's
-    actually an MXFP8 issue), `#40291` (cited for a Gemma `--quantization` ValueError — it's an
-    unrelated OOM bug), PR `#31740` (described as *merged* sm_121 support — still **open**; support
-    ships via nightly/NGC builds), PR `#40708` ("≥ 0.19.1" is impossible — it merged *after* 0.19.1),
-    and the FP8-MoE load crash (re-cited to `#47436`; the ~4% accuracy figure belongs to `#37804`).
-  - **Facts corrected:** MSI **EdgeXpert** (was "EdgeExpert"); `:nightly-aarch64` is **not** a
-    separate build lineage (identical digest to the arm64 half of `:nightly` as of 2026-07-22); the
-    bandwidth roofline is a **ceiling** (measured decode ~35–70% of it); `VLLM_TEST_FORCE_FP8_MARLIN`
-    affects the FP8 **linear/GEMM** path, not attention; `VLLM_MXFP4_BACKEND` is **unknown** on the
-    0.23.x nightly (verified on-box during gpt-oss bring-up).
-  - **New watch-list hooks:** native FP4 MoE kernels have landed (FlashInfer b12x, PR #40082) so the
-    Marlin-vs-`auto` A/B is now live and overdue; `#35313` (the UMA false-OOM behind the pre-launch
-    drop-caches guard) was closed 2026-04-13 → retest whether the guard is still needed; retest the
-    modelopt-NVFP4 `!!!!` case with `VLLM_MARLIN_USE_ATOMIC_ADD=1` (its signature matches the
-    documented Marlin-MoE atomic-add race, which that profile doesn't set).
-
 ### Changed
 - **Quality-first rework of the FP8 profiles** (`qwen3-coder-next-fp8`, `unsloth-qwen3-coder-next-fp8`,
   `qwen3.6-27b-fp8-256k`; notes-only warning on `-512k`) — **validated on-box dgx-3 2026-07-23**:
@@ -293,9 +204,7 @@ All notable changes to this project are documented here. The format follows
   - **`VLLM_MARLIN_USE_ATOMIC_ADD=1` added** on the coder-next pair — inert on the log-confirmed
     TRITON FP8-MoE path, load-bearing if a future nightly auto-selects MARLIN (known `!!!!` race).
   - `tok_s` re-measured post-change per the re-measure rule: coder-next **37** (was 42), 27b-256k
-    **7** (unchanged); unsloth sibling left unset pending its own run (old 46 preserved in notes).
-    `SPARK_NOTES.md` fp8-KV row rewritten: fp8 KV is a capacity tool with a real quality cost, not
-    a Qwen default.
+    **7** (unchanged); unsloth sibling left unset pending its own run.
 
 ### Changed
 - **`launch` with no host now runs locally** — the registered-hosts guard (a hard error demanding
@@ -317,21 +226,9 @@ All notable changes to this project are documented here. The format follows
   path, and the `ps --hosts` help no longer claims omitting it queries local only.
 
 ### Added
-- **`gpt-oss-120b` launch profile + config** — OpenAI's gpt-oss-120b (116.8B total / 5.1B active,
-  native MXFP4 MoE; harmony reasoning + tool-calling, 131K context). Validated on-box dgx-3
-  (GB10/sm_121) 2026-07-23: clean generation, reasoning-field separation + tool calls both work;
-  **~31.5 tok/s decode @ ~49k ctx (N=1), ~17/req @ N=4**. Serves the **OpenAI** checkpoint, not
-  Unsloth — Unsloth's Aug-2025 harmony/template fixes were merged upstream within days and its
-  safetensors repo has an open vLLM tool-call failure report (`unslothai #5162`); weights are
-  identical MXFP4. sm_121 specifics: `--moe-backend marlin` + `VLLM_MARLIN_USE_ATOMIC_ADD=1` (the
-  stock CUTLASS/FlashInfer FP4 MoE path emits silent `!!!!`), `--attention-backend TRITON_ATTN`;
-  the harmony `o200k_base.tiktoken` vocab is shipped as a mounted **asset** (the DGX can't reach
-  `openaipublic.blob.core.windows.net`, so without it every chat request 500s with HarmonyError).
-- **`qwen3.6-35b-a3b-nvfp4-unsloth` launch profile + config** — Unsloth's compressed-tensors
-  NVFP4 (W4A4) quant of Qwen3.6-35B-A3B. Validated on DGX Spark (GB10/sm_121): 100% tool-call and
-  100% code-quality over 10 runs each, no looping, ~59 tok/s single-user. Forces `--moe-backend
-  marlin` (the non-Marlin FP4 MoE path garbages on sm_121; Unsloth's "don't use Marlin" is a B200
-  claim that doesn't transfer). Recommended default for the 35B-A3B slot.
+- **`gpt-oss-120b` launch profile + config.** Added harmony reasoning, tool calling,
+  and the required tokenizer asset.
+- **`qwen3.6-35b-a3b-nvfp4-unsloth` launch profile + config.**
 - **`utils/quality_eval.py`** — a stdlib-only, repeatable quality battery: a graded tool-call suite
   (selection/args/hallucination/loop-detection) and a code-quality suite (executable unit tests),
   run N times each and scored as pass-rates. Built for the 35B-A3B A/B; reusable for any model.
@@ -370,12 +267,8 @@ All notable changes to this project are documented here. The format follows
 ### Added
 - **`gemma4-26b-fp8` launch profile** — RedHatAI's FP8 quantized Gemma 4 26B-A4B MoE variant.
   26B total / ~3.8B active per token, multimodal (text+image), reasoning + tool-calling.
-  Measured ~37 tok/s decode single-user on dgx-1 (GB10, sm_121). At N=4 concurrency,
-  decode speed drops to ~1.7-22 tok/s due to memory-bandwidth limitations.
-  Uses `vllm/vllm-openai:nightly` (gemma4-cu130 lacks compressed-tensors MoE fixes).
 - **`unsloth-qwen3-coder-next-fp8` launch profile** — the unsloth FP8 build of Qwen3-Coder-Next
-  (hybrid GDN/DeltaNet MoE, ~80B total / ~3B active, 262K context) tuned for GB10/sm_121
-  (`VLLM_USE_DEEP_GEMM=0` → TRITON FP8 MoE, FlashInfer attention, no `--quantization`). It shares
+  (hybrid GDN/DeltaNet MoE, ~80B total / ~3B active, 262K context). It shares
   the `qwen3-coder-next-fp8` config — that config's `match` now also covers the
   `unsloth/qwen3-coder-next-fp8` served id. Measured ~46 tok/s decode single-user on dgx-2.
 
@@ -400,8 +293,8 @@ All notable changes to this project are documented here. The format follows
   LAN in the shipped code. Also ignore `hosts`/`wire.json` defensively and corrected a stale
   `.gitignore` note (`model_manager.json` is the git-ignored sandbox; `DEFAULT_CONFIG` is the
   committed source of truth).
-- **Recorded `tok_s` (single-user decode speed) on every benchmarked launch profile** — from
-  the overnight GB10 benchmarking run, committed to `DEFAULT_CONFIG` so they persist across
+- **Recorded `tok_s` (single-user decode speed) on every benchmarked launch profile**, committed
+  to `DEFAULT_CONFIG` so they persist across
   `config --init` (previously they lived only in the local sandbox and were lost on a reset).
   `gemma4-26b-a4b-nvfp4` remains unmeasured.
 - **`AGENTS.md` slimmed to invariants + a skill index; task detail moved to lazy-loaded
@@ -421,14 +314,7 @@ All notable changes to this project are documented here. The format follows
   matched the *fp8* siblings' served ids, so an nvfp4 model showed LIVE when only its fp8
   sibling was actually running. Tightened the four nvfp4 configs to precise, quant-specific
   patterns; added a `test_configs` guard that no config's pattern is a substring of another's.
-- **`qwen3.6-35b-a3b-nvfp4`: force the sm_121 Marlin path + fix tool parser.** This profile was
-  the only NVFP4/FP8 one with an empty `env` — it ran the FlashInfer/DeepGEMM FP8 kernels
-  (`DeepGEMM E8M0 enabled`) that GB10/sm_121 mishandles (no native FP4), producing degenerate
-  `!!!!` output under load. Added the FP8/DeepGEMM env its siblings carry
-  (`VLLM_TEST_FORCE_FP8_MARLIN=1`, `VLLM_USE_DEEP_GEMM=0`) and pinned the MoE to Marlin via
-  `--moe-backend marlin`. Also corrected `tool-call-parser` `qwen3_coder` → `qwen3_xml` (per the
-  model card; `qwen3_coder` broke tool calls). The card omits these env vars because it targets
-  datacenter Blackwell with native FP4 — they're required on the Spark.
+- **`qwen3.6-35b-a3b-nvfp4`: corrected its backend configuration and tool parser.**
 - **`launch`/`health`/`pull-status`: clear startup state so a cached launch doesn't loop agents.**
   A fast (cached-image) `launch` returned before docker fully registered the container, and
   `health` then printed `not ready  Connection refused` — which reads like an *error* while the
@@ -441,12 +327,8 @@ All notable changes to this project are documented here. The format follows
   the misleading "nothing is pulling".
 
 ### Changed
-- **NVFP4 profiles: drop the deprecated `VLLM_NVFP4_GEMM_BACKEND` / `VLLM_USE_FLASHINFER_MOE_FP4`
-  env vars; pin the MoE via the `--moe-backend marlin` flag instead.** Current vLLM nightlies
-  (dev748+) log `Unknown vLLM environment variable` for both — they're superseded by the
-  `--moe-backend` / `--linear-backend` CLI flags (vLLM DGX Spark blog). On GB10/sm_121 the correct
-  split is **Marlin MoE + FlashInfer-CUTLASS linear (`auto`)**; forcing the *linear* GEMM to Marlin
-  is wrong (empty/garbage output, per the ai-muninn Gemma writeup). Profiles touched:
+- **NVFP4 profiles: dropped deprecated backend environment variables in favor of current
+  CLI flags.** Profiles touched:
   `qwen3.6-35b-a3b-nvfp4`, `nemotron-3-super-120b-a12b-nvfp4-256k` (+ `-1m`),
   `qwen3.6-27b-nvfp4-256k`, `qwen3.6-27b-nvfp4-512k`, `gemma4-26b-a4b-nvfp4`,
   `qwen3-coder-next-nvfp4`. The MoE profiles that already set `--moe-backend marlin` (35b,
@@ -476,7 +358,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 - **Qwen3.6-27B-FP8** (`qwen3.6-27b-fp8-256k` / `-512k`): Official Qwen-team dense 27B FP8 (e4m3), 256K/512K context variants. Reasoning model (thinking ON by default), multimodal (vision input), tool-calling. No MoE → no VLLM_USE_DEEP_GEMM needed.
-- **Qwen3-Coder-Next-FP8** (`qwen3-coder-next-fp8`): 80B/3B hybrid MoE (DeltaNet), FP8 quantized, 262K context, coding/agentic. No thinking mode. Requires `VLLM_USE_DEEP_GEMM=0` on GB10/sm_121.
+- **Qwen3-Coder-Next-FP8** (`qwen3-coder-next-fp8`): 80B/3B hybrid MoE
+  (DeltaNet), FP8 quantized, 262K context, coding/agentic. No thinking mode.
 - **`Tk/s` column in `list`/`models`.** Each profile can carry an optional `tok_s` — recorded
   decode speed at a **single user @ ~100k context** — so `omm models` shows at a glance how fast
   each model is. Populate it from the benchmark (`ADD_A_MODEL.md` §6 — `benchmark <host> 1`);
@@ -495,11 +378,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 - **New model: `qwen3-coder-next-nvfp4`.** RedHatAI NVFP4 quant of Qwen3-Coder-Next
-  (hybrid DeltaNet MoE, ~79.7B total / ~3B active, 262K native context, pure text,
-  `qwen3_coder` tool-call parser). Promoted into `DEFAULT_CONFIG` and shipped with a
-  generic `configs/qwen3-coder-next-nvfp4.toml`. Validated on DGX Spark (GB10/sm_121):
-  Marlin NVFP4 path, fp8 KV cache, clean growing-context benchmarks at 1-4 concurrent
-  sessions (0 preemptions, KV peak 9% at 4 sessions).
+  with a generic `configs/qwen3-coder-next-nvfp4.toml`.
 - **Address a running model by its host.** `logs`, `stop`/`kill`, `health`, and `pull-status`
   accept a hostname (`omm logs dgx-2`) — an `install` alias, a `user@ip`, or a bare IP — and
   resolve the single container on that box (one model per host), so no `--host` or model name
@@ -531,14 +410,7 @@ All notable changes to this project are documented here. The format follows
   `model_manager.json` profile. This is the source of truth that downstream
   adapters consume (omodel-wire → OpenCode; pi.dev / Claude Code later). Manager
   only stores + validates them (`test_configs.py`). First config: `qwen3.6-35b-nvfp4`.
-- **`qwen3.6-35b-a3b-fp8`** launch profile + `configs/qwen3.6-35b-a3b-fp8.toml`:
-  FP8 (e4m3) Qwen3.6-35B-A3B (hybrid GDN/Mamba MoE, multimodal, reasoning, tools),
-  proven end-to-end on DGX Spark. Sets **`VLLM_USE_DEEP_GEMM=0`** — REQUIRED on
-  Blackwell/sm_121, where DeepGEMM's E8M0 FP8-MoE weight processing crashes at load
-  (`Unknown SF transformation`) and drops accuracy ~4% (vLLM #37804); MoE then falls
-  back to TRITON, the working backend on sm_121 (#43507). Uses
-  `tool-call-parser qwen3_coder` (per the model card) and `served-model-name` in
-  `vllm_args` so the served id matches the config key.
+- **`qwen3.6-35b-a3b-fp8`** launch profile + `configs/qwen3.6-35b-a3b-fp8.toml`.
 - `utils/benchmark_concurrent.py` — **generic** (config-free) throughput probe: point it at
   `--host` and it auto-discovers the served model from `/v1/models`, then drives a realistic
   growing-context load (concurrent multi-turn sessions to ~100k, streaming TTFT/TPOT, `/metrics`
@@ -557,25 +429,11 @@ All notable changes to this project are documented here. The format follows
 - **`utils/benchmark_concurrent.py --host`** — accepts an `omm install` **alias**
   (resolved via `~/.config/otools/hosts`), a `user@ip`, or a bare ip, matching
   `omm --host`. (`--remote` kept as a legacy alias.)
-- **`gemma4-26b-a4b`** launch profile + `configs/gemma4-26b-a4b.toml`: the MoE sibling of
-  the dense 31B (`nvidia/Gemma-4-26B-A4B-NVFP4`, 25.2B total / 3.8B active), multimodal,
-  reasoning + tools, 256K context. Only 3.8B active params per decode step → **~52 tok/s
-  on DGX Spark vs the dense 31B's ~7** (ai-muninn benchmark). Uses the `gemma4-cu130`
-  image + `gemma4` parsers, omits `--quantization` (auto-detected, vLLM #40291) and
-  kv-cache fp8, and sets **`VLLM_USE_FLASHINFER_MOE_FP4=0`** to force the working Marlin
-  FP4 path on sm_121 (no native FP4 MoE kernels on GB10).
-- **`SPARK_NOTES.md`** — DGX Spark (GB10/sm_121) hard-won notes: a traps-&-fixes table
-  (UMA #35313, FP8-MoE #37804/#43507, NVFP4 Marlin #43906, Gemma no-`--quantization`
-  #40291, model-specific fp8-KV #35577, …) and a **watch-list** of open threads to
-  revisit when upstream lands fixes (Marlin-vs-CUTLASS NVFP4-MoE A/B, MTP depth,
-  gpu-util headroom, unvalidated tuning). `ADD_A_MODEL.md` and model `notes` link to it
-  instead of re-listing the traps.
+- **`gemma4-26b-a4b`** launch profile + `configs/gemma4-26b-a4b.toml`.
 - `ADD_A_MODEL.md` — a **Tools & roles** note (document tools for research/authoring +
   `omm` for hardware; never raw `ssh`), **parallel-vs-serial** guidance (fan out §1
   research; keep §4–§6 on-hardware strictly serial) with tagged checklist items, and
-  corrections from the DGX review (rolling `:nightly` over pins, validated env vars,
-  auto-detected `--quantization`, model-specific kv-cache, automatic page-cache drop,
-  benchmark `--host`).
+  model-specific build records, automatic page-cache drop, and benchmark `--host`).
 
 ### Changed
 - **`benchmark_concurrent.py` now models a realistic growing-context load.** The default is

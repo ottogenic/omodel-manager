@@ -41,9 +41,9 @@ trust the evidence and note it.
 >   `omm --host <alias>` does the remote plumbing for you. If you're reaching for a raw
 >   `ssh`, stop — there's an `omm` subcommand for it.
 >
-> **Hardware context lives in SPARK_NOTES.md** — the DGX Spark
-> (GB10/sm_121) trap table + open watch-list. Read it before §1; it's why several
-> flags below are what they are, and it's where you log anything new you learn.
+> **Build findings are model-specific.** Read `notes/<profile>.md` when it exists and
+> record new results there. Never apply one model's build result to another model without
+> independently verifying it.
 
 ---
 
@@ -80,9 +80,8 @@ trust the evidence and note it.
 > **Parallelize this step.** These lookups are independent — if you can spawn
 > sub-agents, fan them out and have each return a short structured finding, then
 > synthesize. Good split: (1) fetch `config.json`, (2) fetch the model card, (3) vLLM/
-> SGLang GitHub issues for `<model> + <quant>`, (4) Blackwell/sm_121 reports,
-> (5) throughput/perf benchmarks, (6) quant-specific gotchas. Read
-> SPARK_NOTES.md first so you know the traps you're checking against.
+> SGLang GitHub issues for `<model> + <quant>`, (4) hardware reports for the exact
+> model and runtime, (5) throughput/perf benchmarks, (6) quant-specific issues.
 
 1. **Fetch `config.json`** (`<repo>/raw/main/config.json`). Extract: `model_type`,
    `architectures`, `max_position_embeddings`, `rope_theta`/`rope_scaling`,
@@ -94,16 +93,14 @@ trust the evidence and note it.
    mode, thinking control (`enable_thinking` / `reasoning_effort` / `/think`),
    tool-call/reasoning parser names, context/long-context instructions, license/gating.
 3. **Deep web research** (websearch + fetch) for **errors, issues, community
-   feedback** — especially your hardware (DGX Spark = GB10/**Blackwell**/sm_121):
+   feedback** for the exact model, quantization, runtime, and target hardware:
    - vLLM/SGLang GitHub issues for the exact model + quant (loading crashes, wrong
      flags, OOM, `max-num-seqs`/Mamba-cache limits, MoE-backend perf).
    - Search `"<model> vLLM"`, `"<model> blackwell"`, `"<model> fp8 throughput"`.
    - Note anything that changes launch flags or expectations (e.g. FP8-MoE decode
      is slow on Blackwell → NVFP4 may be the better serve).
-   - **Check your findings against SPARK_NOTES.md's trap table**
-     before drafting flags — most GB10/sm_121 surprises are already logged there
-     (FP8-MoE `VLLM_USE_DEEP_GEMM=0`, NVFP4 Marlin path, fp8-KV per-model, Gemma
-     no-`--quantization`, …). If you hit a *new* one, add it there in §7.
+   - Read `notes/<profile>.md` if it exists. Treat its observations as applying only
+     to the exact revisions it records, and verify them again when those revisions change.
 
 Write down: capabilities (vision/reasoning/tool_call), thinking mechanism, native
 context, quant + the vLLM flags it implies, and any known-issue mitigations.
@@ -115,10 +112,8 @@ Add a profile to **`model_manager.json` only** (the local, git-ignored sandbox).
 should only be changed after the model is proven. Base it on the closest existing
 profile; change only what the quant/model needs:
 
-- `image`: **default to the rolling `:nightly-aarch64`** (omit `image` to inherit the
-  config default) — this space moves weekly and pins go stale fast. **Pin only when a
-  build is genuinely required** and say why in `notes` (e.g. Gemma-4 needs
-  `gemma4-cu130`). Don't pin "to be safe."
+- `image`: choose from current upstream documentation and exact-model research. Record
+  the tested tag or digest and the reason for it in `notes/<profile>.md`.
 - `model` + `served-model-name` — put `served-model-name` **inside `vllm_args`**, set
    to the config key, so the served id matches the config's `match` (a top-level
    `served-model-name` is silently ignored and the model serves under its full HF id).
@@ -126,19 +121,13 @@ profile; change only what the quant/model needs:
    It is NOT the same as the config's top-level `model` field (the HF repo ID).
    Downstream tools that call the API must use the served name, not the HF ID.
 - `port` (default 8000 — one model per box at a time).
-- `env`: quant/runtime vars. On DGX Spark the validated ones (see
-  SPARK_NOTES.md) are **`VLLM_USE_DEEP_GEMM=0`** (FP8-MoE) and
-  **`VLLM_TEST_FORCE_FP8_MARLIN=1`** (FP8 attention → Marlin). Pin the NVFP4 MoE to Marlin with
-  the **`--moe-backend marlin`** *flag* (in `vllm_args`), **not** the old
-  `VLLM_USE_FLASHINFER_MOE_FP4` / `VLLM_NVFP4_GEMM_BACKEND` env vars — those are deprecated
-  (current nightlies ignore them). Don't invent env vars — confirm one exists before adding it.
-- `vllm_args`: `--quantization` (**auto-detected — omit it**; an explicit value can crash
-  startup, e.g. Gemma-4 `ValueError`, vLLM #40291), `--kv-cache-dtype` (**model-specific**
-  on Spark — helps Qwen, crashes GLM-MLA, hurts Gemma; see SPARK_NOTES), `--max-model-len`,
+- `env`: add only variables supported by the selected runtime and justified by evidence
+  for this exact model. Don't invent env vars; confirm one exists before adding it.
+- `vllm_args`: determine `--quantization`, `--kv-cache-dtype`, `--max-model-len`,
   `--max-num-seqs` (respect Mamba-cache limits), `--reasoning-parser`, `--tool-call-parser`,
   `--enable-auto-tool-choice`, spec-decode, and **`--gpu-memory-utilization 0.85`** (UMA
   safety default). Leave the page-cache drop to `launch` — it's automatic (see §4).
-- `usecase` tags; `notes` capturing the research (why any image is pinned, known issues).
+- `usecase` tags; `notes/<profile>.md` capturing the tested build and known issues.
 - `assets` if the model needs side files (custom parser plugin, chat template).
 
 **Testing only — do these things:**
@@ -179,8 +168,8 @@ consume — keep it harness-agnostic. Fill from research; the live tests will co
     the image isn't cached yet, `launch` pulls it in the background and returns at once
     — poll `omodel-manager pull-status <key> --host <host>` until it says the container
     started. Then `omodel-manager logs <key> --host <host> -f`.
-    - **Page cache is dropped automatically** right before the container starts (the UMA
-      false-OOM/freeze guard, vLLM #35313 — see SPARK_NOTES). No flag: `install` set up a
+    - **Page cache is dropped automatically** right before the container starts. No flag:
+      `install` set up a
       scoped NOPASSWD sudo rule for it. If a launch prints `warning: drop-caches skipped`,
       the host wasn't fully installed — run `omodel-manager install <host> --fix` and it
       goes away. Don't work around it with raw `ssh`.
@@ -198,7 +187,7 @@ consume — keep it harness-agnostic. Fill from research; the live tests will co
  6. **Concurrency smoke test** — fire a handful of parallel requests to confirm the
     server survives concurrency (no preemption/cache errors in the logs). Save the real
     throughput sweep — single vs multi-prompt decode tok/s, tuning `--max-num-seqs`,
-    where Blackwell FP8-MoE perf shows up — for the benchmark in **§6**; don't duplicate
+    where model-specific scaling shows up — for the benchmark in **§6**; don't duplicate
     it here.
 
 ### 5. Validate features & tunable params
@@ -291,7 +280,8 @@ Only after the model runs clean and you know what's tunable:
   `python3 -m unittest` in both repos, then use the maintainer's requested git workflow.
 - Optionally `omodel-wire --verify --remote <host>` to diff declared vs live.
 - Add a `CHANGELOG.md` entry in each repo.
-- If you hit a *new* GB10/sm_121 trap during testing, log it in SPARK_NOTES.md (see §1).
+- Create or update `notes/<profile>.md` with exact revisions, hardware, observations,
+  failures, and follow-ups from this build.
 
 ---
 
@@ -301,10 +291,11 @@ Tags: `[parallel-ok]` = fan out to sub-agents if you can; `[serial]` = one at a 
 the box (see the parallel-vs-serial note up top).
 
 - [ ] `[parallel-ok]` `config.json` + card read; capabilities & flags noted
-- [ ] `[parallel-ok]` deep research done; findings checked against SPARK_NOTES.md
+- [ ] `[parallel-ok]` deep research done; matching per-model build note reviewed
 - [ ] launch profile drafted in `model_manager.json` only (not committed, not in `DEFAULT_CONFIG`)
 - [ ] `configs/<key>.toml` drafted
 - [ ] `[serial]` launched on a free node; startup logs clean
 - [ ] `[serial]` functional + concurrency test pass; single/multi tok/s noted
 - [ ] `[serial]` thinking / vision / each sampling param verified in logs
 - [ ] config corrected to observed reality; both repos committed + tests green
+- [ ] `notes/<profile>.md` records the exact tested build and unresolved follow-ups

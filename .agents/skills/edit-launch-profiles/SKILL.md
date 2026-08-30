@@ -8,10 +8,9 @@ containers — editing launch profiles, `docker run` argv construction, or launc
 behavior. It carries the Docker / vLLM / SSH documentation pointers and the
 vetted mechanisms & gotchas so you don't re-learn them the hard way.
 
-For **DGX Spark GB10 / sm_121 hardware traps** (why several profiles carry the
-env vars / flags they do), read `SPARK_NOTES.md` — it's the single source of
-truth for hardware gotchas. For **benchmarking a profile's real-context speed and
-parallel cost**, load the **benchmark-model** skill.
+For prior build findings, read only the matching `notes/<profile>.md` record. Do not
+generalize one model's findings into shared hardware guidance. For **benchmarking a
+profile's real-context speed and parallel cost**, load the **benchmark-model** skill.
 
 ## Reference — Docker / vLLM / SSH (WebFetch pointer lines)
 

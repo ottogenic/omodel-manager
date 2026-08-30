@@ -5,22 +5,13 @@
 # 1024-token sliding window. Text + image inputs, text output. Structured thinking
 # via <|channel>thought delimiters; same custom tool-call protocol as the dense 31B.
 #
-# FP8-Dynamic: compressed-tensors e4m3 quantization of the MoE weights. On GB10 this
-# beats NVFP4 because Blackwell has native FP8 hardware support, vs NVFP4's Marlin
-# dequant fallback: ~37 tok/s decode at N=1 (~1.7–22 tok/s at N=4 under parallel
-# slowdown). Requires vLLM >= 0.19.1 for the compressed-tensors MoE loader fixes
-# (PRs #40708, #41683). The FP8 sibling that WORKS today while NVFP4 waits on #41683.
-#
-# sm_121 (GB10) serve notes: FlashInfer has FP8 accuracy bugs on Blackwell, so pin
-# --attention-backend TRITON_ATTN; FP4 MoE kernels are unavailable, so --moe-backend
-# marlin. kv-cache fp8 is recommended here (saves ~50% KV memory for longer contexts).
-# TP=1 only in vLLM for this model.
+# FP8-Dynamic: compressed-tensors e4m3 quantization of the MoE weights.
 #
 # Thinking is controlled via chat_template_kwargs.enable_thinking (per-request) or
 # --default-chat-template-kwargs (server-wide), same as the 31B / NVFP4 sibling.
 #
 # Verified: RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic card (serve flags + temp 1.0/
-# top_p 0.95), GB10 decode measurement (~37 tok/s N=1). Same base model as the
+# top_p 0.95). Same base model as the
 # gemma4-26b-a4b-nvfp4 config — sampling is per-model, quant only changes serve flags.
 
 match  = ["gemma4-26b-fp8", "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"]

@@ -89,7 +89,7 @@ resolves to the single container on it. Works on `logs`, `stop`/`kill`, `health`
 Spark / UMA false-OOM-&-freeze guard (vLLM #35313). There's no flag: `install` sets up a
 scoped `NOPASSWD` sudo rule (`/usr/local/sbin/otools-drop-caches`) so it runs unattended,
 and launch uses `sudo -n`, so a host that wasn't installed just warns and skips it rather
-than ever prompting. See [SPARK_NOTES.md](SPARK_NOTES.md) for the hardware background.
+than ever prompting.
 
 ## Two-Spark clusters
 
@@ -117,11 +117,8 @@ omm cluster rename dgx-5-dgx-6 studio  # optional
 omm launch deepseek-v4-flash-0731 studio
 ```
 
-DeepSeek launch is idempotent: it downloads missing pinned weights, reuses the reviewed c8r
-image from either cluster node or another registered DGX, certifies image/runtime/model content,
-and stores recoverable certificates on both DGXs. Local build state is only a cache, so replacing
-the control machine no longer requires manual manifest reconstruction. A completely isolated
-fleet still needs the reviewed c8r image built once or made available on one registered DGX.
+DeepSeek launch downloads missing pinned weights, reuses an available reviewed image, and
+certifies image, runtime, and model content on both nodes.
 
 Register the local Spark as the head and a previously installed host alias as the worker.
 The Linux interface and UCX RDMA device are deliberately separate: confirm their mapping
@@ -161,29 +158,8 @@ omm cluster launch CLUSTER qwen3.8-flash-next-fp8 --keep
 Use `--keep` so failed ranks and their crash logs survive for `cluster logs`; `cluster status`
 and `cluster stop` include those retained containers.
 
-The Qwen path uses official NVIDIA checkpoints pinned to exact Hugging Face revisions and
-ARM64 TensorRT-LLM bases pinned by digest. The manager builds the small SSH/MPI derivatives
-locally, records separate immutable build manifests per runtime, uses a deployment-specific
-SSH key, and serves absolute snapshot paths. Base, Instruct-2507, and Thinking-2507 were all
-physically validated on two GB10 Sparks on 2026-08-11 with tool loops and 12,515-token streams.
-All three profiles use rc8 for NVIDIA's Blackwell CUTLASS TMA fix. Thinking additionally uses
-an explicit pinned tokenizer, torch sampling, and a conservative 0.60 KV fraction.
-
-DeepSeek V4 Flash 0731 uses the reviewed c8r full-source lane: orchestration commit
-`46eb0fcbadf0e4e0be8838b18f6aa85087ed8839`, vLLM commit
-`48bada6ea49ad7f3ecbe03128aa76562089c8b00`, the pinned 17-file gx10 overlay, native
-FlashInfer `0.6.16.post3`, and the SM120-capable DeepGEMM pin. The multi-hour source build is
-performed by that pinned kit. `cluster prepare ... --build` then certifies the resident image
-configuration, rootfs layers, and installed runtime contents on both nodes before recording
-role-specific image IDs. It also hashes all 74 model files (166,898,660,330 bytes) on each node
-and requires parity. C8r uses dedicated `-c8r` vLLM, Triton, and TileLang caches; the reviewed
-cand7 image remains available as `deepseek-v4-flash-0731-cand7` with its own cache roots. The
-operator accepts `b12x`'s Apache-2.0 package metadata despite its missing bundled license file.
-Launch still requires the QSFP/RoCE preflight, API health, warmup battery, and `NCCL NET/IB`
-evidence or rolls both ranks back. The c8r lane passed those gates plus sustained local OpenCode
-tool traffic and a 20K-token stream on the qualified pair. No community model image or quant is
-substituted. Its shared model config drives OpenCode's native Plan mode at Think Max and Build
-mode at Think High, with low/high/max/no-think request variants available for either runtime lane.
+Cluster profiles keep their immutable model and runtime identities in `omodel-manager`.
+Model-specific build history and findings belong in `notes/<profile>.md`.
 
 See [DUAL_SPARK_MODEL_RESEARCH.md](DUAL_SPARK_MODEL_RESEARCH.md) for model selection and
 primary-source links.

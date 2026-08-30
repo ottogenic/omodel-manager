@@ -62,8 +62,8 @@ via the `skill` tool).
 | Make a code change (file layout, how to extend, checks to run) | **`code-changes`** |
 | Review / approve / merge an explicitly requested PR | delegate to **`agent-review`** (see the note below the table) |
 
-Other docs (read directly when relevant): `SPARK_NOTES.md` (DGX Spark GB10/sm_121 hardware
-traps), `configs/README.md` (config format), `README.md` (user-facing).
+Other docs (read directly when relevant): `notes/README.md` (per-model build records),
+`configs/README.md` (config format), `README.md` (user-facing).
 
 **When a PR is explicitly requested**, reviews are handled by the **`agent-review`** subagent.
 It checks the PR against `REVIEW.md`

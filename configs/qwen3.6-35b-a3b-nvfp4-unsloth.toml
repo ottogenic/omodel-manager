@@ -6,15 +6,9 @@
 # them. Launch via the omodel-manager `qwen3.6-35b-a3b-nvfp4-unsloth` profile.
 # Values are STARTING POINTS to sweep from, not guarantees.
 #
-# Hardware note (Blackwell / DGX Spark, sm_121): the launch profile forces
-# --moe-backend marlin (the CUTLASS/FlashInfer FP4 MoE path yields '!!!!' garbage
-# on GB10) and CUTE_DSL_ARCH=sm_121a. That is a launch/vllm_args concern, not a
-# sampling one. See SPARK_NOTES.md and the profile notes.
-#
 # Anti-loop rule that matters on this checkpoint (thinking model): temperature
-# NEVER 0; add presence_penalty when repetition appears (card allows 0-2). The
-# Unsloth build tends toward LONGER thinking — keep max_output generous (>=32k)
-# or thinking starves and responses come back empty/looping.
+# NEVER 0; add presence_penalty when repetition appears (card allows 0-2).
+# Keep max_output generous (>=32k) so thinking is not truncated.
 #
 # Thinking is a chat-template toggle (not a sampling param). Turn it off per
 # request with  chat_template_kwargs = { enable_thinking = false }.
