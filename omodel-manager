@@ -3627,36 +3627,11 @@ def _prepare_deepseek(cfg, profile, build=False, weights=False, dry=False):
     if not head_signature:
         raise RuntimeError("cannot record the head DeepSeek image signature")
     if worker_signature != head_signature:
-        archive_name = f"deepseek-{profile.get('runtime_lane', 'cand7')}-image.tar.zst"
-        head_archive = os.path.join(remote_contexts["head"], archive_name)
-        worker_archive = os.path.join(remote_contexts["worker"], archive_name)
         for role, target in (("head", head), ("worker", worker)):
             if _host_exec(target, ["zstd", "--version"], capture=True).returncode != 0:
                 raise RuntimeError(f"zstd is required to distribute the reviewed image to {role}")
         print("Distributing the exact head image to worker ...")
-        save_script = (f"docker save {shlex.quote(profile['image'])} | "
-                       f"zstd -T0 -3 -f -o {shlex.quote(head_archive)}")
-        if _host_exec(head, ["bash", "-o", "pipefail", "-c", save_script]).returncode != 0:
-            raise RuntimeError("failed to archive the reviewed DeepSeek image")
-        try:
-            if head is None:
-                copied = subprocess.run(["scp"] + ssh_opts() +
-                                        [head_archive, f"{worker}:{worker_archive}"], text=True)
-            elif worker is None:
-                copied = subprocess.run(["scp"] + ssh_opts() +
-                                        [f"{head}:{head_archive}", worker_archive], text=True)
-            else:
-                copied = subprocess.run(["scp", "-3"] + ssh_opts() +
-                                        [f"{head}:{head_archive}",
-                                         f"{worker}:{worker_archive}"], text=True)
-            if copied.returncode != 0:
-                raise RuntimeError("failed to copy the reviewed DeepSeek image to worker")
-            load_script = f"zstd -dc {shlex.quote(worker_archive)} | docker load"
-            if _host_exec(worker, ["bash", "-o", "pipefail", "-c", load_script]).returncode != 0:
-                raise RuntimeError("failed to load the reviewed DeepSeek image on worker")
-        finally:
-            _host_exec(head, ["rm", "-f", head_archive], capture=True)
-            _host_exec(worker, ["rm", "-f", worker_archive], capture=True)
+        _transfer_deepseek_image(head, worker, profile["image"])
     else:
         print("Worker already has the head image's exact runtime layers and configuration.")
 
