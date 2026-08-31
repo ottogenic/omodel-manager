@@ -1,0 +1,34 @@
+# NVIDIA Qwen3-235B-A22B FP4 profile qualified on a two-node TensorRT-LLM cluster.
+
+match = ["qwen3-235b-a22b-fp4", "nvidia/Qwen3-235B-A22B-FP4"]
+source = "https://huggingface.co/nvidia/Qwen3-235B-A22B-FP4"
+
+[capabilities]
+vision           = false
+reasoning        = true
+tool_call        = true
+concurrency      = 1
+thinking_control = "enable_thinking"
+
+[context]
+native       = 32768
+min_thinking = 16384
+
+[presets.plan]
+thinking   = true
+max_output = 8192
+[presets.plan.sampling]
+temperature = 0.6
+top_p       = 0.95
+top_k       = 20
+
+[presets.build]
+thinking   = true
+max_output = 8192
+[presets.build.sampling]
+temperature = 0.6
+top_p       = 0.95
+top_k       = 20
+
+[variants.no-think]
+options.chat_template_kwargs = { enable_thinking = false }

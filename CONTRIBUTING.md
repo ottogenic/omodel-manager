@@ -53,7 +53,7 @@ git tag -a vX.Y.Z -m "vX.Y.Z"
 
 1. `python3 -m py_compile omodel-manager` passes.
 2. `python3 -m unittest` passes (fast, offline — no containers, no network).
-3. `python3 omodel-manager list` and `launch <profile> --dry-run` produce sane output.
+3. `python3 omodel-manager models` and `plan local <profile>` produce sane output.
 4. `model_manager.json` is your **local, git-ignored sandbox** for testing — don't commit
    it. Promote only validated changes into `DEFAULT_CONFIG` in the script (the committed
    source of truth); `config --init --force` regenerates the sandbox from it.
@@ -66,8 +66,7 @@ git tag -a vX.Y.Z -m "vX.Y.Z"
 
 - Match the surrounding code: comment density, naming, and idioms already in
   `omodel-manager`.
-- Keep it a single script with one companion JSON. Don't split into a package unless the
-  tool genuinely outgrows one file.
+- Keep the manager in one script; checked-in stdlib card helpers live under `utils/card/`.
 - All Docker access goes through `docker()`; build argv lists, never `shell=True`.
 
 ## Naming conventions

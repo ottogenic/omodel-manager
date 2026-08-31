@@ -1,0 +1,35 @@
+# NVIDIA Qwen3-235B-A22B-Thinking-2507 NVFP4 profile qualified on a
+# two-node TensorRT-LLM cluster.
+
+match = [
+  "qwen3-235b-a22b-thinking-2507-nvfp4",
+  "nvidia/Qwen3-235B-A22B-Thinking-2507-NVFP4",
+]
+source = "https://huggingface.co/nvidia/Qwen3-235B-A22B-Thinking-2507-NVFP4"
+
+[capabilities]
+vision           = false
+reasoning        = true
+tool_call        = true
+concurrency      = 4
+thinking_control = "none"
+
+[context]
+native       = 48064
+min_thinking = 32768
+
+[presets.plan]
+thinking   = true
+max_output = 16384
+[presets.plan.sampling]
+temperature = 0.6
+top_p       = 0.95
+top_k       = 20
+
+[presets.build]
+thinking   = true
+max_output = 16384
+[presets.build.sampling]
+temperature = 0.6
+top_p       = 0.95
+top_k       = 20

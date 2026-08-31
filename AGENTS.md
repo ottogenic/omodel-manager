@@ -12,9 +12,12 @@ task-specific lives in a **skill** (see the index at the bottom) that loads on d
 ## Invariants — never violate
 
 - **Stdlib only.** No third-party imports, ever. Runs on a bare `python3`.
-- **Single script + data files.** Tool is `omodel-manager`; `model_manager.json` holds
-  launch profiles; `configs/*.toml` hold the generic model configs — keep them
-  **harness-agnostic** (no OpenCode/harness keys; see `configs/README.md`).
+- **Single manager script + checked-in stdlib card helpers.** Tool is `omodel-manager`;
+  `utils/card/*.py` contains the qualified B70 deployment modules; `model_manager.json`
+  holds launch profiles; versioned `~/.config/otools/devices.json` and `deployments.json`
+  expose the machine-local device/deployment contracts; `configs/**/*.toml` hold generic
+  model configs — keep them **harness-agnostic** (no OpenCode/harness keys; see
+  `configs/README.md`).
 - **No local shell.** All Docker goes through the `docker()` choke point as an **argv list**
   (`subprocess.run([...])`), never `shell=True`. Over SSH the argv is `shlex.quote`d.
 - **Secrets never touch the repo or the displayed command.** Tokens/keys come from env or
@@ -27,6 +30,10 @@ task-specific lives in a **skill** (see the index at the bottom) that loads on d
   into `DEFAULT_CONFIG` **only after it's validated and approved**. Never commit the JSON,
   never edit `DEFAULT_CONFIG` just to test, never edit both for a change-in-progress.
 - **Cross-platform paths** (WSL/Linux + Windows): use `os.path` / `expanduser`.
+- **Public lifecycle is device-first.** Use `launch DEVICE MODEL`, `plan DEVICE MODEL`, and
+  `logs`/`health`/`stop DEVICE`; adapt the existing node/cluster internals rather than duplicating them.
+  Device names are globally unique case-insensitively, and one active deployment owns a device
+  (a cluster also owns its member nodes).
 
 ## Working agreement
 
@@ -35,9 +42,9 @@ task-specific lives in a **skill** (see the index at the bottom) that loads on d
   A single-step task or a plain question needs no list.
 - **Plan approval is for the whole plan.** After a "go"/"proceed", execute all remaining
   steps in sequence without stopping to re-ask between them; discover prerequisites yourself.
-- **`launch` with no host runs locally.** When operating remote boxes, always name the
-  host explicitly (`launch <profile> <alias>` or `--host <alias>`) — pick an idle box from
-  `ps`, don't grep the config. (Details in the `launch-and-operate` skill.)
+- **Always name the device for a real launch.** Use `launch local <profile>` locally or
+  `launch <alias> <profile>` remotely; pick an idle device from `ps`/`devices`, don't grep
+  the config. (Details in the `launch-and-operate` skill.)
 - **Solo git by default.** This is a single-maintainer repo unless told otherwise. Work in the
   canonical checkout and publish directly to `main` when the maintainer requests publishing.
   Use a branch/worktree only when explicitly requested, when concurrent work is actually active,

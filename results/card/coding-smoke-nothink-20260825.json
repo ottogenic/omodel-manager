@@ -1,0 +1,109 @@
+{
+  "created_utc": "2026-08-25T02:16:05Z",
+  "endpoints": [
+    {
+      "model": "qwen3.8-27b",
+      "name": "local",
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "model": "qwen3.8-27b",
+      "name": "cpgaming",
+      "url": "http://cpgaming:8000"
+    }
+  ],
+  "max_tokens": 1200,
+  "records": [
+    {
+      "code": "def coalesce_ranges(ranges):\n    # Normalize and collect\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n    \n    if not normalized:\n        return []\n    \n    # Sort by start\n    normalized.sort(key=lambda x: x[0])\n    \n    # Merge overlapping or touching ranges\n    merged = []\n    for start, end in normalized:\n        if not merged:\n            merged.append([start, end])\n        else:\n            last_start, last_end = merged[-1]\n            if start <= last_end + 1:\n                # Overlapping or touching\n                merged[-1][1] = max(last_end, end)\n            else:\n                merged.append([start, end])\n    \n    return [(s, e) for s, e in merged]",
+      "endpoint": "local",
+      "grade": {
+        "failures": [
+          {
+            "error": "exit 1: permission denied while trying to connect to the docker API at unix:///var/run/docker.sock\n",
+            "name": "sandbox"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "coalesce_ranges",
+      "timing": {
+        "decode_tps": 73.94243172273097,
+        "ok": true,
+        "reasoning_text": "",
+        "text": "```python\ndef coalesce_ranges(ranges):\n    # Normalize and collect\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n    \n    if not normalized:\n        return []\n    \n    # Sort by start\n    normalized.sort(key=lambda x: x[0])\n    \n    # Merge overlapping or touching ranges\n    merged = []\n    for start, end in normalized:\n        if not merged:\n            merged.append([start, end])\n        else:\n            last_start, last_end = merged[-1]\n            if start <= last_end + 1:\n                # Overlapping or touching\n                merged[-1][1] = max(last_end, end)\n            else:\n                merged.append([start, end])\n    \n    return [(s, e) for s, e in merged]\n```",
+        "total_seconds": 2.9396492560008483,
+        "ttft_seconds": 0.19415150200075004,
+        "usage": {
+          "completion_tokens": 204,
+          "prompt_tokens": 123,
+          "total_tokens": 327
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "def coalesce_ranges(ranges):\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n    \n    if not normalized:\n        return []\n    \n    normalized.sort()\n    \n    merged = [normalized[0]]\n    for current_start, current_end in normalized[1:]:\n        last_start, last_end = merged[-1]\n        if current_start <= last_end + 1:\n            if current_end > last_end:\n                merged[-1] = (last_start, current_end)\n        else:\n            merged.append((current_start, current_end))\n    \n    return tuple(merged)",
+      "endpoint": "cpgaming",
+      "grade": {
+        "failures": [
+          {
+            "error": "exit 1: permission denied while trying to connect to the docker API at unix:///var/run/docker.sock\n",
+            "name": "sandbox"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "coalesce_ranges",
+      "timing": {
+        "decode_tps": 39.32592391236158,
+        "ok": true,
+        "reasoning_text": "",
+        "text": "```python\ndef coalesce_ranges(ranges):\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n    \n    if not normalized:\n        return []\n    \n    normalized.sort()\n    \n    merged = [normalized[0]]\n    for current_start, current_end in normalized[1:]:\n        last_start, last_end = merged[-1]\n        if current_start <= last_end + 1:\n            if current_end > last_end:\n                merged[-1] = (last_start, current_end)\n        else:\n            merged.append((current_start, current_end))\n    \n    return tuple(merged)\n```",
+        "total_seconds": 4.713204773001053,
+        "ttft_seconds": 0.5936733989983622,
+        "usage": {
+          "completion_tokens": 163,
+          "completion_tokens_details": {
+            "reasoning_tokens": 0
+          },
+          "prompt_tokens": 123,
+          "total_tokens": 286
+        }
+      },
+      "url": "http://cpgaming:8000"
+    }
+  ],
+  "rounds": 1,
+  "summary": {
+    "cpgaming": {
+      "fully_correct": 0,
+      "median_decode_tps": 39.32592391236158,
+      "median_total_seconds": 4.713204773001053,
+      "median_ttft_seconds": 0.5936733989983622,
+      "runs": 1,
+      "tests_passed": 0,
+      "tests_total": 1
+    },
+    "local": {
+      "fully_correct": 0,
+      "median_decode_tps": 73.94243172273097,
+      "median_total_seconds": 2.9396492560008483,
+      "median_ttft_seconds": 0.19415150200075004,
+      "runs": 1,
+      "tests_passed": 0,
+      "tests_total": 1
+    }
+  },
+  "tasks": [
+    {
+      "id": "coalesce_ranges",
+      "prompt": "Implement:\n\ndef coalesce_ranges(ranges):\n\n`ranges` is an iterable of inclusive integer `(start, end)` pairs. Normalize a\nreversed pair, merge overlapping or touching ranges (for example `(1, 2)` and\n`(3, 5)`), and return sorted `(start, end)` tuples. Do not mutate the input."
+    }
+  ],
+  "temperature": 0.2
+}

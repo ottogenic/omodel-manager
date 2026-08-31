@@ -45,7 +45,7 @@ This appends an alias to your shell rc (`~/.bashrc` / `~/.zshrc` / fish config).
 omm install user@<host-ip> <alias> --fix     # e.g. user@192.0.2.101 dgx1 --fix
 ```
 
-- `<alias>` (e.g. `dgx1`) is the short name you'll pass as `--host dgx1` everywhere after.
+- `<alias>` (e.g. `dgx1`) is the device name used as the first lifecycle operand.
 - `--fix` remediates what's missing (installs Docker, adds you to the `docker` group, sets up the scoped sudo rule, and **prompts for a HuggingFace token if none is set** — see step 4).
 - This is interactive and SSHes into the box — **the user should run it.** Offer the command; don't run it for them.
 
@@ -62,9 +62,10 @@ omm ps            # all registered hosts + any running containers (safe — run 
 Recommended first model: **`unsloth-qwen3-coder-next-fp8`** (a fast, capable coder).
 
 ```bash
-omm launch unsloth-qwen3-coder-next-fp8 --host dgx1     # start the model container
-omm logs   unsloth-qwen3-coder-next-fp8 --host dgx1 -f  # follow vLLM's startup logs (Ctrl-C detaches; container keeps running)
-omm health unsloth-qwen3-coder-next-fp8 --host dgx1     # confirm it's serving
+omm plan   dgx1 unsloth-qwen3-coder-next-fp8     # inspect the launch without mutation
+omm launch dgx1 unsloth-qwen3-coder-next-fp8     # start the model container
+omm logs   dgx1 -f                               # follow startup logs (Ctrl-C detaches)
+omm health dgx1                                  # confirm it is serving
 ```
 
 - `launch` returns immediately if the image isn't cached yet (it pulls in the background — poll with `omm pull-status`), then starts serving. Watch `logs -f` until vLLM prints that it's ready.
@@ -110,8 +111,7 @@ omw sync         # probes your live endpoints, reads omm's configs, writes ~/.co
 `omw sync` adds the live DGX providers, assigns model-specific `build` and `plan`
 presets to OpenCode's native agents, and writes the sampling plugin for parameters
 OpenCode cannot express directly. It does not create custom agents, prompts, or
-workflows. Useful flags: `--dry-run`, `--hosts`/`--ports`, `--build-model REF`, and
-`--plan-model REF`.
+workflows. Useful flags: `--dry-run`, `--build-model REF`, and `--plan-model REF`.
 
 Confirm it worked (safe — run these and show output):
 
@@ -124,12 +124,12 @@ opencode         # launch OpenCode; Tab switches native Build and Plan
 
 ## 7. Choose Build and Plan models
 
-`omw sync` prints every discovered host-qualified model reference. Preview the
+`omw sync` prints every discovered device-qualified model reference. Preview the
 result first, then optionally choose different live models for Build and Plan:
 
 ```bash
 omw sync --dry-run
-omw sync --build-model dgx-102-8000/model-id --plan-model dgx-103-8000/model-id
+omw sync --build-model otools-dgx1/model-id --plan-model otools-dgx2/model-id
 ```
 
 Without explicit flags, a still-live existing selection is preserved; otherwise
@@ -145,8 +145,8 @@ python3 omodel-manager shell-init ; python3 omodel-wire.py shell-init
 # 2. provision a host (once per host — user runs; interactive)
 omm install user@<host-ip> dgx1 --fix
 # 3. launch + watch
-omm launch unsloth-qwen3-coder-next-fp8 --host dgx1
-omm logs   unsloth-qwen3-coder-next-fp8 --host dgx1 -f
+omm launch dgx1 unsloth-qwen3-coder-next-fp8
+omm logs   dgx1 -f
 # 4. install OpenCode
 curl -fsSL https://opencode.ai/install | bash
 # 5. wire it up + verify

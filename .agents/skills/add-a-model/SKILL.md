@@ -38,7 +38,7 @@ trust the evidence and note it.
 >   research the model and author the profile + config. This is the bulk of the job.
 > - **The `omm` CLI** (`omodel-manager …`) for anything on hardware — `ps`, `launch`,
 >   `logs`, `health`, `stop`. **You never run `ssh`, `scp`, or `docker` directly**;
->   `omm --host <alias>` does the remote plumbing for you. If you're reaching for a raw
+>   the named device does the remote plumbing for you. If you're reaching for a raw
 >   `ssh`, stop — there's an `omm` subcommand for it.
 >
 > **Build findings are model-specific.** Read `notes/<profile>.md` when it exists and
@@ -65,15 +65,16 @@ trust the evidence and note it.
 
 ## 0. Pick and prepare a host
 
-1. **List hosts.** `omodel-manager ps` shows every registered host and marks each
-   `running` / `idle` / `unreachable`. Pick an idle box and use **its alias** from
+1. **List devices.** `omodel-manager ps` shows every registered node and marks each
+   `running` / `idle` / `unreachable`; `omodel-manager devices` includes cards and
+   clusters. Pick an idle device and use **its name** from
    here on. Don't grep `model_manager.json` or the configs for a host address.
 2. **No host registered yet?** Bootstrap and name one:
    `omodel-manager install user@ip <alias> --fix` (remediates SSH / docker / docker
    group and prompts for an HF token). This stores `alias → user@ip` in
-   `~/.config/otools/hosts` so every later step can use `--host <alias>`.
-3. From here on, pass **`--host <alias>`** on every remote command. If any host is
-   registered, `launch` refuses a host-less run (pass `--local` only to force local).
+   `~/.config/otools/hosts` so every later step can use the alias as its device name.
+3. From here on, use **the device name as the first lifecycle operand**. Use `local`
+   only for a local node launch.
 
 ## 1. Research the model
 
@@ -134,7 +135,7 @@ profile; change only what the quant/model needs:
 - Edit `model_manager.json` only. Never touch `DEFAULT_CONFIG` during testing.
 - **Never run `config --init` or `config --init --force`** during testing — it
   overwrites `model_manager.json` from `DEFAULT_CONFIG`, destroying your local edits.
-- Validate with `launch <key> --dry-run`, then `launch <key> --host <host> --keep`.
+- Validate with `plan <device> <key>`, then `launch <device> <key>`.
 
 Do **not** commit yet.
 
@@ -161,13 +162,11 @@ consume — keep it harness-agnostic. Fill from research; the live tests will co
  1. **Confirm a free node.** You picked one in §0 — re-run `omodel-manager ps` to be
     sure it's still `idle` (nothing grabbed it since). If none is free, **ask the
     operator which running model to stop** — don't evict blindly.
- 2. **Launch** the dry-run first, then for real, watching startup:
-    `omodel-manager launch <key> --host <host> --keep`  — `--keep` is **not optional**
-    on a first launch: the detached default uses `--rm`, which deletes a crashed
-    container *and its logs*, so a startup crash leaves you with nothing to read. If
-    the image isn't cached yet, `launch` pulls it in the background and returns at once
-    — poll `omodel-manager pull-status <key> --host <host>` until it says the container
-    started. Then `omodel-manager logs <key> --host <host> -f`.
+  2. **Launch** the plan first, then for real, watching startup:
+    `omodel-manager plan <device> <key>` followed by
+    `omodel-manager launch <device> <key>`. Node launches retain the container so a
+    startup crash keeps its logs. If the image is not cached, launch pulls it in the
+    background and returns at once; inspect `omodel-manager logs <device> -f`.
     - **Page cache is dropped automatically** right before the container starts. No flag:
       `install` set up a
       scoped NOPASSWD sudo rule for it. If a launch prints `warning: drop-caches skipped`,
@@ -179,7 +178,7 @@ consume — keep it harness-agnostic. Fill from research; the live tests will co
     + flashinfer autotuning + CUDA graph capture). Poll `health` until READY before
     proceeding:
     ```bash
-    while ! omm health <key> --host <host> 2>&1 | grep -q READY; do sleep 15; done
+    while ! omm health <device> 2>&1 | grep -q READY; do sleep 15; done
     ```
  5. **Functional test** — one request; confirm a clean completion in the logs (no
     errors). Serve with `--enable-log-requests` so the merged `SamplingParams(...)`
@@ -220,7 +219,7 @@ response to confirm it actually took effect — *don't infer*.
 
 Confirm the merged truth from logs:
 ```bash
-omodel-manager logs <container> --host <host> 2>&1 | grep -i sampling
+omodel-manager logs <device> 2>&1 | grep -i sampling
 ```
 
 ### 6. Benchmark: single-user speed + parallel slowdown

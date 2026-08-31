@@ -2,25 +2,38 @@
 
 **Harness-agnostic** model configs: what a model can do (capabilities) and how to
 sample it per task (presets). One **TOML** file per model, keyed to a launch
-profile in `model_manager.json`. TOML so the files `cat`/`vi` cleanly and the
-tuning guidance lives inline as `#` comments (see `qwen3.6-35b-a3b-nvfp4.toml`).
+profile in `model_manager.json` and grouped by deployment kind. TOML keeps the
+files readable and lets tuning guidance live inline as `#` comments.
 
 **omodel-manager owns and stores these.** It only holds + validates them
 (`test_configs.py`, needs Python 3.11+ for `tomllib`). Downstream **adapters
 consume them** and translate to a specific agent harness:
 
-- `omodel-wire` → OpenCode (agents, permissions, colors, `chat.params` plugin)
+- `omodel-wire` → OpenCode providers, native Build/Plan presets, and `chat.params` plugin
 - future adapters → pi.dev, Claude Code, …
 
 Keep these files **generic** — no OpenCode/pi.dev-specific keys (agent names,
 permissions, colors). Those belong in the adapter.
 
-## One file per model
+## Deployment-kind directories
 
-- `configs/<key>.toml`, named to match a `model_manager.json` profile/model key
-  (`qwen3.6-35b-a3b-nvfp4.toml` ↔ the `qwen3.6-35b-a3b-nvfp4` launch profile).
-- Adapters `tomllib.load` each file and match a discovered served-model-id against
-  its `match` list. Non-`.toml` files (this README) are ignored.
+- `configs/node/<key>.toml`: deployments served by one compute node.
+- `configs/cluster/<key>.toml`: deployments spanning multiple compute nodes.
+- `configs/card/<key>.toml`: deployments qualified for a specific accelerator
+  card target.
+- Every TOML is exactly one level below `configs/`, in one of these known kind
+  directories. Its filename stem appears in `match`; one TOML may cover multiple
+  launch variants of the same base model.
+- Every launch profile must resolve to exactly one TOML of its deployment kind by
+  profile key, served-model id, or model id. Deployment records publish that exact
+  configs-relative path for adapters.
+- Adapters discover `configs/**/*.toml` recursively and match a served-model-id
+  against each file's `match` list. Non-TOML files are ignored.
+
+Directory placement describes the **deployment kind**, not the config schema.
+TOML contents remain harness-agnostic and describe only model capabilities,
+context, sampling, and model-native options. Deployment/runtime and harness keys
+do not belong in these files.
 
 ## Schema
 
@@ -45,9 +58,10 @@ permissions, colors). Those belong in the adapter.
 
 ## Contract with adapters
 
-- **Match on `match`.** Filename stem == manager profile key so the two line up.
+- **Match on `match`.** Filename stem == manager profile key so the two line up;
+  directory kind does not participate in matching.
 - Two launch profiles serving the **same** model (e.g. 256k vs 512k context) share
   **one** config here — sampling is per-model, not per-launch.
 - A model with no matching config falls back to the adapter's default.
-- Run `python3 -m unittest` after editing — the validator parses every config and
-  checks required keys.
+- Run `python3 -m unittest test_configs -v` after editing. The validator parses
+  every config recursively and checks placement and required keys.

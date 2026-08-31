@@ -34,10 +34,10 @@ authoritative over this file). Paste a line to an AI tool or fetch it yourself:
 
 ## Mechanisms & gotchas this tool handles (vetted in development)
 
-- **`--rm` eats crash logs.** Detached launches use `--rm`, so a container that crashes
-  during startup is auto-removed with its logs. `--keep` omits `--rm` so it persists for
-  `logs`; `--foreground` streams the crash live. New profiles: always `--dry-run`, then
-  launch and watch (`--keep`/`--foreground`) the first time.
+- **`--rm` eats crash logs.** Public device-first node launches retain their container so
+  a startup crash remains available through `logs DEVICE`; backend profile code must keep
+  that behavior. For a new profile, inspect `plan DEVICE MODEL`, then launch and follow
+  `logs DEVICE -f`.
 - **`docker --filter name=^x$` is unreliable** — container names are stored with a leading
   `/`, so the `^` anchor misses. `resolve_target` lists names and matches exactly.
 - **Colored logs need an env var, not a TTY.** Most output comes from the vLLM
@@ -65,8 +65,8 @@ authoritative over this file). Paste a line to an AI tool or fetch it yourself:
 ## Verify against reality (don't assume)
 
 - **vLLM flags are image/version-specific.** A working recipe on one image can reject a
-  flag on another (a real crash we hit). Confirm a new profile with `launch --dry-run`,
-  then `--keep`/`--foreground` and read the startup log before trusting it.
+  flag on another (a real crash we hit). Confirm a new profile with `plan DEVICE MODEL`,
+  then `launch DEVICE MODEL` and read `logs DEVICE -f` before trusting it.
 - **`--quantization` is usually auto-detected** for NVFP4/ModelOpt checkpoints — omit it
   unless a model needs it explicitly.
 - **YaRN long-context extrapolates** past the trained window (e.g. 27B 512K, `factor 2.0`);

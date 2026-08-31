@@ -4,39 +4,44 @@ Manage your vLLM Docker containers from an editable config — locally or on a
 remote GPU box over SSH. List curated model profiles, launch one, watch its
 logs, health-check it, and stop it, all with copy-pasteable next-step hints.
 
-Built for a DGX Spark setup but works against any host with Docker + NVIDIA GPUs.
+Built for DGX Spark nodes and clusters, with a checked-in qualified Docker/vLLM
+deployment for the Intel Arc Pro B70.
 
 - **Stdlib only.** No `pip install`, no dependencies — just Python 3.
 - **Config-driven.** Curated launch profiles are the committed source of truth in the
   script's `DEFAULT_CONFIG`; `config --init` writes them to a **local, git-ignored**
   `model_manager.json` you freely tune (after a `git pull`, `omm sync` refreshes it from
   the committed defaults — with a `.bak` of your old file).
-- **Local or remote.** Run Docker here, or on a GPU box over SSH (`--host`); one
-  `install` bootstraps the box and gives it a short alias (`dgx1`).
+- **Local or remote.** Choose `local` or a registered device alias; one `install`
+  bootstraps a remote box and gives it a short name (`dgx1`).
 
 ---
 
 ## Requirements
 
-- Python 3.8+ (stdlib only)
-- Local: Docker with the NVIDIA container runtime/CDI
+- Python 3.11+ (stdlib only; model-config resolution uses `tomllib`)
+- Local nodes: Docker with the NVIDIA container runtime/CDI
+- B70 card: Docker, `/dev/dri/renderD128`, and the pinned model snapshot described
+  in `notes/card/b70-qwen3.8-vllm.md`
 - Remote: an `ssh` client locally; Docker and `curl` on the remote (see `install`)
 
 ## Quick start
 
 ```bash
-# See what's available (context / concurrency / use-case)
-python omodel-manager list
+# See the unified model and device inventories
+python omodel-manager models
+python omodel-manager devices
 
 # On the DGX itself: check/provision local prerequisites, then run one locally
 python omodel-manager install --fix
-python omodel-manager launch qwen3.6-35b-a3b-nvfp4
+python omodel-manager plan local qwen3.6-35b-a3b-nvfp4
+python omodel-manager launch local qwen3.6-35b-a3b-nvfp4
 
 # ...or on a remote box: bootstrap + name it once, then use the alias
 python omodel-manager install user@192.0.2.102 dgx1 --fix
-python omodel-manager launch qwen3.6-35b-a3b-nvfp4 --host dgx1
-python omodel-manager logs   qwen3.6-35b-a3b-nvfp4 --host dgx1 -f
-python omodel-manager health qwen3.6-35b-a3b-nvfp4 --host dgx1
+python omodel-manager launch dgx1 qwen3.6-35b-a3b-nvfp4
+python omodel-manager logs dgx1 -f
+python omodel-manager health dgx1
 ```
 
 Run with no arguments for a status/home screen with suggested next steps. Every
@@ -46,24 +51,26 @@ Optional: `python omodel-manager shell-init` adds an `omm` shell alias.
 
 ## Card And eGPU Qualification
 
-Native runtimes, driver bring-up, OCuLink qualification, and B70/RTX experiments
-now live in [`omodel-card`](https://github.com/ottogenic/omodel-card). This
-repository remains the stable Docker/vLLM deployment manager; validated card
-results return here only as production-ready launch profiles.
+The qualified B70 Docker/vLLM deployment is checked in under `utils/card/` and
+is managed through the same device-first lifecycle as node and cluster models.
+Historical native-runtime, driver, and OCuLink qualification records are retained
+under `notes/card/`; those non-vLLM paths are evidence, not normal deployments.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `list` (alias `models`) | Table of profiles: context, concurrency, use-case |
-| `launch <profile> [host\|cluster]` | Start a profile (detached) on an optional host, or launch a two-node profile on a registered cluster. Single-host options: `--foreground`, `--keep`, `--force`, `--wait`, `--local`; `vllm-mp` cluster launches also accept `--keep`; `--dry-run` works for both. For single-host launches, an uncached image pulls in the background and returns immediately |
+| `models [card\|node\|cluster]` (alias `list`) | Unified profile table, optionally filtered by compatible device kind |
+| `devices [card\|node\|cluster]` | Built-in `local` and `b70`, registered hosts, configured clusters, and explicit device overrides |
+| `launch [DEVICE] [MODEL]` | Device-first deterministic launch. Missing operands show concrete choices instead of an argparse error |
+| `plan DEVICE MODEL` | Print the existing node/cluster dry-run or exact card deployment plan without changing deployment state |
 | `pull <profile>` | Pre-pull a profile's image so `launch` starts instantly |
 | `pull-status <profile\|host>` | Progress of a backgrounded launch/pull |
-| `logs <profile\|host> [-f]` | Show/follow a container's logs (Ctrl-C detaches cleanly) |
-| `health [<profile\|host>]` | `GET /v1/models` on running containers |
-| `cluster <subcommand>` | Register, preflight, prepare, launch, inspect, and stop one model across two DGX Sparks |
+| `logs DEVICE [head\|worker] [-f]` | Show/follow the current deployment logs; cluster role defaults to `head` |
+| `health DEVICE` | Check the current deployment on a device |
+| `cluster <subcommand>` | Register, inspect, preflight, and prepare two-node clusters; lifecycle uses the top-level device commands |
 | `ps [--all]` | Running containers plus every registered host, with host and cluster columns and each target `running`/`idle`/`pulling`/`unreachable` |
-| `stop <profile\|host>` (alias `kill`) | Stop + remove a container (`-y` to skip confirm) |
+| `stop DEVICE` | Stop the device's current deployment (`-y` to skip confirmation) |
 | `fetch <profile>` | Pre-download a profile's declared assets |
 | `install [<user@ip> [alias]] [--fix]` (alias `setup`) | Bootstrap this machine; for remotes, register the host and discover unambiguous DGX cluster pairs |
 | `uninstall <alias\|host> [--purge]` | Unregister a host + revoke the otools key (`--purge` also drops docker-group/containers + drop-caches rule) |
@@ -71,19 +78,21 @@ results return here only as production-ready launch profiles.
 | `config [--path/--init/--edit]` | Show/init/edit the config file |
 | `shell-init` (alias `install-aliases`) | Add the `omm` shell alias |
 
-`--host ALIAS|USER@HOST` runs any docker-touching command on that host over SSH —
-an alias from `install` (e.g. `dgx1`) or a raw `user@ip`. (`--remote` is a legacy
-alias for `--host`.) Set `defaults.remote` in the config to make it the default. With
-no host given, `launch` runs locally — when hosts are registered it prints a one-line
-"Launching locally (registered hosts: …)" reminder so a forgotten host stays visible.
-`--local` forces a local launch even when `defaults.remote` is set (combining it with
-an explicit host is an error).
+Lifecycle commands resolve the device first. `local` always means this machine, host aliases
+come from `install`, and cluster names come from the cluster registry. Names are
+case-insensitive and globally unambiguous. Machine-local extensions live in
+`~/.config/otools/devices.json`; successful launch intents are published atomically in
+`~/.config/otools/deployments.json` for downstream consumers. Override those paths with
+`$OMODEL_MANAGER_DEVICES` and `$OMODEL_MANAGER_DEPLOYMENTS`. These registries are versioned,
+contain no secrets, and deployment entries may be stale, so consumers should probe liveness.
+Remote vLLM listeners remain loopback-only. Their published `base_url` uses the device/head
+target and assumes the operator's Tailgate route exposes that port; `omm` does not create
+tunnels or broaden the listener. Local node and card URLs remain on `127.0.0.1`.
 
-**Address a running model by its host** instead of typing a model name + `--host` — with
-one model per box, the hostname is unambiguous (and stable). Run `ps`, then `logs dgx-2` /
-`stop dgx-2` / `health dgx-2` — the host (an `install` alias, a `user@ip`, or a bare IP)
-resolves to the single container on it. Works on `logs`, `stop`/`kill`, `health`, and
-`pull-status`. And `launch <profile> dgx-1` launches onto that host.
+Card lifecycle uses the checked-in stdlib helper `utils/card/deploy_b70_vllm.py`.
+`omm plan b70 qwen3.8-27b-gptq-int4-b70` works offline without Docker or a B70;
+launch verifies the pinned image, model files, isolation, and container identities.
+`$OMODEL_MANAGER_CARD_HELPER` may override the helper with an executable.
 
 **Every `launch` drops the host's OS page cache right before `docker run`** — the DGX
 Spark / UMA false-OOM-&-freeze guard (vLLM #35313). There's no flag: `install` sets up a
@@ -114,7 +123,7 @@ The normal new-cluster flow is therefore:
 omm install otto@new-dgx-1 dgx-5 --fix
 omm install otto@new-dgx-2 dgx-6 --fix
 omm cluster rename dgx-5-dgx-6 studio  # optional
-omm launch deepseek-v4-flash-0731 studio
+omm launch studio deepseek-v4-flash-0731
 ```
 
 DeepSeek launch downloads missing pinned weights, reuses an available reviewed image, and
@@ -139,24 +148,23 @@ omm cluster preflight spark2
 
 # Optional explicit preparation; normal DeepSeek launch now ensures missing artifacts itself.
 omm cluster prepare spark2 qwen3-235b-a22b-fp4 --build --weights
-# Normal launch syntax recognizes cluster-only profiles and cluster names case-insensitively.
-omm launch qwen3-235b-a22b-fp4 spark2
-omm cluster status spark2
-omm cluster health spark2 qwen3-235b-a22b-fp4
-omm cluster logs spark2 qwen3-235b-a22b-fp4 -f
-omm cluster stop spark2 -y
+# Lifecycle is device-first and cluster names resolve case-insensitively.
+omm plan spark2 qwen3-235b-a22b-fp4
+omm launch spark2 qwen3-235b-a22b-fp4
+omm health spark2
+omm logs spark2 head -f
+omm stop spark2 -y
 ```
 
-The explicit `omm cluster launch spark2 qwen3-235b-a22b-fp4` form remains available.
-Qwen3.8 Flash Next requires explicit preparation on first use before its `--keep` launch:
+Qwen3.8 Flash Next requires explicit preparation on first use:
 
 ```bash
 omm cluster prepare CLUSTER qwen3.8-flash-next-fp8 --build --weights
-omm cluster launch CLUSTER qwen3.8-flash-next-fp8 --keep
+omm launch CLUSTER qwen3.8-flash-next-fp8
 ```
 
-Use `--keep` so failed ranks and their crash logs survive for `cluster logs`; `cluster status`
-and `cluster stop` include those retained containers.
+Facade launches retain failed rank logs where the backend supports it; `ps` and
+`stop` include retained containers.
 
 Cluster profiles keep their immutable model and runtime identities in `omodel-manager`.
 Model-specific build history and findings belong in `notes/<profile>.md`.
@@ -235,8 +243,8 @@ installs it, installs Docker if missing, adds you to the `docker` group, checks
 the NVIDIA driver + container runtime (CDI-aware), and prompts for an HF token if
 none is set. Run it without `--fix` for a read-only status report. It also **registers**
 the host — under `alias` (e.g. `dgx1`) — in `~/.config/otools/hosts`, **merging** into
-that list so other hosts stay. Then `ps` fans across every host by default and
-`--host dgx1` resolves the alias. A bare `user@host` line works too; the file is safe to
+that list so other hosts stay. Then `ps` fans across every host by default and lifecycle
+commands accept `dgx1` as the device. A bare `user@host` line works too; the file is safe to
 hand-edit. After registration, `install` probes the registered DGXs directly and offers to
 name a newly discovered two-node cluster once both members are present.
 

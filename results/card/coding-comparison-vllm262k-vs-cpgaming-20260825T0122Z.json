@@ -1,0 +1,1123 @@
+{
+  "created_utc": "2026-08-25T01:34:19Z",
+  "endpoints": [
+    {
+      "model": "qwen3.8-27b",
+      "name": "local",
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "model": "qwen3.8-27b",
+      "name": "cpgaming",
+      "url": "http://cpgaming:8000"
+    }
+  ],
+  "max_tokens": 1200,
+  "records": [
+    {
+      "code": "def coalesce_ranges(ranges):\n    # Normalize: ensure start <= end for each pair\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n    \n    if not normalized:\n        return []\n    \n    # Sort by start, then by end\n    normalized.sort(key=lambda x: (x[0], x[1]))\n    \n    # Merge overlapping or touching ranges\n    merged = []\n    for start, end in normalized:\n        if not merged:\n            merged.append([start, end])\n        else:\n            last_start, last_end = merged[-1]\n            # If current range overlaps or touches the last merged range\n            if start <= last_end + 1:\n                # Extend the last range if needed\n                if end > last_end:\n                    merged[-1][1] = end\n            else:\n                merged.append([start, end])\n    \n    return [(s, e) for s, e in merged]",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "empty",
+          "normalize_merge_sort",
+          "nested_and_duplicates"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "coalesce_ranges",
+      "timing": {
+        "decode_tps": 70.97220101525038,
+        "ok": true,
+        "text": "```python\ndef coalesce_ranges(ranges):\n    # Normalize: ensure start <= end for each pair\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n    \n    if not normalized:\n        return []\n    \n    # Sort by start, then by end\n    normalized.sort(key=lambda x: (x[0], x[1]))\n    \n    # Merge overlapping or touching ranges\n    merged = []\n    for start, end in normalized:\n        if not merged:\n            merged.append([start, end])\n        else:\n            last_start, last_end = merged[-1]\n            # If current range overlaps or touches the last merged range\n            if start <= last_end + 1:\n                # Extend the last range if needed\n                if end > last_end:\n                    merged[-1][1] = end\n            else:\n                merged.append([start, end])\n    \n    return [(s, e) for s, e in merged]\n```",
+        "total_seconds": 3.5522989930013864,
+        "ttft_seconds": 0.2269171349998942,
+        "usage": {
+          "completion_tokens": 237,
+          "prompt_tokens": 118,
+          "total_tokens": 355
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "def coalesce_ranges(ranges):\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n\n    normalized.sort()\n\n    merged = []\n    for start, end in normalized:\n        if not merged or start > merged[-1][1] + 1:\n            merged.append([start, end])\n        else:\n            if end > merged[-1][1]:\n                merged[-1][1] = end\n\n    return [(start, end) for start, end in merged]",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "empty",
+          "normalize_merge_sort",
+          "nested_and_duplicates"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "coalesce_ranges",
+      "timing": {
+        "decode_tps": 291.43878923013324,
+        "ok": true,
+        "text": "```python\ndef coalesce_ranges(ranges):\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n\n    normalized.sort()\n\n    merged = []\n    for start, end in normalized:\n        if not merged or start > merged[-1][1] + 1:\n            merged.append([start, end])\n        else:\n            if end > merged[-1][1]:\n                merged[-1][1] = end\n\n    return [(start, end) for start, end in merged]\n```",
+        "total_seconds": 38.02214464999997,
+        "ttft_seconds": 34.2478959,
+        "usage": {
+          "completion_tokens": 1080,
+          "completion_tokens_details": {
+            "reasoning_tokens": 940
+          },
+          "prompt_tokens": 154,
+          "total_tokens": 1234
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "```python\ndef coalesce_ranges(ranges):",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "SyntaxError('invalid syntax', ('candidate.py', 1, 1, '```python\\n', 1, 2))",
+            "name": "load",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 13, in <module>\n  File \"candidate.py\", line 1\n    ```python\n    ^\nSyntaxError: invalid syntax\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "coalesce_ranges",
+      "timing": {
+        "decode_tps": 6060.058148140771,
+        "ok": true,
+        "text": "```python\ndef coalesce_ranges(ranges):",
+        "total_seconds": 40.347138707998965,
+        "ttft_seconds": 40.14920399699986,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1188
+          },
+          "prompt_tokens": 154,
+          "total_tokens": 1354
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "def coalesce_ranges(ranges):\n    # Normalize and collect\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n    \n    if not normalized:\n        return []\n    \n    # Sort by start\n    normalized.sort(key=lambda x: x[0])\n    \n    # Merge overlapping or touching ranges\n    merged = []\n    for start, end in normalized:\n        if not merged:\n            merged.append([start, end])\n        else:\n            last_start, last_end = merged[-1]\n            if start <= last_end + 1:\n                # Overlapping or touching\n                if end > last_end:\n                    merged[-1][1] = end\n            else:\n                merged.append([start, end])\n    \n    return [(s, e) for s, e in merged]",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "empty",
+          "normalize_merge_sort",
+          "nested_and_duplicates"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "coalesce_ranges",
+      "timing": {
+        "decode_tps": 73.57727512686148,
+        "ok": true,
+        "text": "```python\ndef coalesce_ranges(ranges):\n    # Normalize and collect\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n    \n    if not normalized:\n        return []\n    \n    # Sort by start\n    normalized.sort(key=lambda x: x[0])\n    \n    # Merge overlapping or touching ranges\n    merged = []\n    for start, end in normalized:\n        if not merged:\n            merged.append([start, end])\n        else:\n            last_start, last_end = merged[-1]\n            if start <= last_end + 1:\n                # Overlapping or touching\n                if end > last_end:\n                    merged[-1][1] = end\n            else:\n                merged.append([start, end])\n    \n    return [(s, e) for s, e in merged]\n```",
+        "total_seconds": 2.990091215000575,
+        "ttft_seconds": 0.19023008900148852,
+        "usage": {
+          "completion_tokens": 207,
+          "prompt_tokens": 118,
+          "total_tokens": 325
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "def coalesce_ranges(ranges):\n    # Normalize: ensure start <= end for each pair\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n    \n    if not normalized:\n        return []\n    \n    # Sort by start, then by end\n    normalized.sort(key=lambda x: (x[0], x[1]))\n    \n    # Merge overlapping or touching ranges\n    merged = []\n    for start, end in normalized:\n        if not merged:\n            merged.append([start, end])\n        else:\n            last_start, last_end = merged[-1]\n            # If current range overlaps or touches the last merged range\n            if start <= last_end + 1:\n                # Extend the last range if needed\n                if end > last_end:\n                    merged[-1][1] = end\n            else:\n                merged.append([start, end])\n    \n    return [(s, e) for s, e in merged]",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "empty",
+          "normalize_merge_sort",
+          "nested_and_duplicates"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "coalesce_ranges",
+      "timing": {
+        "decode_tps": 70.87703159607841,
+        "ok": true,
+        "text": "```python\ndef coalesce_ranges(ranges):\n    # Normalize: ensure start <= end for each pair\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n    \n    if not normalized:\n        return []\n    \n    # Sort by start, then by end\n    normalized.sort(key=lambda x: (x[0], x[1]))\n    \n    # Merge overlapping or touching ranges\n    merged = []\n    for start, end in normalized:\n        if not merged:\n            merged.append([start, end])\n        else:\n            last_start, last_end = merged[-1]\n            # If current range overlaps or touches the last merged range\n            if start <= last_end + 1:\n                # Extend the last range if needed\n                if end > last_end:\n                    merged[-1][1] = end\n            else:\n                merged.append([start, end])\n    \n    return [(s, e) for s, e in merged]\n```",
+        "total_seconds": 3.5203819119997206,
+        "ttft_seconds": 0.1905460239995591,
+        "usage": {
+          "completion_tokens": 237,
+          "prompt_tokens": 118,
+          "total_tokens": 355
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "def coalesce_ranges(ranges):\n    normalized = []\n    for pair in ranges:\n        start, end = pair\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n\n    normalized.sort()\n\n    merged = []\n    for start, end in normalized:\n        if not merged or start > merged[-1][1] + 1:\n            merged.append([start, end])\n        else:\n            if end > merged[-1][1]:\n                merged[-1][1] = end\n\n    return [(start, end) for start, end in merged]",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "empty",
+          "normalize_merge_sort",
+          "nested_and_duplicates"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "coalesce_ranges",
+      "timing": {
+        "decode_tps": 300.1262609626837,
+        "ok": true,
+        "text": "```python\ndef coalesce_ranges(ranges):\n    normalized = []\n    for pair in ranges:\n        start, end = pair\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n\n    normalized.sort()\n\n    merged = []\n    for start, end in normalized:\n        if not merged or start > merged[-1][1] + 1:\n            merged.append([start, end])\n        else:\n            if end > merged[-1][1]:\n                merged[-1][1] = end\n\n    return [(start, end) for start, end in merged]\n```",
+        "total_seconds": 30.099769540000125,
+        "ttft_seconds": 26.989988810000796,
+        "usage": {
+          "completion_tokens": 920,
+          "completion_tokens_details": {
+            "reasoning_tokens": 775
+          },
+          "prompt_tokens": 154,
+          "total_tokens": 1074
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "def topological_order(nodes, edges):\n    nodes_list = list(nodes)\n    node_set = set(nodes_list)\n    \n    # Build adjacency list and in-degree map\n    adj = {node: [] for node in node_set}\n    in_degree = {node: 0 for node in node_set}\n    \n    seen_edges = set()\n    for before, after in edges:\n        if before not in node_set or after not in node_set:\n            raise ValueError(f\"Edge contains unknown node: ({before}, {after})\")\n        if (before, after) in seen_edges:\n            continue\n        seen_edges.add((before, after))\n        adj[before].append(after)\n        in_degree[after] += 1\n    \n    # Use a min-heap for lexicographically smallest order\n    import heapq\n    heap = [node for node in node_set if in_degree[node] == 0]\n    heapq.heapify(heap)\n    \n    result = []\n    while heap:\n        node = heapq.heappop(heap)\n        result.append(node)\n        for neighbor in adj[node]:\n            in_degree[neighbor] -= 1\n            if in_degree[neighbor] == 0:\n                heapq.heappush(heap, neighbor)\n    \n    if len(result) != len(node_set):\n        raise ValueError(\"Graph has a cycle\")\n    \n    return result",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "order_and_isolated",
+          "duplicate_edges",
+          "failures"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "topological_order",
+      "timing": {
+        "decode_tps": 80.03047958707563,
+        "ok": true,
+        "text": "```python\ndef topological_order(nodes, edges):\n    nodes_list = list(nodes)\n    node_set = set(nodes_list)\n    \n    # Build adjacency list and in-degree map\n    adj = {node: [] for node in node_set}\n    in_degree = {node: 0 for node in node_set}\n    \n    seen_edges = set()\n    for before, after in edges:\n        if before not in node_set or after not in node_set:\n            raise ValueError(f\"Edge contains unknown node: ({before}, {after})\")\n        if (before, after) in seen_edges:\n            continue\n        seen_edges.add((before, after))\n        adj[before].append(after)\n        in_degree[after] += 1\n    \n    # Use a min-heap for lexicographically smallest order\n    import heapq\n    heap = [node for node in node_set if in_degree[node] == 0]\n    heapq.heapify(heap)\n    \n    result = []\n    while heap:\n        node = heapq.heappop(heap)\n        result.append(node)\n        for neighbor in adj[node]:\n            in_degree[neighbor] -= 1\n            if in_degree[neighbor] == 0:\n                heapq.heappush(heap, neighbor)\n    \n    if len(result) != len(node_set):\n        raise ValueError(\"Graph has a cycle\")\n    \n    return result\n```",
+        "total_seconds": 4.053071438000188,
+        "ttft_seconds": 0.19526237799982482,
+        "usage": {
+          "completion_tokens": 305,
+          "prompt_tokens": 127,
+          "total_tokens": 432
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "order_and_isolated",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 5, in test_order_and_isolated\nNameError: name 'topological_order' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "duplicate_edges",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 8, in test_duplicate_edges\nNameError: name 'topological_order' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "failures",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 13, in test_failures\nNameError: name 'topological_order' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "topological_order",
+      "timing": {
+        "decode_tps": null,
+        "ok": false,
+        "text": "",
+        "total_seconds": 44.808717058000184,
+        "ttft_seconds": null,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1197
+          },
+          "prompt_tokens": 163,
+          "total_tokens": 1363
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "order_and_isolated",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 5, in test_order_and_isolated\nNameError: name 'topological_order' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "duplicate_edges",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 8, in test_duplicate_edges\nNameError: name 'topological_order' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "failures",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 13, in test_failures\nNameError: name 'topological_order' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "topological_order",
+      "timing": {
+        "decode_tps": null,
+        "ok": false,
+        "text": "",
+        "total_seconds": 44.77807239200047,
+        "ttft_seconds": null,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 163,
+          "total_tokens": 1363
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "def topological_order(nodes, edges):\n    import heapq\n\n    node_set = set(nodes)\n    in_degree = {node: 0 for node in node_set}\n    adjacency = {node: set() for node in node_set}\n\n    for before, after in edges:\n        if before not in node_set or after not in node_set:\n            raise ValueError(f\"Edge ({before}, {after}) contains an unknown node\")\n        if before == after:\n            raise ValueError(\"Cycle detected\")\n        if after not in adjacency[before]:\n            adjacency[before].add(after)\n            in_degree[after] += 1\n\n    # Use a min-heap for lexicographically smallest ordering\n    heap = [node for node in node_set if in_degree[node] == 0]\n    heapq.heapify(heap)\n\n    result = []\n    while heap:\n        node = heapq.heappop(heap)\n        result.append(node)\n        for neighbor in adjacency[node]:\n            in_degree[neighbor] -= 1\n            if in_degree[neighbor] == 0:\n                heapq.heappush(heap, neighbor)\n\n    if len(result) != len(node_set):\n        raise ValueError(\"Cycle detected\")\n\n    return result",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "order_and_isolated",
+          "duplicate_edges",
+          "failures"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "topological_order",
+      "timing": {
+        "decode_tps": 75.28903631966368,
+        "ok": true,
+        "text": "```python\ndef topological_order(nodes, edges):\n    import heapq\n\n    node_set = set(nodes)\n    in_degree = {node: 0 for node in node_set}\n    adjacency = {node: set() for node in node_set}\n\n    for before, after in edges:\n        if before not in node_set or after not in node_set:\n            raise ValueError(f\"Edge ({before}, {after}) contains an unknown node\")\n        if before == after:\n            raise ValueError(\"Cycle detected\")\n        if after not in adjacency[before]:\n            adjacency[before].add(after)\n            in_degree[after] += 1\n\n    # Use a min-heap for lexicographically smallest ordering\n    heap = [node for node in node_set if in_degree[node] == 0]\n    heapq.heapify(heap)\n\n    result = []\n    while heap:\n        node = heapq.heappop(heap)\n        result.append(node)\n        for neighbor in adjacency[node]:\n            in_degree[neighbor] -= 1\n            if in_degree[neighbor] == 0:\n                heapq.heappush(heap, neighbor)\n\n    if len(result) != len(node_set):\n        raise ValueError(\"Cycle detected\")\n\n    return result\n```",
+        "total_seconds": 3.8047125739994954,
+        "ttft_seconds": 0.191850279999926,
+        "usage": {
+          "completion_tokens": 273,
+          "prompt_tokens": 127,
+          "total_tokens": 400
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "def topological_order(nodes, edges):\n    nodes_set = set(nodes)\n    adj = {node: set() for node in nodes_set}\n    in_degree = {node: 0 for node in nodes_set}\n\n    for before, after in edges:\n        if before not in nodes_set or after not in nodes_set:\n            raise ValueError(f\"Edge contains unknown node: ({before}, {after})\")\n        if before == after:\n            raise ValueError(\"Cycle detected: self-loop\")\n        if after not in adj[before]:\n            adj[before].add(after)\n            in_degree[after] += 1\n\n    import heapq\n    heap = [node for node in nodes_set if in_degree[node] == 0]\n    heapq.heapify(heap)\n\n    result = []\n    while heap:\n        node = heapq.heappop(heap)\n        result.append(node)\n        for neighbor in adj[node]:\n            in_degree[neighbor] -= 1\n            if in_degree[neighbor] == 0:\n                heapq.heappush(heap, neighbor)\n\n    if len(result) != len(nodes_set):\n        raise ValueError(\"Cycle detected in graph\")\n\n    return result",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "order_and_isolated",
+          "duplicate_edges",
+          "failures"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "topological_order",
+      "timing": {
+        "decode_tps": 76.45904590009651,
+        "ok": true,
+        "text": "```python\ndef topological_order(nodes, edges):\n    nodes_set = set(nodes)\n    adj = {node: set() for node in nodes_set}\n    in_degree = {node: 0 for node in nodes_set}\n\n    for before, after in edges:\n        if before not in nodes_set or after not in nodes_set:\n            raise ValueError(f\"Edge contains unknown node: ({before}, {after})\")\n        if before == after:\n            raise ValueError(\"Cycle detected: self-loop\")\n        if after not in adj[before]:\n            adj[before].add(after)\n            in_degree[after] += 1\n\n    import heapq\n    heap = [node for node in nodes_set if in_degree[node] == 0]\n    heapq.heapify(heap)\n\n    result = []\n    while heap:\n        node = heapq.heappop(heap)\n        result.append(node)\n        for neighbor in adj[node]:\n            in_degree[neighbor] -= 1\n            if in_degree[neighbor] == 0:\n                heapq.heappush(heap, neighbor)\n\n    if len(result) != len(nodes_set):\n        raise ValueError(\"Cycle detected in graph\")\n\n    return result\n```",
+        "total_seconds": 3.633633309000288,
+        "ttft_seconds": 0.1937589860008302,
+        "usage": {
+          "completion_tokens": 264,
+          "prompt_tokens": 127,
+          "total_tokens": 391
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "order_and_isolated",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 5, in test_order_and_isolated\nNameError: name 'topological_order' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "duplicate_edges",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 8, in test_duplicate_edges\nNameError: name 'topological_order' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "failures",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 13, in test_failures\nNameError: name 'topological_order' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "topological_order",
+      "timing": {
+        "decode_tps": null,
+        "ok": false,
+        "text": "",
+        "total_seconds": 51.15527293800005,
+        "ttft_seconds": null,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 163,
+          "total_tokens": 1363
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "import time\nfrom collections import OrderedDict\n\n\nclass TTLCache:\n    def __init__(self, maxsize, clock):\n        if maxsize < 1:\n            raise ValueError(\"maxsize must be >= 1\")\n        self.maxsize = maxsize\n        self.clock = clock\n        self._cache = OrderedDict()  # key -> (value, expiry)\n\n    def set(self, key, value, ttl):\n        now = self.clock()\n        expiry = now + ttl\n        if ttl <= 0:\n            # Non-positive TTL must not remain stored\n            if key in self._cache:\n                del self._cache[key]\n            return\n        if key in self._cache:\n            # Update existing entry\n            self._cache[key] = (value, expiry)\n            self._cache.move_to_end(key)\n        else:\n            # Evict if necessary\n            if len(self._cache) >= self.maxsize:\n                self._evict()\n            self._cache[key] = (value, expiry)\n\n    def get(self, key, default=None):\n        if key not in self._cache:\n            return default\n        value, expiry = self._cache[key]\n        if self.clock() >= expiry:\n            # Expired\n            del self._cache[key]\n            return default\n        # Refresh LRU recency but not expiry\n        self._cache.move_to_end(key)\n        return value\n\n    def _evict(self):\n        # First, remove expired items\n        now = self.clock()\n        expired_keys = [k for k, (_, expiry) in self._cache.items() if now >= expiry]\n        for k in expired_keys:\n            del self._cache[k]\n        # If still at capacity, evict LRU live item\n        if len(self._cache) >= self.maxsize:\n            self._cache.popitem(last=False)",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "lru_and_refresh",
+          "expiry_and_update",
+          "invalid_and_nonpositive"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "ttl_cache",
+      "timing": {
+        "decode_tps": 73.28648060508989,
+        "ok": true,
+        "text": "```python\nimport time\nfrom collections import OrderedDict\n\n\nclass TTLCache:\n    def __init__(self, maxsize, clock):\n        if maxsize < 1:\n            raise ValueError(\"maxsize must be >= 1\")\n        self.maxsize = maxsize\n        self.clock = clock\n        self._cache = OrderedDict()  # key -> (value, expiry)\n\n    def set(self, key, value, ttl):\n        now = self.clock()\n        expiry = now + ttl\n        if ttl <= 0:\n            # Non-positive TTL must not remain stored\n            if key in self._cache:\n                del self._cache[key]\n            return\n        if key in self._cache:\n            # Update existing entry\n            self._cache[key] = (value, expiry)\n            self._cache.move_to_end(key)\n        else:\n            # Evict if necessary\n            if len(self._cache) >= self.maxsize:\n                self._evict()\n            self._cache[key] = (value, expiry)\n\n    def get(self, key, default=None):\n        if key not in self._cache:\n            return default\n        value, expiry = self._cache[key]\n        if self.clock() >= expiry:\n            # Expired\n            del self._cache[key]\n            return default\n        # Refresh LRU recency but not expiry\n        self._cache.move_to_end(key)\n        return value\n\n    def _evict(self):\n        # First, remove expired items\n        now = self.clock()\n        expired_keys = [k for k, (_, expiry) in self._cache.items() if now >= expiry]\n        for k in expired_keys:\n            del self._cache[k]\n        # If still at capacity, evict LRU live item\n        if len(self._cache) >= self.maxsize:\n            self._cache.popitem(last=False)\n```",
+        "total_seconds": 5.934226945000773,
+        "ttft_seconds": 0.19862755599933735,
+        "usage": {
+          "completion_tokens": 417,
+          "prompt_tokens": 172,
+          "total_tokens": 589
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "lru_and_refresh",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 8, in test_lru_and_refresh\nNameError: name 'TTLCache' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "expiry_and_update",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_expiry_and_update\nNameError: name 'TTLCache' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "invalid_and_nonpositive",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 30, in test_invalid_and_nonpositive\nNameError: name 'TTLCache' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "ttl_cache",
+      "timing": {
+        "decode_tps": null,
+        "ok": false,
+        "text": "",
+        "total_seconds": 50.000766160999774,
+        "ttft_seconds": null,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1199
+          },
+          "prompt_tokens": 208,
+          "total_tokens": 1408
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "lru_and_refresh",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 8, in test_lru_and_refresh\nNameError: name 'TTLCache' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "expiry_and_update",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_expiry_and_update\nNameError: name 'TTLCache' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "invalid_and_nonpositive",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 30, in test_invalid_and_nonpositive\nNameError: name 'TTLCache' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "ttl_cache",
+      "timing": {
+        "decode_tps": null,
+        "ok": false,
+        "text": "",
+        "total_seconds": 46.4802194519998,
+        "ttft_seconds": null,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1199
+          },
+          "prompt_tokens": 208,
+          "total_tokens": 1408
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "import time\nfrom collections import OrderedDict\n\n\nclass TTLCache:\n    def __init__(self, maxsize, clock):\n        if maxsize < 1:\n            raise ValueError(\"maxsize must be >= 1\")\n        self.maxsize = maxsize\n        self.clock = clock\n        self._cache = OrderedDict()  # key -> (value, expiry)\n\n    def set(self, key, value, ttl):\n        now = self.clock()\n        expiry = now + ttl\n        # Non-positive TTL must not remain stored\n        if ttl <= 0:\n            # Remove if exists\n            if key in self._cache:\n                del self._cache[key]\n            return\n        # If key exists, update it (move to end for LRU)\n        if key in self._cache:\n            self._cache[key] = (value, expiry)\n            self._cache.move_to_end(key)\n        else:\n            # Evict expired items first\n            self._evict_expired()\n            # If still over capacity, evict LRU live item\n            if len(self._cache) >= self.maxsize:\n                self._cache.popitem(last=False)\n            self._cache[key] = (value, expiry)\n\n    def get(self, key, default=None):\n        if key not in self._cache:\n            return default\n        value, expiry = self._cache[key]\n        now = self.clock()\n        if now >= expiry:\n            # Expired, remove it\n            del self._cache[key]\n            return default\n        # Refresh LRU recency but not expiry\n        self._cache.move_to_end(key)\n        return value\n\n    def _evict_expired(self):\n        now = self.clock()\n        expired_keys = [k for k, (_, expiry) in self._cache.items() if now >= expiry]\n        for k in expired_keys:\n            del self._cache[k]",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "lru_and_refresh",
+          "expiry_and_update",
+          "invalid_and_nonpositive"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "ttl_cache",
+      "timing": {
+        "decode_tps": 70.84014519105972,
+        "ok": true,
+        "text": "```python\nimport time\nfrom collections import OrderedDict\n\n\nclass TTLCache:\n    def __init__(self, maxsize, clock):\n        if maxsize < 1:\n            raise ValueError(\"maxsize must be >= 1\")\n        self.maxsize = maxsize\n        self.clock = clock\n        self._cache = OrderedDict()  # key -> (value, expiry)\n\n    def set(self, key, value, ttl):\n        now = self.clock()\n        expiry = now + ttl\n        # Non-positive TTL must not remain stored\n        if ttl <= 0:\n            # Remove if exists\n            if key in self._cache:\n                del self._cache[key]\n            return\n        # If key exists, update it (move to end for LRU)\n        if key in self._cache:\n            self._cache[key] = (value, expiry)\n            self._cache.move_to_end(key)\n        else:\n            # Evict expired items first\n            self._evict_expired()\n            # If still over capacity, evict LRU live item\n            if len(self._cache) >= self.maxsize:\n                self._cache.popitem(last=False)\n            self._cache[key] = (value, expiry)\n\n    def get(self, key, default=None):\n        if key not in self._cache:\n            return default\n        value, expiry = self._cache[key]\n        now = self.clock()\n        if now >= expiry:\n            # Expired, remove it\n            del self._cache[key]\n            return default\n        # Refresh LRU recency but not expiry\n        self._cache.move_to_end(key)\n        return value\n\n    def _evict_expired(self):\n        now = self.clock()\n        expired_keys = [k for k, (_, expiry) in self._cache.items() if now >= expiry]\n        for k in expired_keys:\n            del self._cache[k]\n```",
+        "total_seconds": 6.162469316001079,
+        "ttft_seconds": 0.19116358700011915,
+        "usage": {
+          "completion_tokens": 424,
+          "prompt_tokens": 172,
+          "total_tokens": 596
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "import time\nfrom collections import OrderedDict\n\n\nclass TTLCache:\n    def __init__(self, maxsize, clock):\n        if maxsize < 1:\n            raise ValueError(\"maxsize must be >= 1\")\n        self.maxsize = maxsize\n        self.clock = clock\n        self._store = OrderedDict()  # key -> (value, expiry)\n\n    def _purge_expired(self):\n        now = self.clock()\n        expired_keys = [k for k, (_, expiry) in self._store.items() if now >= expiry]\n        for k in expired_keys:\n            del self._store[k]\n\n    def set(self, key, value, ttl):\n        if ttl <= 0:\n            # Non-positive TTL must not remain stored\n            if key in self._store:\n                del self._store[key]\n            return\n        expiry = self.clock() + ttl\n        if key in self._store:\n            # Update existing entry: refresh recency and expiry\n            self._store[key] = (value, expiry)\n            self._store.move_to_end(key)\n        else:\n            # New key: may need to evict\n            self._store[key] = (value, expiry)\n            if len(self._store) > self.maxsize:\n                self._purge_expired()\n                if len(self._store) > self.maxsize:\n                    # Evict LRU live item\n                    self._store.popitem(last=False)\n\n    def get(self, key, default=None):\n        if key not in self._store:\n            return default\n        value, expiry = self._store[key]\n        if self.clock() >= expiry:\n            del self._store[key]\n            return default\n        # Refresh LRU recency but not expiry\n        self._store.move_to_end(key)\n        return value",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "lru_and_refresh",
+          "expiry_and_update",
+          "invalid_and_nonpositive"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "ttl_cache",
+      "timing": {
+        "decode_tps": 72.85128186359442,
+        "ok": true,
+        "text": "```python\nimport time\nfrom collections import OrderedDict\n\n\nclass TTLCache:\n    def __init__(self, maxsize, clock):\n        if maxsize < 1:\n            raise ValueError(\"maxsize must be >= 1\")\n        self.maxsize = maxsize\n        self.clock = clock\n        self._store = OrderedDict()  # key -> (value, expiry)\n\n    def _purge_expired(self):\n        now = self.clock()\n        expired_keys = [k for k, (_, expiry) in self._store.items() if now >= expiry]\n        for k in expired_keys:\n            del self._store[k]\n\n    def set(self, key, value, ttl):\n        if ttl <= 0:\n            # Non-positive TTL must not remain stored\n            if key in self._store:\n                del self._store[key]\n            return\n        expiry = self.clock() + ttl\n        if key in self._store:\n            # Update existing entry: refresh recency and expiry\n            self._store[key] = (value, expiry)\n            self._store.move_to_end(key)\n        else:\n            # New key: may need to evict\n            self._store[key] = (value, expiry)\n            if len(self._store) > self.maxsize:\n                self._purge_expired()\n                if len(self._store) > self.maxsize:\n                    # Evict LRU live item\n                    self._store.popitem(last=False)\n\n    def get(self, key, default=None):\n        if key not in self._store:\n            return default\n        value, expiry = self._store[key]\n        if self.clock() >= expiry:\n            del self._store[key]\n            return default\n        # Refresh LRU recency but not expiry\n        self._store.move_to_end(key)\n        return value\n```",
+        "total_seconds": 5.756305902999884,
+        "ttft_seconds": 0.1969646150009794,
+        "usage": {
+          "completion_tokens": 406,
+          "prompt_tokens": 172,
+          "total_tokens": 578
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "lru_and_refresh",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 8, in test_lru_and_refresh\nNameError: name 'TTLCache' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "expiry_and_update",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_expiry_and_update\nNameError: name 'TTLCache' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "invalid_and_nonpositive",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 30, in test_invalid_and_nonpositive\nNameError: name 'TTLCache' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "ttl_cache",
+      "timing": {
+        "decode_tps": null,
+        "ok": false,
+        "text": "",
+        "total_seconds": 47.89152521700089,
+        "ttft_seconds": null,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1199
+          },
+          "prompt_tokens": 208,
+          "total_tokens": 1408
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "import asyncio\nfrom typing import Any, AsyncIterator, Iterable, List, TypeVar\n\nT = TypeVar(\"T\")\nR = TypeVar(\"R\")\n\n\nasync def async_map_ordered(\n    items: Iterable[T], worker, limit: int\n) -> List[R]:\n    if limit < 1:\n        raise ValueError(\"limit must be >= 1\")\n\n    # Convert to a list so we can index by position\n    items_list = list(items)\n    n = len(items_list)\n    if n == 0:\n        return []\n\n    results: List[R] = [None] * n\n    tasks: List[asyncio.Task] = []\n    next_index = 0\n\n    async def run_one(index: int, item: T) -> None:\n        nonlocal next_index\n        try:\n            result = await worker(item)\n            results[index] = result\n        except Exception as exc:\n            # Store the exception to re-raise later\n            # We'll cancel all other tasks and re-raise\n            # Use a sentinel to propagate\n            raise\n        finally:\n            # Schedule next task if any remain\n            if next_index < n:\n                idx = next_index\n                next_index += 1\n                tasks.append(asyncio.current_task())\n                # Actually we need to create a new task\n                # This approach is tricky; let's restructure\n\n    # Better approach: use a semaphore and gather with return_exceptions\n    # But we need to cancel on first error and re-raise original\n\n    # Use a semaphore to limit concurrency\n    sem = asyncio.Semaphore(limit)\n\n    async def bounded_worker(index: int, item: T) -> R:\n        async with sem:\n            return await worker(item)\n\n    # Create all tasks upfront but they'll be limited by semaphore\n    # However, creating all tasks at once means all coroutines are scheduled\n    # but only `limit` will be running due to semaphore.\n    # If one raises, we need to cancel the rest.\n\n    # Alternative: use asyncio.gather with return_exceptions=False\n    # but that doesn't cancel others on first failure by default.\n    # Actually, asyncio.gather does NOT cancel other tasks on first exception\n    # unless we handle it.\n\n    # Let's use a different approach: manually manage tasks with a queue-like pattern\n\n    # Simpler: create tasks one at a time, up to `limit`, and as each completes,\n    # start the next.\n\n    results: List[R] = [None] * n\n    next_index = 0\n    active: List[asyncio.Task] = []\n    first_exception: Exception = None\n\n    async def process_one(index: int, item: T) -> None:\n        nonlocal first_exception\n        try:\n            results[index] = await worker(item)\n        except Exception as exc:\n            if first_exception is None:\n                first_exception = exc\n            raise\n\n    # Start initial batch\n    for i in range(min(limit, n)):\n        task = asyncio.create_task(process_one(i, items_list[i]))\n        active.append(task)\n        next_index = i + 1\n\n    # Process remaining items as tasks complete\n    while active:\n        # Wait for any one task to complete\n        done, _ = await asyncio.wait(active, return_when=asyncio.FIRST_COMPLETED)\n        # Remove completed tasks from active\n        for task in done:\n            active.remove(task)\n            if task.cancelled():\n                continue\n            exc = task.exception()\n            if exc is not None:\n                if first_exception is None:\n                    first_exception = exc\n                # Cancel all remaining active tasks\n                for t in active:\n                    t.cancel()\n                # Wait for all to finish\n                if active:\n                    await asyncio.gather(*active, return_exceptions=True)\n                active.clear()\n                break\n            # Start next task if any remain\n            if next_index < n:\n                idx = next_index\n                next_index += 1\n                task = asyncio.create_task(process_one(idx, items_list[idx]))\n                active.append(task)\n        if first_exception is not None:\n            break\n\n    if first_exception is not None:\n        raise first_exception\n\n    return results",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "order_and_limit",
+          "invalid_limit",
+          "propagates_exception"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "async_map_ordered",
+      "timing": {
+        "decode_tps": 60.77222227827539,
+        "ok": true,
+        "text": "```python\nimport asyncio\nfrom typing import Any, AsyncIterator, Iterable, List, TypeVar\n\nT = TypeVar(\"T\")\nR = TypeVar(\"R\")\n\n\nasync def async_map_ordered(\n    items: Iterable[T], worker, limit: int\n) -> List[R]:\n    if limit < 1:\n        raise ValueError(\"limit must be >= 1\")\n\n    # Convert to a list so we can index by position\n    items_list = list(items)\n    n = len(items_list)\n    if n == 0:\n        return []\n\n    results: List[R] = [None] * n\n    tasks: List[asyncio.Task] = []\n    next_index = 0\n\n    async def run_one(index: int, item: T) -> None:\n        nonlocal next_index\n        try:\n            result = await worker(item)\n            results[index] = result\n        except Exception as exc:\n            # Store the exception to re-raise later\n            # We'll cancel all other tasks and re-raise\n            # Use a sentinel to propagate\n            raise\n        finally:\n            # Schedule next task if any remain\n            if next_index < n:\n                idx = next_index\n                next_index += 1\n                tasks.append(asyncio.current_task())\n                # Actually we need to create a new task\n                # This approach is tricky; let's restructure\n\n    # Better approach: use a semaphore and gather with return_exceptions\n    # But we need to cancel on first error and re-raise original\n\n    # Use a semaphore to limit concurrency\n    sem = asyncio.Semaphore(limit)\n\n    async def bounded_worker(index: int, item: T) -> R:\n        async with sem:\n            return await worker(item)\n\n    # Create all tasks upfront but they'll be limited by semaphore\n    # However, creating all tasks at once means all coroutines are scheduled\n    # but only `limit` will be running due to semaphore.\n    # If one raises, we need to cancel the rest.\n\n    # Alternative: use asyncio.gather with return_exceptions=False\n    # but that doesn't cancel others on first failure by default.\n    # Actually, asyncio.gather does NOT cancel other tasks on first exception\n    # unless we handle it.\n\n    # Let's use a different approach: manually manage tasks with a queue-like pattern\n\n    # Simpler: create tasks one at a time, up to `limit`, and as each completes,\n    # start the next.\n\n    results: List[R] = [None] * n\n    next_index = 0\n    active: List[asyncio.Task] = []\n    first_exception: Exception = None\n\n    async def process_one(index: int, item: T) -> None:\n        nonlocal first_exception\n        try:\n            results[index] = await worker(item)\n        except Exception as exc:\n            if first_exception is None:\n                first_exception = exc\n            raise\n\n    # Start initial batch\n    for i in range(min(limit, n)):\n        task = asyncio.create_task(process_one(i, items_list[i]))\n        active.append(task)\n        next_index = i + 1\n\n    # Process remaining items as tasks complete\n    while active:\n        # Wait for any one task to complete\n        done, _ = await asyncio.wait(active, return_when=asyncio.FIRST_COMPLETED)\n        # Remove completed tasks from active\n        for task in done:\n            active.remove(task)\n            if task.cancelled():\n                continue\n            exc = task.exception()\n            if exc is not None:\n                if first_exception is None:\n                    first_exception = exc\n                # Cancel all remaining active tasks\n                for t in active:\n                    t.cancel()\n                # Wait for all to finish\n                if active:\n                    await asyncio.gather(*active, return_exceptions=True)\n                active.clear()\n                break\n            # Start next task if any remain\n            if next_index < n:\n                idx = next_index\n                next_index += 1\n                task = asyncio.create_task(process_one(idx, items_list[idx]))\n                active.append(task)\n        if first_exception is not None:\n            break\n\n    if first_exception is not None:\n        raise first_exception\n\n    return results\n```",
+        "total_seconds": 15.514874476999466,
+        "ttft_seconds": 0.19525058599901968,
+        "usage": {
+          "completion_tokens": 932,
+          "prompt_tokens": 136,
+          "total_tokens": 1068
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "order_and_limit",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_order_and_limit\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 15, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "invalid_limit",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 28, in test_invalid_limit\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 24, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "propagates_exception",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 42, in test_propagates_exception\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 37, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "async_map_ordered",
+      "timing": {
+        "decode_tps": null,
+        "ok": false,
+        "text": "",
+        "total_seconds": 50.09809782699995,
+        "ttft_seconds": null,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 172,
+          "total_tokens": 1372
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "order_and_limit",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_order_and_limit\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 15, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "invalid_limit",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 28, in test_invalid_limit\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 24, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "propagates_exception",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 42, in test_propagates_exception\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 37, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "async_map_ordered",
+      "timing": {
+        "decode_tps": null,
+        "ok": false,
+        "text": "",
+        "total_seconds": 49.58266060800088,
+        "ttft_seconds": null,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 172,
+          "total_tokens": 1372
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "import asyncio\nfrom typing import Any, AsyncIterator, Iterable, List, Optional\n\n\nasync def async_map_ordered(items, worker, limit):\n    if limit < 1:\n        raise ValueError(\"limit must be >= 1\")\n\n    # Convert to list to support any finite iterable\n    items_list = list(items)\n    n = len(items_list)\n    results: List[Optional[Any]] = [None] * n\n\n    if n == 0:\n        return results\n\n    # Use a semaphore to limit concurrency\n    semaphore = asyncio.Semaphore(limit)\n    tasks = []\n    error_holder: List[BaseException] = []\n\n    async def run_task(index: int, item: Any):\n        async with semaphore:\n            try:\n                result = await worker(item)\n                results[index] = result\n            except BaseException as e:\n                error_holder.append(e)\n                raise\n\n    for i, item in enumerate(items_list):\n        task = asyncio.create_task(run_task(i, item))\n        tasks.append(task)\n\n    try:\n        # Wait for all tasks; if any raises, gather will propagate the first exception\n        # but we need to cancel the rest\n        await asyncio.gather(*tasks)\n    except BaseException as e:\n        # Cancel all outstanding tasks\n        for task in tasks:\n            if not task.done():\n                task.cancel()\n        # Await all to ensure they are properly cancelled\n        await asyncio.gather(*tasks, return_exceptions=True)\n        raise e\n\n    return results",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "order_and_limit",
+          "invalid_limit",
+          "propagates_exception"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "async_map_ordered",
+      "timing": {
+        "decode_tps": 64.7817287998769,
+        "ok": true,
+        "text": "```python\nimport asyncio\nfrom typing import Any, AsyncIterator, Iterable, List, Optional\n\n\nasync def async_map_ordered(items, worker, limit):\n    if limit < 1:\n        raise ValueError(\"limit must be >= 1\")\n\n    # Convert to list to support any finite iterable\n    items_list = list(items)\n    n = len(items_list)\n    results: List[Optional[Any]] = [None] * n\n\n    if n == 0:\n        return results\n\n    # Use a semaphore to limit concurrency\n    semaphore = asyncio.Semaphore(limit)\n    tasks = []\n    error_holder: List[BaseException] = []\n\n    async def run_task(index: int, item: Any):\n        async with semaphore:\n            try:\n                result = await worker(item)\n                results[index] = result\n            except BaseException as e:\n                error_holder.append(e)\n                raise\n\n    for i, item in enumerate(items_list):\n        task = asyncio.create_task(run_task(i, item))\n        tasks.append(task)\n\n    try:\n        # Wait for all tasks; if any raises, gather will propagate the first exception\n        # but we need to cancel the rest\n        await asyncio.gather(*tasks)\n    except BaseException as e:\n        # Cancel all outstanding tasks\n        for task in tasks:\n            if not task.done():\n                task.cancel()\n        # Await all to ensure they are properly cancelled\n        await asyncio.gather(*tasks, return_exceptions=True)\n        raise e\n\n    return results\n```",
+        "total_seconds": 5.389320454998597,
+        "ttft_seconds": 0.18711601899849484,
+        "usage": {
+          "completion_tokens": 338,
+          "prompt_tokens": 136,
+          "total_tokens": 474
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "import asyncio\nfrom typing import Any, AsyncIterable, AsyncIterator, Callable, Iterable, List, Optional\n\n\nasync def async_map_ordered(\n    items: Iterable[Any],\n    worker: Callable[[Any], Any],\n    limit: int,\n) -> List[Any]:\n    if limit < 1:\n        raise ValueError(\"limit must be >= 1\")\n\n    # Convert to a list to support any finite iterable\n    items_list = list(items)\n    n = len(items_list)\n    results: List[Any] = [None] * n\n\n    if n == 0:\n        return results\n\n    async def _run() -> None:\n        # Use a semaphore to limit concurrent workers\n        sem = asyncio.Semaphore(limit)\n        tasks: List[asyncio.Task] = []\n\n        for i, item in enumerate(items_list):\n            async def _wrapped(idx: int, it: Any) -> None:\n                async with sem:\n                    results[idx] = await worker(it)\n\n            tasks.append(asyncio.create_task(_wrapped(i, item)))\n\n        # Wait for all tasks; if any raises, cancel the rest\n        try:\n            await asyncio.gather(*tasks)\n        except BaseException:\n            # Cancel all outstanding tasks\n            for t in tasks:\n                if not t.done():\n                    t.cancel()\n            # Await all to ensure cleanup\n            await asyncio.gather(*tasks, return_exceptions=True)\n            raise\n\n    await _run()\n    return results",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "order_and_limit",
+          "invalid_limit",
+          "propagates_exception"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "async_map_ordered",
+      "timing": {
+        "decode_tps": 64.72096699011645,
+        "ok": true,
+        "text": "```python\nimport asyncio\nfrom typing import Any, AsyncIterable, AsyncIterator, Callable, Iterable, List, Optional\n\n\nasync def async_map_ordered(\n    items: Iterable[Any],\n    worker: Callable[[Any], Any],\n    limit: int,\n) -> List[Any]:\n    if limit < 1:\n        raise ValueError(\"limit must be >= 1\")\n\n    # Convert to a list to support any finite iterable\n    items_list = list(items)\n    n = len(items_list)\n    results: List[Any] = [None] * n\n\n    if n == 0:\n        return results\n\n    async def _run() -> None:\n        # Use a semaphore to limit concurrent workers\n        sem = asyncio.Semaphore(limit)\n        tasks: List[asyncio.Task] = []\n\n        for i, item in enumerate(items_list):\n            async def _wrapped(idx: int, it: Any) -> None:\n                async with sem:\n                    results[idx] = await worker(it)\n\n            tasks.append(asyncio.create_task(_wrapped(i, item)))\n\n        # Wait for all tasks; if any raises, cancel the rest\n        try:\n            await asyncio.gather(*tasks)\n        except BaseException:\n            # Cancel all outstanding tasks\n            for t in tasks:\n                if not t.done():\n                    t.cancel()\n            # Await all to ensure cleanup\n            await asyncio.gather(*tasks, return_exceptions=True)\n            raise\n\n    await _run()\n    return results\n```",
+        "total_seconds": 5.276774302999911,
+        "ttft_seconds": 0.19329238399950555,
+        "usage": {
+          "completion_tokens": 330,
+          "prompt_tokens": 136,
+          "total_tokens": 466
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "order_and_limit",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_order_and_limit\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 15, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "invalid_limit",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 28, in test_invalid_limit\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 24, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "propagates_exception",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 42, in test_propagates_exception\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 37, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "async_map_ordered",
+      "timing": {
+        "decode_tps": null,
+        "ok": false,
+        "text": "",
+        "total_seconds": 51.4731492030005,
+        "ttft_seconds": null,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1199
+          },
+          "prompt_tokens": 172,
+          "total_tokens": 1372
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "import copy\n\ndef deep_merge(base, overlay):\n    \"\"\"\n    Deep merge two dictionaries.\n    \n    - Returns a new dictionary that is a deep copy of the merge.\n    - Recursively merges values only when both are dictionaries.\n    - An overlay value of None deletes that key from the result.\n    - Lists and all other values replace the base value (deep-copied).\n    - Does not mutate or alias either input.\n    \"\"\"\n    result = {}\n    \n    # Start with a deep copy of base\n    for key, value in base.items():\n        result[key] = copy.deepcopy(value)\n    \n    # Apply overlay\n    for key, value in overlay.items():\n        if value is None:\n            # Delete the key if it exists\n            if key in result:\n                del result[key]\n        elif isinstance(value, dict) and key in result and isinstance(result[key], dict):\n            # Recursively merge dictionaries\n            result[key] = deep_merge(result[key], value)\n        else:\n            # Replace with deep copy of overlay value\n            result[key] = copy.deepcopy(value)\n    \n    return result",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "recursive_delete_replace",
+          "no_aliases",
+          "none_only_deletes_overlay_key"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "deep_merge",
+      "timing": {
+        "decode_tps": 69.36684533365724,
+        "ok": true,
+        "text": "```python\nimport copy\n\ndef deep_merge(base, overlay):\n    \"\"\"\n    Deep merge two dictionaries.\n    \n    - Returns a new dictionary that is a deep copy of the merge.\n    - Recursively merges values only when both are dictionaries.\n    - An overlay value of None deletes that key from the result.\n    - Lists and all other values replace the base value (deep-copied).\n    - Does not mutate or alias either input.\n    \"\"\"\n    result = {}\n    \n    # Start with a deep copy of base\n    for key, value in base.items():\n        result[key] = copy.deepcopy(value)\n    \n    # Apply overlay\n    for key, value in overlay.items():\n        if value is None:\n            # Delete the key if it exists\n            if key in result:\n                del result[key]\n        elif isinstance(value, dict) and key in result and isinstance(result[key], dict):\n            # Recursively merge dictionaries\n            result[key] = deep_merge(result[key], value)\n        else:\n            # Replace with deep copy of overlay value\n            result[key] = copy.deepcopy(value)\n    \n    return result\n```",
+        "total_seconds": 3.809970615000566,
+        "ttft_seconds": 0.1914575769988005,
+        "usage": {
+          "completion_tokens": 252,
+          "prompt_tokens": 118,
+          "total_tokens": 370
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "recursive_delete_replace",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 5, in test_recursive_delete_replace\nNameError: name 'deep_merge' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "no_aliases",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 11, in test_no_aliases\nNameError: name 'deep_merge' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "none_only_deletes_overlay_key",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_none_only_deletes_overlay_key\nNameError: name 'deep_merge' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "deep_merge",
+      "timing": {
+        "decode_tps": null,
+        "ok": false,
+        "text": "",
+        "total_seconds": 46.66484513100113,
+        "ttft_seconds": null,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 154,
+          "total_tokens": 1354
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "recursive_delete_replace",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 5, in test_recursive_delete_replace\nNameError: name 'deep_merge' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "no_aliases",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 11, in test_no_aliases\nNameError: name 'deep_merge' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "none_only_deletes_overlay_key",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_none_only_deletes_overlay_key\nNameError: name 'deep_merge' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "deep_merge",
+      "timing": {
+        "decode_tps": null,
+        "ok": false,
+        "text": "",
+        "total_seconds": 55.00840640899878,
+        "ttft_seconds": null,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 154,
+          "total_tokens": 1354
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "import copy\n\ndef deep_merge(base, overlay):\n    \"\"\"\n    Deep merge two dictionaries.\n    \n    - Returns a new dictionary that is a deep copy of the merge result.\n    - Does not mutate or alias either input.\n    - Recursively merges values only when both corresponding values are dicts.\n    - An overlay value of None deletes that key from the result.\n    - Lists and all other values replace the base value and are deep-copied.\n    \"\"\"\n    result = {}\n    \n    # Start with a deep copy of base\n    for key, value in base.items():\n        result[key] = copy.deepcopy(value)\n    \n    # Apply overlay\n    for key, value in overlay.items():\n        if value is None:\n            # Delete the key if it exists\n            if key in result:\n                del result[key]\n        elif isinstance(value, dict) and isinstance(result.get(key), dict):\n            # Recursively merge if both are dicts\n            result[key] = deep_merge(result[key], value)\n        else:\n            # Replace with deep copy of overlay value\n            result[key] = copy.deepcopy(value)\n    \n    return result",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "recursive_delete_replace",
+          "no_aliases",
+          "none_only_deletes_overlay_key"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "deep_merge",
+      "timing": {
+        "decode_tps": 74.08848021049204,
+        "ok": true,
+        "text": "```python\nimport copy\n\ndef deep_merge(base, overlay):\n    \"\"\"\n    Deep merge two dictionaries.\n    \n    - Returns a new dictionary that is a deep copy of the merge result.\n    - Does not mutate or alias either input.\n    - Recursively merges values only when both corresponding values are dicts.\n    - An overlay value of None deletes that key from the result.\n    - Lists and all other values replace the base value and are deep-copied.\n    \"\"\"\n    result = {}\n    \n    # Start with a deep copy of base\n    for key, value in base.items():\n        result[key] = copy.deepcopy(value)\n    \n    # Apply overlay\n    for key, value in overlay.items():\n        if value is None:\n            # Delete the key if it exists\n            if key in result:\n                del result[key]\n        elif isinstance(value, dict) and isinstance(result.get(key), dict):\n            # Recursively merge if both are dicts\n            result[key] = deep_merge(result[key], value)\n        else:\n            # Replace with deep copy of overlay value\n            result[key] = copy.deepcopy(value)\n    \n    return result\n```",
+        "total_seconds": 3.633073635999608,
+        "ttft_seconds": 0.19112828699871898,
+        "usage": {
+          "completion_tokens": 256,
+          "prompt_tokens": 118,
+          "total_tokens": 374
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "import copy\n\ndef deep_merge(base, overlay):\n    \"\"\"\n    Deep merge two dictionaries, returning a new dictionary.\n    - Recursively merges when both values are dicts.\n    - An overlay value of None deletes that key.\n    - Lists and other values replace the base value (deep-copied).\n    - Does not mutate or alias either input.\n    \"\"\"\n    result = copy.deepcopy(base)\n    for key, overlay_value in overlay.items():\n        if overlay_value is None:\n            # Delete the key if it exists\n            if key in result:\n                del result[key]\n        elif isinstance(overlay_value, dict) and isinstance(result.get(key), dict):\n            # Recursively merge\n            result[key] = deep_merge(result[key], overlay_value)\n        else:\n            # Replace with deep copy of overlay value\n            result[key] = copy.deepcopy(overlay_value)\n    return result",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "recursive_delete_replace",
+          "no_aliases",
+          "none_only_deletes_overlay_key"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "deep_merge",
+      "timing": {
+        "decode_tps": 73.7225574317393,
+        "ok": true,
+        "text": "```python\nimport copy\n\ndef deep_merge(base, overlay):\n    \"\"\"\n    Deep merge two dictionaries, returning a new dictionary.\n    - Recursively merges when both values are dicts.\n    - An overlay value of None deletes that key.\n    - Lists and other values replace the base value (deep-copied).\n    - Does not mutate or alias either input.\n    \"\"\"\n    result = copy.deepcopy(base)\n    for key, overlay_value in overlay.items():\n        if overlay_value is None:\n            # Delete the key if it exists\n            if key in result:\n                del result[key]\n        elif isinstance(overlay_value, dict) and isinstance(result.get(key), dict):\n            # Recursively merge\n            result[key] = deep_merge(result[key], overlay_value)\n        else:\n            # Replace with deep copy of overlay value\n            result[key] = copy.deepcopy(overlay_value)\n    return result\n```",
+        "total_seconds": 2.9869942299992545,
+        "ttft_seconds": 0.1882019049990049,
+        "usage": {
+          "completion_tokens": 203,
+          "prompt_tokens": 118,
+          "total_tokens": 321
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "recursive_delete_replace",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 5, in test_recursive_delete_replace\nNameError: name 'deep_merge' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "no_aliases",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 11, in test_no_aliases\nNameError: name 'deep_merge' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "none_only_deletes_overlay_key",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_none_only_deletes_overlay_key\nNameError: name 'deep_merge' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "deep_merge",
+      "timing": {
+        "decode_tps": null,
+        "ok": false,
+        "text": "",
+        "total_seconds": 49.221587712001565,
+        "ttft_seconds": null,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 154,
+          "total_tokens": 1354
+        }
+      },
+      "url": "http://cpgaming:8000"
+    }
+  ],
+  "rounds": 3,
+  "summary": {
+    "cpgaming": {
+      "fully_correct": 2,
+      "median_decode_tps": 300.1262609626837,
+      "median_total_seconds": 47.89152521700089,
+      "median_ttft_seconds": 34.2478959,
+      "runs": 15,
+      "tests_passed": 6,
+      "tests_total": 43
+    },
+    "local": {
+      "fully_correct": 15,
+      "median_decode_tps": 72.85128186359442,
+      "median_total_seconds": 3.809970615000566,
+      "median_ttft_seconds": 0.191850279999926,
+      "runs": 15,
+      "tests_passed": 45,
+      "tests_total": 45
+    }
+  },
+  "tasks": [
+    {
+      "id": "coalesce_ranges",
+      "prompt": "Implement:\n\ndef coalesce_ranges(ranges):\n\n`ranges` is an iterable of inclusive integer `(start, end)` pairs. Normalize a\nreversed pair, merge overlapping or touching ranges (for example `(1, 2)` and\n`(3, 5)`), and return sorted `(start, end)` tuples. Do not mutate the input."
+    },
+    {
+      "id": "topological_order",
+      "prompt": "Implement:\n\ndef topological_order(nodes, edges):\n\n`nodes` is an iterable of unique strings and `edges` contains `(before, after)`\npairs. Return the lexicographically smallest valid topological ordering,\nincluding isolated nodes. Ignore duplicate edges. Raise `ValueError` for an\nedge containing an unknown node or when the graph has a cycle. Do not mutate\nthe inputs."
+    },
+    {
+      "id": "ttl_cache",
+      "prompt": "Implement an `TTLCache` class:\n\nTTLCache(maxsize, clock)\ncache.set(key, value, ttl)\ncache.get(key, default=None)\n\n`clock` is a zero-argument callable returning seconds. Expire an item when\n`clock() >= expiry`. `get` refreshes LRU recency but not expiry. `set` updates\nrecency and expiry. Before capacity eviction, remove expired items; otherwise\nevict the least-recently-used live item. A non-positive TTL must not remain\nstored. Raise `ValueError` when `maxsize < 1`."
+    },
+    {
+      "id": "async_map_ordered",
+      "prompt": "Implement:\n\nasync def async_map_ordered(items, worker, limit):\n\nCall async `worker(item)` for each item with at most `limit` calls active at\nonce. Return results in input order even when completion order differs. Accept\nany finite iterable, not only lists. Raise `ValueError` if `limit < 1`. If a\nworker raises, cancel and await all outstanding work, then re-raise the original\nexception."
+    },
+    {
+      "id": "deep_merge",
+      "prompt": "Implement:\n\ndef deep_merge(base, overlay):\n\nBoth arguments are dictionaries. Return a deep copy merge without mutating or\naliasing either input. Recursively merge values only when both corresponding\nvalues are dictionaries. An overlay value of `None` deletes that key. Lists and\nall other values replace the base value and must also be deep-copied."
+    }
+  ],
+  "temperature": 0.2
+}

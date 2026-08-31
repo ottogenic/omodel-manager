@@ -18,19 +18,23 @@ All notable changes to this project are documented here. The format follows
   concurrency.
 
 ### Changed
+- **Lifecycle is now device-first across cards, nodes, and clusters.** Public commands use
+  `plan DEVICE MODEL`, `launch DEVICE MODEL`, and `logs`/`health`/`stop DEVICE`; successful
+  launches publish strict versioned deployment intent for adapters. Model configs are grouped
+  under `configs/{card,node,cluster}/`, and every profile resolves to one exact TOML.
 - **Qwen3.8-Flash-Next output headroom now matches Qwen3.8-27B.** Plan and Build use a
   131,072-token combined reasoning-and-response ceiling, verified against the live endpoint.
 - **Hardware records are now model-specific.** Build research and qualification findings live
   in `notes/<profile>.md`; the cross-model `SPARK_NOTES.md` and duplicated profile commentary
   were removed.
-- **Card and eGPU qualification moved to `omodel-card`.** Native SYCL/CUDA
-  builds, Intel Arc B70 and RTX 4090 OCuLink setup, and hardware experiment logs
-  now evolve independently from this stable Docker/vLLM manager.
+- **The qualified Intel Arc B70 deployment is integrated.** Checked-in stdlib helpers preserve
+  the pinned model/runtime, loopback proxy, isolation, drift refusal, and retained qualification
+  evidence while routing Docker through the manager's execution choke point.
 - **`ps` now shows `HOST` and `CLUSTER` as its first two columns.** Distributed ranks
   expose their cluster label directly, while idle, pulling, and one-node rows derive
   membership from the cluster registry. Suggested follow-up commands use the cluster name
   for status, health, logs, and stop operations when distributed ranks are active.
-- **Two-node profiles now use the normal launch syntax.** `launch <profile> <cluster>`
+- **Two-node profiles now use the normal launch syntax.** `launch <cluster> <profile>`
   recognizes cluster-only profiles, resolves registered cluster names case-insensitively,
   and delegates to the existing preflight, launch, warmup, and rollback lifecycle.
 - **Model configs now expose only native Plan and Build presets.** The retired

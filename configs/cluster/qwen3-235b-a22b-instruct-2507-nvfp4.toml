@@ -1,0 +1,34 @@
+# NVIDIA Qwen3-235B-A22B-Instruct-2507 NVFP4 profile qualified on a
+# two-node TensorRT-LLM cluster. This checkpoint is direct-response only.
+
+match = [
+  "qwen3-235b-a22b-instruct-2507-nvfp4",
+  "nvidia/Qwen3-235B-A22B-Instruct-2507-NVFP4",
+]
+source = "https://huggingface.co/nvidia/Qwen3-235B-A22B-Instruct-2507-NVFP4"
+
+[capabilities]
+vision           = false
+reasoning        = false
+tool_call        = true
+concurrency      = 1
+thinking_control = "none"
+
+[context]
+native = 32768
+
+[presets.plan]
+thinking   = false
+max_output = 8192
+[presets.plan.sampling]
+temperature = 0.7
+top_p       = 0.8
+top_k       = 20
+
+[presets.build]
+thinking   = false
+max_output = 8192
+[presets.build.sampling]
+temperature = 0.7
+top_p       = 0.8
+top_k       = 20

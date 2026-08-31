@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Validates the generic per-model configs in configs/*.toml.
+Validates the generic per-model configs in configs/**/*.toml.
 
 omodel-manager owns these files but doesn't render them; this test is the
 "store + validate" guarantee: every config parses and has the required shape,
@@ -16,13 +16,14 @@ import unittest
 CONFIGS = pathlib.Path(__file__).resolve().parent / "configs"
 
 REQUIRED_PRESETS = {"plan", "build"}
+KNOWN_CONFIG_KINDS = {"node", "cluster", "card"}
 KNOWN_THINKING_CONTROL = {"enable_thinking", "reasoning_effort", "soft_switch", "none"}
 KNOWN_SAMPLING = {"temperature", "top_p", "top_k", "min_p", "presence_penalty",
                   "frequency_penalty", "repetition_penalty"}
 
 
 def _config_files():
-    return sorted(CONFIGS.glob("*.toml")) if CONFIGS.is_dir() else []
+    return sorted(CONFIGS.rglob("*.toml")) if CONFIGS.is_dir() else []
 
 
 def _load(p):
@@ -32,7 +33,16 @@ def _load(p):
 
 class ConfigValidityTests(unittest.TestCase):
     def test_at_least_one_config(self):
-        self.assertTrue(_config_files(), "no configs/*.toml found")
+        self.assertTrue(_config_files(), "no configs/**/*.toml found")
+
+    def test_each_config_is_in_a_known_kind_directory(self):
+        for p in _config_files():
+            with self.subTest(config=p.relative_to(CONFIGS)):
+                relative = p.relative_to(CONFIGS)
+                self.assertEqual(len(relative.parts), 2,
+                                 f"{relative}: config must be exactly one level below configs/")
+                self.assertIn(relative.parts[0], KNOWN_CONFIG_KINDS,
+                              f"{relative}: unknown deployment kind")
 
     def test_each_config_valid(self):
         for p in _config_files():
@@ -89,7 +99,7 @@ class ConfigValidityTests(unittest.TestCase):
         }
         for name, context in expected.items():
             with self.subTest(config=name):
-                cfg = _load(CONFIGS / f"{name}.toml")
+                cfg = _load(CONFIGS / "node" / f"{name}.toml")
                 self.assertEqual(cfg["context"]["native"], context)
                 self.assertEqual(cfg["capabilities"]["concurrency"], 1)
                 for preset in REQUIRED_PRESETS:
@@ -98,7 +108,7 @@ class ConfigValidityTests(unittest.TestCase):
                                      {"temperature": 1.0, "top_p": 1.0, "top_k": 20})
 
     def test_deepseek_plan_build_modes_and_variants(self):
-        cfg = _load(CONFIGS / "deepseek-v4-flash-0731.toml")
+        cfg = _load(CONFIGS / "cluster" / "deepseek-v4-flash-0731.toml")
         self.assertEqual(cfg["capabilities"]["concurrency"], 12)
         self.assertEqual(cfg["capabilities"]["thinking_control"], "none")
         self.assertEqual(cfg["context"], {"native": 1048576, "min_thinking": 393216})
@@ -111,7 +121,7 @@ class ConfigValidityTests(unittest.TestCase):
                          {"thinking": False})
 
     def test_qwen38_bf16_config_matches_multimodal_profiles(self):
-        cfg = _load(CONFIGS / "qwen3.8-27b-bf16.toml")
+        cfg = _load(CONFIGS / "node" / "qwen3.8-27b-bf16.toml")
         self.assertEqual(set(cfg["match"]), {
             "qwen3.8-27b-bf16", "qwen3.8-27b-bf16-mtp",
         })
@@ -121,7 +131,7 @@ class ConfigValidityTests(unittest.TestCase):
         self.assertEqual(cfg["capabilities"]["concurrency"], 2)
 
     def test_qwen38_nvfp4_config_matches_qualified_profile(self):
-        cfg = _load(CONFIGS / "qwen3.8-27b-nvfp4-vllm-dflash2.toml")
+        cfg = _load(CONFIGS / "node" / "qwen3.8-27b-nvfp4-vllm-dflash2.toml")
         self.assertEqual(set(cfg["match"]), {
             "qwen3.8-27b-nvfp4-vllm-dflash2", "RadixArk/Qwen3.8-27B-NVFP4",
         })
@@ -141,7 +151,7 @@ class ConfigValidityTests(unittest.TestCase):
                          {"enable_thinking": False})
 
     def test_qwen38_flash_next_config_matches_cluster_baseline(self):
-        cfg = _load(CONFIGS / "qwen3.8-flash-next-fp8.toml")
+        cfg = _load(CONFIGS / "cluster" / "qwen3.8-flash-next-fp8.toml")
         self.assertEqual(set(cfg["match"]), {
             "qwen3.8-flash-next-fp8", "Qwen/Qwen3.8-Flash-Next-FP8",
         })
@@ -155,8 +165,25 @@ class ConfigValidityTests(unittest.TestCase):
         self.assertEqual(cfg["presets"]["build"]["max_output"], 131072)
         self.assertEqual(set(cfg["variants"]), {"xhigh", "medium", "low", "no-think"})
 
+    def test_qwen38_gptq_int4_b70_config_matches_qualified_card_deployment(self):
+        cfg = _load(CONFIGS / "card" / "qwen3.8-27b-gptq-int4-b70.toml")
+        fp8 = _load(CONFIGS / "node" / "qwen3.8-27b-fp8.toml")
+        self.assertEqual(cfg["match"], ["qwen3.8-27b-gptq-int4-b70"])
+        self.assertEqual(cfg["source"],
+                         "https://huggingface.co/SergiioB/Qwen3.8-27B-GPTQ-Int4-sym-G128-MTP-BF16")
+        self.assertEqual(cfg["capabilities"], {
+            "vision": False,
+            "reasoning": True,
+            "tool_call": True,
+            "concurrency": 1,
+            "thinking_control": "enable_thinking",
+        })
+        self.assertEqual(cfg["context"], {"native": 262144, "min_thinking": 131072})
+        self.assertEqual(cfg["presets"], fp8["presets"])
+        self.assertEqual(cfg["variants"], fp8["variants"])
+
     def test_muse_config_matches_observed_capabilities_and_sampling(self):
-        cfg = _load(CONFIGS / "muse-glimmer-30b-nvfp4.toml")
+        cfg = _load(CONFIGS / "node" / "muse-glimmer-30b-nvfp4.toml")
         self.assertEqual(cfg["capabilities"]["vision"], {
             "input": ["text", "image"], "output": ["text"],
         })
@@ -167,7 +194,7 @@ class ConfigValidityTests(unittest.TestCase):
             })
 
     def test_lightning_config_keeps_coding_only_template_option(self):
-        cfg = _load(CONFIGS / "nemotron-3.5-lightning-30b-a3b-nvfp4.toml")
+        cfg = _load(CONFIGS / "node" / "nemotron-3.5-lightning-30b-a3b-nvfp4.toml")
         self.assertFalse(cfg["capabilities"]["vision"])
         self.assertEqual(cfg["context"]["native"], 1048576)
         self.assertEqual(cfg["presets"]["plan"]["options"]["chat_template_kwargs"],

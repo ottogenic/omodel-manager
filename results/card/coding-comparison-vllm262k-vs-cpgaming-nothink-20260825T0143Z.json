@@ -1,0 +1,1175 @@
+{
+  "created_utc": "2026-08-25T01:48:03Z",
+  "endpoints": [
+    {
+      "model": "qwen3.8-27b",
+      "name": "local",
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "model": "qwen3.8-27b",
+      "name": "cpgaming",
+      "url": "http://cpgaming:8000"
+    }
+  ],
+  "max_tokens": 1200,
+  "records": [
+    {
+      "code": "def coalesce_ranges(ranges):\n    # Normalize and collect\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n    \n    if not normalized:\n        return []\n    \n    # Sort by start\n    normalized.sort(key=lambda x: x[0])\n    \n    # Merge overlapping or touching ranges\n    merged = []\n    for start, end in normalized:\n        if not merged:\n            merged.append([start, end])\n        else:\n            last_start, last_end = merged[-1]\n            if start <= last_end + 1:\n                # Overlapping or touching\n                if end > last_end:\n                    merged[-1][1] = end\n            else:\n                merged.append([start, end])\n    \n    return [(s, e) for s, e in merged]",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "empty",
+          "normalize_merge_sort",
+          "nested_and_duplicates"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "coalesce_ranges",
+      "timing": {
+        "decode_tps": 73.65741297332175,
+        "ok": true,
+        "reasoning_text": "",
+        "text": "```python\ndef coalesce_ranges(ranges):\n    # Normalize and collect\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n    \n    if not normalized:\n        return []\n    \n    # Sort by start\n    normalized.sort(key=lambda x: x[0])\n    \n    # Merge overlapping or touching ranges\n    merged = []\n    for start, end in normalized:\n        if not merged:\n            merged.append([start, end])\n        else:\n            last_start, last_end = merged[-1]\n            if start <= last_end + 1:\n                # Overlapping or touching\n                if end > last_end:\n                    merged[-1][1] = end\n            else:\n                merged.append([start, end])\n    \n    return [(s, e) for s, e in merged]\n```",
+        "total_seconds": 2.992001742000866,
+        "ttft_seconds": 0.19519833300000755,
+        "usage": {
+          "completion_tokens": 207,
+          "prompt_tokens": 127,
+          "total_tokens": 334
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'coalesce_ranges' is not defined\")",
+            "name": "empty",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 3, in test_empty\nNameError: name 'coalesce_ranges' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'coalesce_ranges' is not defined\")",
+            "name": "normalize_merge_sort",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 8, in test_normalize_merge_sort\nNameError: name 'coalesce_ranges' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'coalesce_ranges' is not defined\")",
+            "name": "nested_and_duplicates",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 12, in test_nested_and_duplicates\nNameError: name 'coalesce_ranges' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "coalesce_ranges",
+      "timing": {
+        "decode_tps": 27.374681665183537,
+        "ok": false,
+        "reasoning_text": "We need answer user's request: implement Python function coalesce_ranges(ranges). Need output only code fenced python no prose tests. Need think through requirements.\n\nRanges iterable of inclusive integer (start,end) pairs. Normalize reversed pair, merge overlapping or touching ranges e.g. (1,2) and (3,5), return sorted tuples. Do not mutate input. Standard library only.\n\nNeed robust: iterable maybe generator; can consume once. Need handle empty -> []. Pairs may be lists? tuple? We'll convert to tuple ints? Inclusive integer pairs. Normalize reversed pair: if start > end swap. What about non-integers? assume int. Could validate length 2? Not necessary but could raise ValueError for invalid. Do not mutate input: if input list of tuples, we don't modify; creating new list okay. If ranges is iterator, consume. Need merge overlapping or touching: after sorting by start then end, iterate. Condition to merge with current if next_start <= current_end + 1 (touching) or overlap. Since inclusive integers. For negative? works.\n\nPotential issue large ints and +1 overflow? Python no. If ranges include floats? spec integer; but if float, touching maybe not intended. We can keep as is. But return tuples of start/end values. Should we cast to int? Maybe not, because could be numpy ints? Standard only. Use tuple(pair) after normalizing.\n\nImplementation:\ndef coalesce_ranges(ranges):\n    normalized=[]\n    for pair in ranges:\n        try:\n            start,end = pair\n        except (TypeError, ValueError): raise ValueError(\"each range must be a pair\")\n        if start > end: start,end=end,start\n        # maybe ensure int? If not integer but comparable. Could do int(start), int(end) but that mutates values and may fail for bool? Spec integer. Avoid casting to preserve exact? But return tuples likely ints. If input [1,2] okay.\n        normalized.append((start,end))\n    if not normalized: return []\n    normalized.sort(key=lambda x: (x[0], x[1]))\n    merged=[normalized[0]]\n    for start,end in normalized[1:]:\n        last_start,last_end=merged[-1]\n        if start <= last_end + 1:\n            if end > last_end:\n                merged[-1]=(last_start,end)\n        else:\n            merged.append((start,end))\n    return merged\n\nNeed consider if pair elements not comparable? okay. If ranges is None? maybe TypeError from iteration. Could handle by returning []? Not specified. Better let TypeError. But if want robust, if ranges is None: return []? No.\n\nPotential issue with bool start/end: True > False etc. int subclass. Fine.\n\nNeed no think aloud final only code block. Ensure function name exactly coalesce_ranges.\n\nCould use itertools? not needed.\n\nLet's consider edge cases:\n- [(3,1),(2,4)] -> normalized (1,3),(2,4) sorted -> merge to (1,4). Good.\n- [(5,5), (6,7)] touching -> (5,7).\n- [(1,2),(4,5)] not touching? 4 <= 3 false -> separate.\n- duplicates -> merged.\n- empty iterable -> [].\n- input list of lists: normalized tuples; no mutate original because we don't assign to pair elements. If pair is mutable and contains same object? We just read. Good.\n\nCould there be ranges with start/end as strings? comparison works lexicographically but +1 fails. Spec integer.\n\nNeed maybe use `if start <= last_end + 1` assumes numeric; if Decimal okay. If custom int-like no __add__? spec integer.\n\nAlternative: sort by min then max. Good.\n\nShould we include docstring? It's code only, can include docstring. User says return only implementation in fenced block. Docstring okay but maybe minimal. No tests.\n\nNeed ensure final has ```python ... ```.\n\nDouble-check \"Do not mutate the input.\" If ranges is a list and we do normalized.sort, that's new list. We don't sort original. Good. If pair is tuple no mutation. If pair is list, we don't modify it. Good.\n\nPotential hidden tests: `coalesce_ranges(iter([(1,3),(2,4)]))` works. `coalesce_ranges([])` returns []. `coalesce_ranges(((5,1), (0,0)))` -> normalized [(1,5),(0,0)], sorted [(0,0),(1,5)], merge touching? 1 <= 0+1 true => (0,5). Good.\n\nWhat about zero-length ranges: (2,2) and (3,3) touch -> (2,3). Good.\n\nShould we handle pair with more than two values by unpacking raising ValueError. Fine.\n\nCould use `range` variable name? no.\n\nNeed maybe type hints? Could add `def coalesce_ranges(ranges):`. No imports.\n\nLet's craft final:\n```python\ndef coalesce_ranges(ranges):\n    normalized = []\n    for pair in ranges:\n        start, end = pair\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n\n    if not normalized:\n        return []\n\n    normalized.sort(key=lambda item: (item[0], item[1]))\n\n    merged = [normalized[0]]\n    for start, end in normalized[1:]:\n        last_start, last_end = merged[-1]\n        if start <= last_end",
+        "text": "",
+        "total_seconds": 44.5688162030001,
+        "ttft_seconds": 0.7690351460005331,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 163,
+          "total_tokens": 1363
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "def coalesce_ranges(ranges):\n    normalized = []\n    for pair in ranges:\n        start, end = pair\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n\n    normalized.sort()\n\n    merged = []\n    for start, end in normalized:\n        if not merged or start > merged[-1][1] + 1:\n            merged.append([start, end])\n        else:\n            if end > merged[-1][1]:\n                merged[-1][1] = end\n\n    return [(start, end) for start, end in merged]",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "empty",
+          "normalize_merge_sort",
+          "nested_and_duplicates"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "coalesce_ranges",
+      "timing": {
+        "decode_tps": 28.026651278305845,
+        "ok": true,
+        "reasoning_text": "We need answer user's request: implement Python function coalesce_ranges(ranges). Need output only code fenced python no prose tests. Need think through requirements.\n\nFunction takes iterable of inclusive integer (start,end) pairs. Normalize reversed pair, merge overlapping or touching ranges e.g. (1,2) and (3,5), return sorted tuples. Do not mutate input. Standard library only.\n\nNeed robust: ranges may be any iterable, possibly generator. Need convert to list? We can process. Each item is pair; maybe tuple/list of two ints. Normalize reversed: if start > end swap. What about invalid non-int? assume integer pairs. Merge overlapping or touching: inclusive integer ranges. Touching means end + 1 >= next_start (or end >= next_start - 1). Overlap if end >= next_start. Since normalized, sort by start then end.\n\nNeed not mutate input: don't modify original iterable; converting to list of tuples okay? If items are lists, we can create new tuple. Do not mutate pairs. We'll parse into (min,max) ints maybe int conversion? Should we coerce? \"integer pairs\" likely already ints. Could use a,b = item; if a > b: a,b=b,a. Maybe ensure tuple.\n\nAlgorithm:\ndef coalesce_ranges(ranges):\n    normalized=[]\n    for pair in ranges:\n        start,end=pair\n        if start>end: start,end=end,start\n        # maybe int? no need. But inclusive integer; could be bool? ignore.\n        normalized.append((start,end))\n    normalized.sort(key=lambda x:(x[0], x[1]))\n    merged=[]\n    for s,e in normalized:\n       if not merged or e < merged[-1][1] + 1: # non-touching and non-overlap? If e < prev_end+1 means gap at least one integer. For ints, touching if e == prev_end+1 merge. Overlap if e >= prev_start? Actually sorted by start; current s <= maybe > prev_s. Need condition to not merge: s > merged[-1][1] + 1. Equivalent if s <= last_end + 1 merge.\n           merged.append([s,e]) or tuple? Use list for mutability then convert.\n       else:\n           if e > merged[-1][1]: merged[-1]=(merged[-1][0],e)\n    return [tuple(r) for r in merged]\n\nNeed handle empty -> [].\n\nPotential issue with non-integer values and +1? assume ints. If start/end are numpy int? standard library only but okay. Could use s > last_end + 1. For arbitrary comparable? no.\n\nCould avoid storing normalized by sorting list of pairs. Need not mutate input: if ranges is list, we don't sort it in place; create new list. Good.\n\nNeed consider duplicate/zero-length ranges (5,5). Touching merge with (6,7) -> (5,7). Overlap (1,3),(2,4)->(1,4). Reversed (3,1) normalized.\n\nCould there be negative infinity? no.\n\nPotential edge: pair may have more than two elements? spec says pairs; unpack exactly two. If input is iterator of tuples. Good.\n\nNeed output only fenced code. No tests. Ensure function signature exact.\n\nLet's craft concise.\n\nMaybe use itertools? not needed.\n\nConsider if ranges contains None? no.\n\nPotential issue: \"Do not mutate the input\" means don't modify iterable or pairs. We don't. If pair is list, we create tuple; okay.\n\nShould we validate integer? Not required. Could coerce int to be safe but might alter bool? Better not.\n\nCould use sorted() instead of .sort on new list: normalized = sorted(...). But need normalize first. Use generator expression with helper? Need handle reversed. Could do:\n    pairs=[]\n    for start,end in ranges:\n       if start > end: start,end=end,start\n       pairs.append((start,end))\n    pairs.sort()\n\nThen merge.\n\nNeed ensure return sorted tuples. Merged list of tuples sorted by start due to process. Good.\n\nLet's produce final code block only.\n",
+        "text": "```python\ndef coalesce_ranges(ranges):\n    normalized = []\n    for pair in ranges:\n        start, end = pair\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n\n    normalized.sort()\n\n    merged = []\n    for start, end in normalized:\n        if not merged or start > merged[-1][1] + 1:\n            merged.append([start, end])\n        else:\n            if end > merged[-1][1]:\n                merged[-1][1] = end\n\n    return [(start, end) for start, end in merged]\n```",
+        "total_seconds": 37.1874729430001,
+        "ttft_seconds": 0.15115975800108572,
+        "usage": {
+          "completion_tokens": 1039,
+          "completion_tokens_details": {
+            "reasoning_tokens": 894
+          },
+          "prompt_tokens": 163,
+          "total_tokens": 1202
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "def coalesce_ranges(ranges):\n    # Normalize and collect\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n    \n    if not normalized:\n        return []\n    \n    # Sort by start\n    normalized.sort(key=lambda x: x[0])\n    \n    # Merge overlapping or touching ranges\n    merged = []\n    for start, end in normalized:\n        if not merged:\n            merged.append([start, end])\n        else:\n            last_start, last_end = merged[-1]\n            if start <= last_end + 1:\n                # Overlapping or touching\n                merged[-1][1] = max(last_end, end)\n            else:\n                merged.append([start, end])\n    \n    return [(s, e) for s, e in merged]",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "empty",
+          "normalize_merge_sort",
+          "nested_and_duplicates"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "coalesce_ranges",
+      "timing": {
+        "decode_tps": 72.58071273357025,
+        "ok": true,
+        "reasoning_text": "",
+        "text": "```python\ndef coalesce_ranges(ranges):\n    # Normalize and collect\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n    \n    if not normalized:\n        return []\n    \n    # Sort by start\n    normalized.sort(key=lambda x: x[0])\n    \n    # Merge overlapping or touching ranges\n    merged = []\n    for start, end in normalized:\n        if not merged:\n            merged.append([start, end])\n        else:\n            last_start, last_end = merged[-1]\n            if start <= last_end + 1:\n                # Overlapping or touching\n                merged[-1][1] = max(last_end, end)\n            else:\n                merged.append([start, end])\n    \n    return [(s, e) for s, e in merged]\n```",
+        "total_seconds": 2.991326741001103,
+        "ttft_seconds": 0.1943735700006073,
+        "usage": {
+          "completion_tokens": 204,
+          "prompt_tokens": 127,
+          "total_tokens": 331
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "def coalesce_ranges(ranges):\n    # Normalize: ensure start <= end\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n    \n    if not normalized:\n        return []\n    \n    # Sort by start\n    normalized.sort(key=lambda x: x[0])\n    \n    # Merge overlapping or touching ranges\n    merged = []\n    for start, end in normalized:\n        if not merged:\n            merged.append([start, end])\n        else:\n            last_start, last_end = merged[-1]\n            if start <= last_end + 1:\n                # Overlapping or touching\n                merged[-1][1] = max(last_end, end)\n            else:\n                merged.append([start, end])\n    \n    return [(s, e) for s, e in merged]",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "empty",
+          "normalize_merge_sort",
+          "nested_and_duplicates"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "coalesce_ranges",
+      "timing": {
+        "decode_tps": 73.57641828762925,
+        "ok": true,
+        "reasoning_text": "",
+        "text": "```python\ndef coalesce_ranges(ranges):\n    # Normalize: ensure start <= end\n    normalized = []\n    for start, end in ranges:\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n    \n    if not normalized:\n        return []\n    \n    # Sort by start\n    normalized.sort(key=lambda x: x[0])\n    \n    # Merge overlapping or touching ranges\n    merged = []\n    for start, end in normalized:\n        if not merged:\n            merged.append([start, end])\n        else:\n            last_start, last_end = merged[-1]\n            if start <= last_end + 1:\n                # Overlapping or touching\n                merged[-1][1] = max(last_end, end)\n            else:\n                merged.append([start, end])\n    \n    return [(s, e) for s, e in merged]\n```",
+        "total_seconds": 2.9949278839994804,
+        "ttft_seconds": 0.19500093100032245,
+        "usage": {
+          "completion_tokens": 207,
+          "prompt_tokens": 127,
+          "total_tokens": 334
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'coalesce_ranges' is not defined\")",
+            "name": "empty",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 3, in test_empty\nNameError: name 'coalesce_ranges' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'coalesce_ranges' is not defined\")",
+            "name": "normalize_merge_sort",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 8, in test_normalize_merge_sort\nNameError: name 'coalesce_ranges' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'coalesce_ranges' is not defined\")",
+            "name": "nested_and_duplicates",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 12, in test_nested_and_duplicates\nNameError: name 'coalesce_ranges' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "coalesce_ranges",
+      "timing": {
+        "decode_tps": 28.515154054539348,
+        "ok": false,
+        "reasoning_text": "We need answer user's request: implement Python function coalesce_ranges(ranges) using stdlib only, no prose, one python fenced block. Need think carefully. Requirements: ranges iterable of inclusive integer (start,end) pairs. Normalize reversed pair, merge overlapping or touching ranges e.g. (1,2) and (3,5), return sorted tuples. Do not mutate input.\n\nNeed produce code only in ```python ...```. No tests/prose. Need consider edge cases: empty iterable -> []. Pairs maybe lists? Should convert to tuple ints? Inclusive integer pairs; could be any sequence length 2. Normalize reversed pair: if start > end swap. If equal ok. Merge overlapping or touching: after sorting by start, merge if next.start <= current.end + 1 (touching). Return sorted tuples. Do not mutate input: we can create list of normalized tuples from iterable; don't modify original pairs? If pairs are mutable lists, converting to tuple avoids mutating them. But if input is generator consumed okay. Need maybe validate? Not specified. Could raise ValueError for non-2 length? Probably fine but robust.\n\nPotential issue with huge ints and +1 overflow? Python no overflow. Negative ranges ok. Touching: (1,2) and (3,5) merge to (1,5). Overlap: next.start <= current.end. For touching inclusive integer: if next.start == current.end+1. So condition next_start <= cur_end + 1.\n\nImplementation:\ndef coalesce_ranges(ranges):\n    normalized = []\n    for pair in ranges:\n        try: start, end = pair\n        except (TypeError, ValueError): raise? Could just unpack; if invalid raises. Maybe use tuple(pair) and check len? Simpler:\n            a,b = pair\n        if a > b: a,b=b,a\n        normalized.append((int(a), int(b)))? Should we cast to int? It says integer pairs; casting may be okay but could alter bool? bool is int subclass. If non-int numeric maybe not required. Better not cast, just use values as given; return tuples of original types? But sorted with mixed types might fail if not comparable. Could cast to int to ensure integer semantics. However if input contains numpy ints? stdlib only no numpy. Casting may be okay but could lose precision for large floats? It says integers. I'd avoid casting to preserve exact values, except maybe bool? Not needed.\n    normalized.sort(key=lambda x: (x[0], x[1]))\n    merged=[]\n    for start,end in normalized:\n       if not merged or start > merged[-1][1] + 1:\n           merged.append([start,end]) # use list mutable then convert? Or tuple and replace.\n       else:\n           cur = merged[-1]\n           if end > cur[1]: cur[1]=end\n    return [tuple(r) for r in merged]\n\nNeed ensure no mutation input: using lists internal okay. If pair is a custom iterable that can only be iterated once? unpack works. If pair is string of two chars? not relevant.\n\nCould use tuple(pair) and len check to handle more than 2? Unpack raises ValueError if too many. Fine.\n\nNeed consider if ranges is None? Not specified; would raise TypeError. okay.\n\nPotential subtlety: \"Normalize a reversed pair\" means (5,3)->(3,5). If start/end not comparable? ints. Good.\n\nReturn sorted tuples. Merged list already sorted by start due to sort and merge. Need if same start different end, sorting by end ascending; merging handles max end. Could sort key just x[0] stable but okay.\n\nNeed only implementation in fenced block. No think aloud. Final code:\n```python\ndef coalesce_ranges(ranges):\n    normalized = []\n    for pair in ranges:\n        start, end = pair\n        if start > end:\n            start, end = end, start\n        normalized.append((start, end))\n\n    normalized.sort(key=lambda item: (item[0], item[1]))\n\n    merged = []\n    for start, end in normalized:\n        if not merged or start > merged[-1][1] + 1:\n            merged.append([start, end])\n        elif end > merged[-1][1]:\n            merged[-1][1] = end\n\n    return [(start, end) for start, end in merged]\n```\n\nNeed maybe if pair is not length 2 but iterable of more? Unpack error. Good.\n\nCould there be issue with `merged[-1][1] + 1` if end is not int (e.g., Decimal)? It says integer; okay. If end is max int? Python fine. If end is float inf? no.\n\nNeed ensure do not mutate input: if pair is list, we don't modify it. We create new tuple/list internal. Good.\n\nCould use `tuple(pair)` to avoid unpacking custom objects that support iteration but not multiple? Unpack iterates once. okay.\n\nMaybe need handle empty pairs? no.\n\nLet's consider examples:\n[(1,2),(3,5)] -> normalized sorted [(1,2),(3,5)], merged [1,2], next start 3 <= 3 => end max 5 -> (1,5). Good.\n[(5,3),(1,4)] -> normalize (3,5),(1,4) sort (1,4),(3,5), merge touching? 3 <=5 yes overlap -> (1,5). Actually (1,4) and (3,5) overlap. Good.\n[(",
+        "text": "",
+        "total_seconds": 42.47503550800138,
+        "ttft_seconds": 0.4270687160005764,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 163,
+          "total_tokens": 1363
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "def topological_order(nodes, edges):\n    import heapq\n\n    node_set = set(nodes)\n    graph = {node: set() for node in node_set}\n    in_degree = {node: 0 for node in node_set}\n\n    for before, after in edges:\n        if before not in node_set or after not in node_set:\n            raise ValueError(f\"Edge contains unknown node: ({before}, {after})\")\n        if before == after:\n            raise ValueError(\"Cycle detected\")\n        if after not in graph[before]:\n            graph[before].add(after)\n            in_degree[after] += 1\n\n    heap = [node for node in node_set if in_degree[node] == 0]\n    heapq.heapify(heap)\n\n    result = []\n    while heap:\n        node = heapq.heappop(heap)\n        result.append(node)\n        for neighbor in graph[node]:\n            in_degree[neighbor] -= 1\n            if in_degree[neighbor] == 0:\n                heapq.heappush(heap, neighbor)\n\n    if len(result) != len(node_set):\n        raise ValueError(\"Cycle detected\")\n\n    return result",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "order_and_isolated",
+          "duplicate_edges",
+          "failures"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "topological_order",
+      "timing": {
+        "decode_tps": 76.10205022650456,
+        "ok": true,
+        "reasoning_text": "",
+        "text": "```python\ndef topological_order(nodes, edges):\n    import heapq\n\n    node_set = set(nodes)\n    graph = {node: set() for node in node_set}\n    in_degree = {node: 0 for node in node_set}\n\n    for before, after in edges:\n        if before not in node_set or after not in node_set:\n            raise ValueError(f\"Edge contains unknown node: ({before}, {after})\")\n        if before == after:\n            raise ValueError(\"Cycle detected\")\n        if after not in graph[before]:\n            graph[before].add(after)\n            in_degree[after] += 1\n\n    heap = [node for node in node_set if in_degree[node] == 0]\n    heapq.heapify(heap)\n\n    result = []\n    while heap:\n        node = heapq.heappop(heap)\n        result.append(node)\n        for neighbor in graph[node]:\n            in_degree[neighbor] -= 1\n            if in_degree[neighbor] == 0:\n                heapq.heappush(heap, neighbor)\n\n    if len(result) != len(node_set):\n        raise ValueError(\"Cycle detected\")\n\n    return result\n```",
+        "total_seconds": 3.576408696000726,
+        "ttft_seconds": 0.18610275100036233,
+        "usage": {
+          "completion_tokens": 259,
+          "prompt_tokens": 136,
+          "total_tokens": 395
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "order_and_isolated",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 5, in test_order_and_isolated\nNameError: name 'topological_order' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "duplicate_edges",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 8, in test_duplicate_edges\nNameError: name 'topological_order' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "failures",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 13, in test_failures\nNameError: name 'topological_order' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "topological_order",
+      "timing": {
+        "decode_tps": 23.426742436576045,
+        "ok": false,
+        "reasoning_text": "We need answer user wants implement Python function only in fenced block no prose tests. Need think through requirements.\n\nFunction topological_order(nodes, edges): nodes iterable unique strings; edges contains (before, after) pairs. Return lexicographically smallest valid topological ordering including isolated nodes. Ignore duplicate edges. Raise ValueError for edge containing unknown node or when graph has cycle. Do not mutate inputs.\n\nNeed standard library only. Need produce code in ```python block only.\n\nConsider details:\n- nodes iterable unique strings but could be any iterable, maybe generator; need consume once? We can convert to list/set. Unique assumed but we can handle duplicates? It says unique. But do not mutate inputs. If nodes is iterator, converting to set/list consumes it okay. Need preserve? no.\n- edges contains pairs; may be iterable/generator. Need process once. Ignore duplicate edges. Unknown node in edge -> ValueError. Cycle -> ValueError.\n- Lexicographically smallest valid topological ordering: standard Kahn with min-heap of available nodes (indegree zero). Since strings, heap works lexicographic. Include isolated nodes. If graph has cycle, after processing len(order) < len(nodes) raise ValueError. But also if duplicate self-loop? Edge before==after unknown? known but creates cycle; should raise cycle. Duplicate edges ignored: use set of pairs or adjacency with indegree increments only once per unique edge. Need not mutate inputs.\n- Potential issue: nodes may be unhashable? strings hashable. Good.\n- If duplicate node in nodes iterable despite assumption, using set would collapse; but topological order should include unique? It says unique. Could use list to preserve all? But if duplicates, lexicographically smallest ordering of multiset? Not needed. Use set for membership and heap initial all nodes. If nodes has duplicates, returning unique might be okay? But spec unique.\n- Need ensure edges with unknown node raises ValueError before cycle maybe. If multiple unknown? raise first encountered. We can validate while building graph.\n- Do not mutate inputs: don't modify nodes/edges. Converting to set/list doesn't mutate. Edges iterable consumed; that's okay? \"Do not mutate\" means not alter list contents, consuming iterator is inherent if generator. Can't avoid. If edges is list, we iterate without modifying.\n- Need handle edge pair length? assume pairs. Could unpack.\n\nImplementation options:\n```\nimport heapq\n\ndef topological_order(nodes, edges):\n    node_set = set(nodes)\n    adj = {n: [] for n in node_set} # or defaultdict(list)\n    indeg = {n: 0 for n in node_set}\n    seen_edges = set()\n    for before, after in edges:\n        if before not in node_set or after not in node_set:\n            raise ValueError(...)\n        edge=(before,after)\n        if edge in seen_edges: continue\n        seen_edges.add(edge)\n        adj[before].append(after)\n        indeg[after] += 1\n    heap = [n for n in node_set if indeg[n]==0]\n    heapq.heapify(heap)\n    order=[]\n    while heap:\n       u=heapq.heappop(heap)\n       order.append(u)\n       for v in adj[u]:\n          indeg[v]-=1\n          if indeg[v]==0: heapq.heappush(heap,v)\n    if len(order)!=len(node_set): raise ValueError(\"cycle\")\n    return order\n```\n\nNeed consider lexicographically smallest topological ordering with duplicate edges ignored. Using heap of zero indegree nodes yields lexicographically smallest sequence? Yes for DAG, greedy picking smallest available at each step gives lexicographically smallest topological sort. Proof standard.\n\nPotential nuance: If nodes iterable is e.g. tuple and we create set, order not matter. Good.\n\nNeed maybe use `heapq` imported inside function to avoid global? Standard library okay. Could import at top. User asks implement def; likely include import. In fenced block only code. No tests.\n\nPotential issue: If nodes is an iterator, `set(nodes)` consumes it. Then edges may reference node strings not in set if consumed? no. But if edges is same object as nodes? Not relevant.\n\nCould there be edge with unknown node and cycle; spec says raise ValueError for unknown or cycle. Order of checks? We validate all edges first then cycle. If unknown appears after some valid edges, we may have partially built graph but raise. Fine. Could check unknown before adding duplicate. Good.\n\nNeed maybe if `edges` contains non-iterable? assume pairs.\n\nPotential memory: seen_edges set of tuples; okay.\n\nCould use adjacency as dict mapping to list for only nodes with outgoing. But initialize all. No mutation inputs.\n\nDo we need preserve isolated nodes even if no edges. Yes heap initial includes them.\n\nWhat about self-loop duplicate? If edge (a,a) unique, indeg[a]++ and adj[a].append(a). Then a not zero unless other? It will remain cycle; raise ValueError. Good. If duplicate self-loops ignored after first still cycle.\n\nPotential issue: If nodes is empty iterable, node_set empty, edges should be empty else unknown. heap empty order [] return []. Cycle no. Good.\n\nNeed maybe handle `nodes` not list but e.g. set; set(nodes) okay. If strings unique.\n\nCould there be Unicode lexicographic? Python string ordering codepoint. Fine.\n\nNow final must only ```python fenced block, no prose. Ensure no thinking aloud. Need include import heapq. Could use from typing? Not necessary.\n\nLet's craft robust docstring? User says return only implementation",
+        "text": "",
+        "total_seconds": 51.62257497000064,
+        "ttft_seconds": 0.43911805400057347,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 172,
+          "total_tokens": 1372
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "order_and_isolated",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 5, in test_order_and_isolated\nNameError: name 'topological_order' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "duplicate_edges",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 8, in test_duplicate_edges\nNameError: name 'topological_order' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "failures",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 13, in test_failures\nNameError: name 'topological_order' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "topological_order",
+      "timing": {
+        "decode_tps": 26.102641256507564,
+        "ok": false,
+        "reasoning_text": "We need answer user wants implement Python function only in fenced block no prose tests. Need think through requirements.\n\nFunction topological_order(nodes, edges): nodes iterable unique strings; edges contains (before, after) pairs. Return lexicographically smallest valid topological ordering including isolated nodes. Ignore duplicate edges. Raise ValueError for edge containing unknown node or when graph has cycle. Do not mutate inputs.\n\nNeed standard library only. Need produce code in ```python block only. No tests.\n\nImplementation details:\n- Convert nodes to set/list? Nodes iterable unique strings but could be any iterable; do not mutate. We can create list(nodes) maybe if generator consumed once okay. But need preserve? Return ordering lexicographically smallest among all valid topological orders. Use Kahn's algorithm with min-heap (heapq). Need include isolated nodes.\n- Validate edges: each edge tuple length 2? Probably assume pairs but robust? Could raise ValueError for unknown node. If edge not pair maybe TypeError? Not specified. We can unpack; if invalid raises ValueError? Maybe better to handle by try except and raise ValueError? But spec only unknown/cycle. Keep simple.\n- Need ignore duplicate edges: use set of (u,v). Also self-loop? Edge before==after is cycle, should raise ValueError when graph has a cycle. If u==v known node, indegree increment then never zero -> cycle detected. Or explicitly detect. Good.\n- Do not mutate inputs: don't modify nodes/edges; creating sets okay. Edges iterable maybe generator; we iterate once. Need if edges is list and contains unhashable? strings hashable. If edge pair unknown node, raise ValueError before adding? We can validate as we process. But if duplicate invalid edge after valid? Should raise anyway.\n- Lexicographically smallest: Kahn with heap of zero indegree nodes; pop min each time. This yields lexicographically smallest topological order for DAG (standard). Need ensure all nodes included, even isolated. Initialize indegrees 0 for all nodes. For edges add adjacency and indegree[after]++.\n- Cycle detection: if processed count != len(nodes) raise ValueError. But careful if duplicate edges ignored; self-loop causes cycle. If unknown node in edge, raise ValueError immediately. What about edge with before/after not strings? Unknown node check membership in set of nodes (strings). If non-string unhashable? Could error TypeError. Not required.\n- Need lexicographic order: Python string comparison. Use heapq.\n\nPotential pitfalls:\n- Nodes iterable may be e.g. tuple; list(nodes) okay. Unique but if not unique? Spec says unique. If duplicates, set would collapse and len mismatch. We can use nodes_set = set(nodes); all_nodes = sorted? For heap initial we need push all zero indegree. Could push all nodes in nodes_set. But to be deterministic with duplicate input? Not needed. However if nodes is generator, list then set. Do not mutate inputs.\n- If edges contains duplicates and one unknown? We raise on first unknown; okay.\n- Need ignore duplicate edges: use edge_set. For each (u,v): if u not in node_set or v not in node_set: raise ValueError. If (u,v) in edge_set continue. Add. But what about reverse edge causing cycle? Kahn detects.\n- Could there be multiple edges with same pair but one invalid? all pairs either valid/invalid; duplicate ignore after validation? If first unknown raises, no need. If duplicate known okay.\n- Need not mutate adjacency? local.\n\nComplexities fine.\n\nNeed output only code fenced. Ensure function signature exactly.\n\nLet's craft:\nimport heapq\n\ndef topological_order(nodes, edges):\n    node_set = set(nodes)\n    # if nodes is iterator consumed; okay. But if nodes is e.g. list of strings unique. If empty? Return [] unless edges nonempty unknown -> ValueError.\n    indegree = {node: 0 for node in node_set}\n    adjacency = {node: [] for node in node_set}\n    seen_edges = set()\n\n    for edge in edges:\n        try:\n            before, after = edge\n        except (TypeError, ValueError):\n            raise ValueError(\"edge must be a pair of nodes\") from None? Spec not require. Could just let unpack error? But maybe better ValueError? It says Raise ValueError for edge containing unknown node or cycle. Invalid shape unspecified; raising ValueError okay? Might be unexpected if tests expect TypeError? Probably no invalid shape tests. Simpler: before, after = edge.\n        if before not in node_set or after not in node_set:\n            raise ValueError(f\"unknown node in edge: {edge!r}\")\n        pair = (before, after)\n        if pair in seen_edges:\n            continue\n        seen_edges.add(pair)\n        adjacency[before].append(after)\n        indegree[after] += 1\n\n    heap = [node for node in node_set if indegree[node] == 0]\n    heapq.heapify(heap)\n    order=[]\n    while heap:\n       node=heapq.heappop(heap)\n       order.append(node)\n       for nxt in adjacency[node]:\n           indegree[nxt]-=1\n           if indegree[nxt]==0: heapq.heappush(heap,nxt)\n    if len(order)!=len(node_set): raise ValueError(\"cycle detected\")\n    return order\n\nNeed consider lexicographically smallest with isolated nodes. If all zero, heap sorted. Good.\n\nBut subtle: Using node_set loses original order; not needed for lex smallest. But if nodes contains non-string comparable? Spec strings. Good.\n\nPotential issue: If nodes is an iterator and edges also",
+        "text": "",
+        "total_seconds": 46.09800989699943,
+        "ttft_seconds": 0.1638063009995676,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 172,
+          "total_tokens": 1372
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "def topological_order(nodes, edges):\n    nodes_list = list(nodes)\n    node_set = set(nodes_list)\n    \n    # Build adjacency list and in-degree map\n    adj = {node: [] for node in node_set}\n    in_degree = {node: 0 for node in node_set}\n    \n    seen_edges = set()\n    for before, after in edges:\n        if before not in node_set or after not in node_set:\n            raise ValueError(f\"Edge contains unknown node: ({before}, {after})\")\n        if (before, after) in seen_edges:\n            continue\n        seen_edges.add((before, after))\n        adj[before].append(after)\n        in_degree[after] += 1\n    \n    # Use a min-heap for lexicographically smallest order\n    import heapq\n    heap = [node for node in node_set if in_degree[node] == 0]\n    heapq.heapify(heap)\n    \n    result = []\n    while heap:\n        node = heapq.heappop(heap)\n        result.append(node)\n        for neighbor in adj[node]:\n            in_degree[neighbor] -= 1\n            if in_degree[neighbor] == 0:\n                heapq.heappush(heap, neighbor)\n    \n    if len(result) != len(node_set):\n        raise ValueError(\"Graph contains a cycle\")\n    \n    return result",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "order_and_isolated",
+          "duplicate_edges",
+          "failures"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "topological_order",
+      "timing": {
+        "decode_tps": 78.88306100633062,
+        "ok": true,
+        "reasoning_text": "",
+        "text": "```python\ndef topological_order(nodes, edges):\n    nodes_list = list(nodes)\n    node_set = set(nodes_list)\n    \n    # Build adjacency list and in-degree map\n    adj = {node: [] for node in node_set}\n    in_degree = {node: 0 for node in node_set}\n    \n    seen_edges = set()\n    for before, after in edges:\n        if before not in node_set or after not in node_set:\n            raise ValueError(f\"Edge contains unknown node: ({before}, {after})\")\n        if (before, after) in seen_edges:\n            continue\n        seen_edges.add((before, after))\n        adj[before].append(after)\n        in_degree[after] += 1\n    \n    # Use a min-heap for lexicographically smallest order\n    import heapq\n    heap = [node for node in node_set if in_degree[node] == 0]\n    heapq.heapify(heap)\n    \n    result = []\n    while heap:\n        node = heapq.heappop(heap)\n        result.append(node)\n        for neighbor in adj[node]:\n            in_degree[neighbor] -= 1\n            if in_degree[neighbor] == 0:\n                heapq.heappush(heap, neighbor)\n    \n    if len(result) != len(node_set):\n        raise ValueError(\"Graph contains a cycle\")\n    \n    return result\n```",
+        "total_seconds": 4.047012277000249,
+        "ttft_seconds": 0.19308645599994634,
+        "usage": {
+          "completion_tokens": 305,
+          "prompt_tokens": 136,
+          "total_tokens": 441
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "def topological_order(nodes, edges):\n    nodes = list(nodes)\n    node_set = set(nodes)\n    \n    # Build adjacency list and in-degree map\n    adj = {node: [] for node in nodes}\n    in_degree = {node: 0 for node in nodes}\n    \n    seen_edges = set()\n    for before, after in edges:\n        if before not in node_set or after not in node_set:\n            raise ValueError(f\"Edge contains unknown node: ({before}, {after})\")\n        if (before, after) in seen_edges:\n            continue\n        seen_edges.add((before, after))\n        adj[before].append(after)\n        in_degree[after] += 1\n    \n    # Use a min-heap for lexicographically smallest order\n    import heapq\n    heap = [node for node in nodes if in_degree[node] == 0]\n    heapq.heapify(heap)\n    \n    result = []\n    while heap:\n        node = heapq.heappop(heap)\n        result.append(node)\n        for neighbor in adj[node]:\n            in_degree[neighbor] -= 1\n            if in_degree[neighbor] == 0:\n                heapq.heappush(heap, neighbor)\n    \n    if len(result) != len(nodes):\n        raise ValueError(\"Graph has a cycle\")\n    \n    return result",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "order_and_isolated",
+          "duplicate_edges",
+          "failures"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "topological_order",
+      "timing": {
+        "decode_tps": 82.328966380191,
+        "ok": true,
+        "reasoning_text": "",
+        "text": "```python\ndef topological_order(nodes, edges):\n    nodes = list(nodes)\n    node_set = set(nodes)\n    \n    # Build adjacency list and in-degree map\n    adj = {node: [] for node in nodes}\n    in_degree = {node: 0 for node in nodes}\n    \n    seen_edges = set()\n    for before, after in edges:\n        if before not in node_set or after not in node_set:\n            raise ValueError(f\"Edge contains unknown node: ({before}, {after})\")\n        if (before, after) in seen_edges:\n            continue\n        seen_edges.add((before, after))\n        adj[before].append(after)\n        in_degree[after] += 1\n    \n    # Use a min-heap for lexicographically smallest order\n    import heapq\n    heap = [node for node in nodes if in_degree[node] == 0]\n    heapq.heapify(heap)\n    \n    result = []\n    while heap:\n        node = heapq.heappop(heap)\n        result.append(node)\n        for neighbor in adj[node]:\n            in_degree[neighbor] -= 1\n            if in_degree[neighbor] == 0:\n                heapq.heappush(heap, neighbor)\n    \n    if len(result) != len(nodes):\n        raise ValueError(\"Graph has a cycle\")\n    \n    return result\n```",
+        "total_seconds": 3.8652611350007646,
+        "ttft_seconds": 0.18707213600100658,
+        "usage": {
+          "completion_tokens": 299,
+          "prompt_tokens": 136,
+          "total_tokens": 435
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "order_and_isolated",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 5, in test_order_and_isolated\nNameError: name 'topological_order' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "duplicate_edges",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 8, in test_duplicate_edges\nNameError: name 'topological_order' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'topological_order' is not defined\")",
+            "name": "failures",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 13, in test_failures\nNameError: name 'topological_order' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "topological_order",
+      "timing": {
+        "decode_tps": 25.066433622863638,
+        "ok": false,
+        "reasoning_text": "We need answer user wants implement Python function only in fenced block no prose tests. Need think carefully. Now produce final code. Need satisfy: topological_order(nodes, edges). nodes iterable unique strings; edges contains (before, after) pairs. Return lexicographically smallest valid topological ordering including isolated nodes. Ignore duplicate edges. Raise ValueError for edge containing unknown node or graph cycle. Do not mutate inputs.\n\nNeed standard library only. Lexicographically smallest topological order: use min-heap of available nodes (indegree zero). Need build adjacency, indegree. Nodes unique strings but iterable maybe list/tuple/set? We can convert to list? But if set, lexicographic order still okay. Do not mutate inputs: converting to list doesn't mutate. Edges iterable; we can iterate once. If edges is iterator, fine. Need ignore duplicate edges: use set of pairs or adjacency sets. Unknown node check: for each edge (before, after), if before not in nodes_set or after not in nodes_set raise ValueError. Duplicate self-loop? Edge (a,a) creates cycle and unknown? It's known but cycle; should raise ValueError due cycle. If duplicate edges ignore. Need lexicographically smallest among valid topological orderings. Kahn with heap yields lexicographically smallest sequence for DAG if all weights strings comparable. Yes.\n\nPotential nuance: nodes iterable unique strings, but may be generator. We need validate? Not necessary. But to check unknown node, build set(nodes). If nodes has duplicates despite spec? Could handle by set; output should include each unique once? Spec says unique. If duplicate in input, maybe we shouldn't mutate and could return duplicates? Topological ordering of nodes likely list of given nodes. But spec unique. We can use list(nodes) to preserve? Lexicographically smallest independent of original order. If duplicates, using set would drop; but not required. Better: node_list = list(nodes); node_set = set(node_list). For output include isolated nodes and all nodes. If duplicate input, maybe should include each occurrence? Topological ordering normally vertices unique. We can assume unique. But if we use node_set for indegree dict, duplicates collapsed. Could be okay.\n\nNeed not mutate inputs: don't modify nodes or edges. Using list(nodes) creates new list; set(edges?) no mutation. If edges is a list of tuples, iterating fine. If edge elements not length 2? Not specified; could raise ValueError? Maybe let unpack error. But robust: try except? Not necessary.\n\nCycle detection: after heap processing, if len(order) != len(node_set) (or node_list unique count) raise ValueError. Need ensure all nodes included. If duplicate nodes in input and we use set length mismatch with order? Use expected = len(nodes_set). Since spec unique, fine. But if nodes iterable has duplicates, maybe expected should be len(list)? Topological ordering of multiset weird. I'd use node_list for output count? Let's design robust:\n\nnodes_iterable may be any iterable; convert to list once: all_nodes = list(nodes). If we want include isolated nodes and unique strings, but if duplicates in input, maybe return each duplicate? Lexicographically smallest valid ordering of given nodes with duplicates? Edges refer to node labels, not positions. Usually vertices are unique. To avoid weird, use set for graph; output sorted heap from set. But if all_nodes has duplicates, expected len(set). Spec says unique so no issue.\n\nNeed lexicographic order: Python strings compare lex by Unicode code points. Use heapq.\n\nImplementation:\nimport heapq\n\ndef topological_order(nodes, edges):\n    node_list = list(nodes)\n    nodes_set = set(node_list)\n    # If duplicate? maybe use len(nodes_set). But if nodes is empty and edges nonempty unknown -> ValueError.\n    adj = {node: [] for node in nodes_set} or dict? Need indegree.\n    indeg = {node: 0 for node in nodes_set}\n    seen_edges = set()\n    for edge in edges:\n        before, after = edge\n        if before not in nodes_set or after not in nodes_set:\n            raise ValueError(...)\n        pair = (before, after)\n        if pair in seen_edges: continue\n        # self-loop? If before == after, adding indegree and adj leads cycle. Could detect immediately? Kahn will detect because indeg never zero. But if only node a with edge a->a, heap empty, order len 0 !=1 raise ValueError. Good.\n        seen_edges.add(pair)\n        adj[before].append(after)\n        indeg[after] += 1\n    # initialize heap with nodes indeg 0\n    heap = [node for node in nodes_set if indeg[node] == 0]\n    heapq.heapify(heap)\n    order=[]\n    while heap:\n       u=heapq.heappop(heap)\n       order.append(u)\n       for v in adj[u]:\n          indeg[v]-=1\n          if indeg[v]==0: heapq.heappush(heap,v)\n    if len(order) != len(nodes_set): raise ValueError(\"cycle\")\n    return order\n\nPotential issue: If nodes is a set, node_list list(set) arbitrary but we only use set. Good.\n\nNeed not mutate inputs: adj and indeg new; seen_edges new. Edges may be generator consumed; that's okay? \"Do not mutate inputs\" consuming iterator isn't mutation? It changes state of iterator maybe unavoidable to read. But if edges is list, no mutation. If nodes is generator, list consumes; necessary. Could avoid storing node_list by set(nodes). But need expected count. Use nodes_set = set(nodes);",
+        "text": "",
+        "total_seconds": 48.13386817600076,
+        "ttft_seconds": 0.3008199819996662,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 172,
+          "total_tokens": 1372
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "class TTLCache:\n    def __init__(self, maxsize, clock):\n        if maxsize < 1:\n            raise ValueError(\"maxsize must be >= 1\")\n        self.maxsize = maxsize\n        self.clock = clock\n        self._store = {}  # key -> (value, expiry)\n        self._order = []  # list of keys in LRU order (least recent first)\n\n    def _purge_expired(self):\n        now = self.clock()\n        expired = [k for k in self._order if self._store[k][1] <= now]\n        for k in expired:\n            del self._store[k]\n        if expired:\n            self._order = [k for k in self._order if k not in set(expired)]\n\n    def set(self, key, value, ttl):\n        if ttl <= 0:\n            # Non-positive TTL must not remain stored\n            if key in self._store:\n                del self._store[key]\n                if key in self._order:\n                    self._order.remove(key)\n            return\n        expiry = self.clock() + ttl\n        if key in self._store:\n            # Update existing entry\n            self._store[key] = (value, expiry)\n            # Move to most recent\n            if key in self._order:\n                self._order.remove(key)\n            self._order.append(key)\n        else:\n            # New entry\n            self._store[key] = (value, expiry)\n            self._order.append(key)\n            # Check capacity\n            if len(self._store) > self.maxsize:\n                self._purge_expired()\n                if len(self._store) > self.maxsize:\n                    # Evict LRU live item\n                    while self._order:\n                        lru_key = self._order.pop(0)\n                        if lru_key in self._store:\n                            del self._store[lru_key]\n                            break\n\n    def get(self, key, default=None):\n        if key not in self._store:\n            return default\n        value, expiry = self._store[key]\n        if self.clock() >= expiry:\n            # Expired\n            del self._store[key]\n            if key in self._order:\n                self._order.remove(key)\n            return default\n        # Refresh LRU recency\n        if key in self._order:\n            self._order.remove(key)\n        self._order.append(key)\n        return value",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "lru_and_refresh",
+          "expiry_and_update",
+          "invalid_and_nonpositive"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "ttl_cache",
+      "timing": {
+        "decode_tps": 74.47936540244385,
+        "ok": true,
+        "reasoning_text": "",
+        "text": "```python\nclass TTLCache:\n    def __init__(self, maxsize, clock):\n        if maxsize < 1:\n            raise ValueError(\"maxsize must be >= 1\")\n        self.maxsize = maxsize\n        self.clock = clock\n        self._store = {}  # key -> (value, expiry)\n        self._order = []  # list of keys in LRU order (least recent first)\n\n    def _purge_expired(self):\n        now = self.clock()\n        expired = [k for k in self._order if self._store[k][1] <= now]\n        for k in expired:\n            del self._store[k]\n        if expired:\n            self._order = [k for k in self._order if k not in set(expired)]\n\n    def set(self, key, value, ttl):\n        if ttl <= 0:\n            # Non-positive TTL must not remain stored\n            if key in self._store:\n                del self._store[key]\n                if key in self._order:\n                    self._order.remove(key)\n            return\n        expiry = self.clock() + ttl\n        if key in self._store:\n            # Update existing entry\n            self._store[key] = (value, expiry)\n            # Move to most recent\n            if key in self._order:\n                self._order.remove(key)\n            self._order.append(key)\n        else:\n            # New entry\n            self._store[key] = (value, expiry)\n            self._order.append(key)\n            # Check capacity\n            if len(self._store) > self.maxsize:\n                self._purge_expired()\n                if len(self._store) > self.maxsize:\n                    # Evict LRU live item\n                    while self._order:\n                        lru_key = self._order.pop(0)\n                        if lru_key in self._store:\n                            del self._store[lru_key]\n                            break\n\n    def get(self, key, default=None):\n        if key not in self._store:\n            return default\n        value, expiry = self._store[key]\n        if self.clock() >= expiry:\n            # Expired\n            del self._store[key]\n            if key in self._order:\n                self._order.remove(key)\n            return default\n        # Refresh LRU recency\n        if key in self._order:\n            self._order.remove(key)\n        self._order.append(key)\n        return value\n```",
+        "total_seconds": 7.583991200999662,
+        "ttft_seconds": 0.19926311099879968,
+        "usage": {
+          "completion_tokens": 551,
+          "prompt_tokens": 181,
+          "total_tokens": 732
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "lru_and_refresh",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 8, in test_lru_and_refresh\nNameError: name 'TTLCache' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "expiry_and_update",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_expiry_and_update\nNameError: name 'TTLCache' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "invalid_and_nonpositive",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 30, in test_invalid_and_nonpositive\nNameError: name 'TTLCache' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "ttl_cache",
+      "timing": {
+        "decode_tps": 26.57495368486541,
+        "ok": false,
+        "reasoning_text": "We need answer user wants implement TTLCache class in Python only stdlib, return only code fenced block no prose/tests. Need think carefully. done. Now analyze requirements.\n\nClass TTLCache(maxsize, clock). maxsize int? Raise ValueError when maxsize < 1. Probably if not int? Not specified; can just if maxsize < 1 raise ValueError. clock callable zero-arg returning seconds. Methods set(key,value,ttl), get(key,default=None).\n\nSemantics:\n- Expire item when clock() >= expiry. So store expiry = current_time + ttl? If ttl non-positive must not remain stored. Need handle ttl <=0: should not be stored. What does set do for nonpositive TTL? \"A non-positive TTL must not remain stored.\" Could mean if ttl <= 0, don't insert or immediately expire/remove. Probably set with ttl<=0 should not store item; maybe remove existing key? Let's infer. It says cache.set(key,value,ttl). A non-positive TTL must not remain stored. So after set(ttl<=0), get returns default. If key existed, likely update to expired/nonexistent. Could delete existing entry. We'll implement: if ttl <= 0: discard key (if present) and return None? No specified return. set probably no return.\n- get refreshes LRU recency but not expiry. So on successful get, move key to most recent in OrderedDict. If expired at current clock, remove and return default; should it update recency? Expired item removed, so no.\n- set updates recency and expiry. If key exists, update value/expiry and move to end (most recent). If new and capacity exceeded: before capacity eviction, remove expired items; otherwise evict LRU live item. Need define order of operations for set when maxsize reached. Suppose cache full with some expired. We should purge expired first, then if still at/over capacity? Since maxsize is maximum number of stored live items. If adding new key and len == maxsize after purging, evict LRU live. If updating existing key, no eviction needed (len unchanged). But what if set nonpositive ttl for existing key: remove it; no eviction.\n- Expire item when clock() >= expiry. So at get/set/purge use current = clock(); expired if now >= expiry. Note if ttl positive but very small and clock same? If now + ttl maybe equal now if float? But condition uses stored expiry. For nonpositive TTL must not remain stored; we can avoid storing.\n- LRU recency: set updates recency, get refreshes. What about expired items in order? We remove them when encountered or purge before eviction. Could leave expired until needed? Requirement says before capacity eviction, remove expired items; otherwise evict LRU live item. It doesn't explicitly require lazy expiration on get? But get must return default if expired. So yes check expiry on get. For set updating existing key that is expired: treat as update (new expiry) and recency; no need to purge first? If key exists but expired, setting should update it to live. Since len includes expired maybe at capacity. If we just move_to_end and update, fine. But if maxsize full with expired items and set new key, must remove expired before eviction. We can implement _purge_expired(now) that removes all expired entries (or until len < maxsize? Requirement says remove expired items; could remove all). Then if adding new and len >= maxsize evict LRU live. If updating existing no capacity issue.\n\nPotential edge cases:\n- clock may be None? Not specified. Could default to time.time? But constructor requires clock. We can store callable. Maybe validate callable? Not required but okay? Keep simple.\n- maxsize < 1 raise ValueError. What about bool True? bool is int; True >=1, False<1 raises. Fine.\n- ttl may be None? If non-positive? Could compare fail. Spec says ttl seconds likely numeric. We can do if ttl <= 0: remove and return. If invalid type, let TypeError. But maybe robust: try except? Not needed.\n- expiry = now + ttl. If ttl positive but now+ttl <= now due to overflow? not relevant.\n- Use collections.OrderedDict for LRU.\n\nNeed decide exact behavior of set with nonpositive TTL and existing key. \"A non-positive TTL must not remain stored.\" Could mean if you set with ttl=0, it should be immediately expired; get returns default. If there was an existing live item under same key, setting with ttl<=0 probably overwrites then expires, so removed. We'll do pop(key, None).\n\nNeed consider capacity eviction when updating existing key that is currently the only item and maxsize 1: no eviction. When adding new key to full cache: purge expired; if len >= maxsize evict one (or more? Since len should never exceed maxsize except maybe after nonpositive removals? We maintain <=maxsize). If len == maxsize, popitem(last=False) once. But what if len > maxsize due to some bug? Could while len >= maxsize: pop LRU live. But if all expired purged and len still >= maxsize, evict until len < maxsize. Use while self._data and len(self._data) >= self.maxsize: self._data.popitem(last=False). However if updating existing key, we shouldn't evict it even if len == maxsize? We can branch: if key in data: update; else: purge, then while len>=maxsize pop LRU. But what if key not in data but len < maxsize after purging? insert.\n\nBut subtle: If cache full with expired",
+        "text": "",
+        "total_seconds": 45.74006246799945,
+        "ttft_seconds": 0.6222651959997165,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1199
+          },
+          "prompt_tokens": 217,
+          "total_tokens": 1417
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "lru_and_refresh",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 8, in test_lru_and_refresh\nNameError: name 'TTLCache' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "expiry_and_update",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_expiry_and_update\nNameError: name 'TTLCache' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "invalid_and_nonpositive",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 30, in test_invalid_and_nonpositive\nNameError: name 'TTLCache' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "ttl_cache",
+      "timing": {
+        "decode_tps": 28.415797943106135,
+        "ok": false,
+        "reasoning_text": "We need answer user wants implement TTLCache class in Python only stdlib, no think aloud, return only implementation in one ```python fenced block, no prose/tests. Need produce final code. Let's reason thoroughly to ensure correct.\n\nRequirements:\n- TTLCache(maxsize, clock)\n- cache.set(key, value, ttl)\n- cache.get(key, default=None)\nclock zero-arg callable returning seconds. Expire item when clock() >= expiry. get refreshes LRU recency but not expiry. set updates recency and expiry. Before capacity eviction, remove expired items; otherwise evict least-recently-used live item. A non-positive TTL must not remain stored. Raise ValueError when maxsize < 1.\n\nNeed implement likely using OrderedDict for LRU. Need handle ttl <=0: \"must not remain stored\". What does set with non-positive ttl do? It should not store item. Probably just no-op (or if key exists, remove? Let's parse). A non-positive TTL must not remain stored. If setting a key with ttl<=0, it shouldn't be in cache after call. Could also delete existing entry for that key because otherwise old positive expiry remains and would violate \"must not remain stored\" for the set operation? Need decide.\n\nSpec: `set(key, value, ttl)` updates recency and expiry. A non-positive TTL must not remain stored. If ttl <= 0, item expired immediately (expiry = now + ttl <= now). Since expire when clock() >= expiry. It should not be stored. If key already exists with positive ttl, calling set(key,value,ttl<=0) likely should remove it because the new value has non-positive TTL and must not remain stored; leaving old entry would be wrong. So implement: if ttl <= 0: discard key from cache (if present), return None? No specified return. Could just no-op after deletion.\n\nNeed capacity eviction: maxsize is maximum number of live items? \"Before capacity eviction, remove expired items; otherwise evict the least-recently-used live item.\" Means when adding new item and len >= maxsize, first purge all expired (based on current clock). If still at capacity, evict LRU live. Then insert. Need consider if updating existing key: should not trigger eviction? Usually set updates recency/expiry; if key exists, move to end, update value/expiry, no capacity change. But if ttl <=0 remove. For new key and len >= maxsize after purge/eviction.\n\nNeed get: check existence. If expired (clock() >= expiry) delete and return default. Else move_to_end(key), return value. Does get need to purge other expired? Not required, but could lazily only target. But capacity eviction purges all expired. Could also implement _purge_expired for internal.\n\nNeed clock callable. Validate maxsize < 1 raise ValueError. What about non-int maxsize? Spec says maxsize<1; can just if maxsize < 1: raise ValueError. If None? not needed. Clock maybe no validation.\n\nPotential edge cases:\n- ttl may be float, int, Decimal? Use addition. expiry = clock() + ttl. Non-positive TTL means ttl <= 0. If ttl is NaN? Not specified; ignore.\n- Expire when clock() >= expiry. So if ttl=0, expiry=now, expired immediately (clock>=expiry). We don't store anyway.\n- If clock returns non-monotonic? Could cause previously live become expired or not. Use current time each operation. For purge: remove items where now >= expiry. Need be careful iterating OrderedDict and deleting. Can use list comprehension of keys to delete, or while loop from begin. Simpler: for key in list(self._data): if self._now() >= self._expiry[key]: del ... But storing expiry separate? Could store tuple (value, expiry) as value in OrderedDict. Then move_to_end works.\n\nImplementation options:\nclass TTLCache:\n    def __init__(self, maxsize, clock):\n        if maxsize < 1: raise ValueError(\"maxsize must be >= 1\")\n        self._maxsize = maxsize\n        self._clock = clock\n        self._data = OrderedDict() # key -> (value, expiry)\n\n    def _now(self): return self._clock()\n\n    def set(self, key, value, ttl):\n        if ttl <= 0:\n            self._data.pop(key, None)\n            return None? maybe no return.\n        now = self._now()\n        expiry = now + ttl\n        # If existing update recency/expiry; no eviction needed except if maxsize? len unchanged. But what if existing expired and we set new positive: just replace.\n        if key in self._data:\n            self._data[key] = (value, expiry)\n            self._data.move_to_end(key)\n            return None\n        # New key\n        # If at capacity, purge expired then evict LRU live until len < maxsize? Since adding one item only need make room for one. But if maxsize maybe 0 not allowed. Could while len >= maxsize: purge; if still len>=maxsize: popitem(last=False). Need ensure not infinite if no expired and len>=maxsize: evict one, then len < maxsize (assuming maxsize>=1). If multiple? only need one slot. But if maxsize changed? no.\n        while len(self._data) >= self._maxsize:\n            # remove expired items; break if any removed? Need purge all before eviction. Requirement: Before capacity eviction, remove expired items; otherwise evict LRU live item. Could mean first remove all",
+        "text": "",
+        "total_seconds": 42.68461450099858,
+        "ttft_seconds": 0.4888015929991525,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1199
+          },
+          "prompt_tokens": 217,
+          "total_tokens": 1417
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "import time\nfrom collections import OrderedDict\n\n\nclass TTLCache:\n    def __init__(self, maxsize, clock):\n        if maxsize < 1:\n            raise ValueError(\"maxsize must be >= 1\")\n        self.maxsize = maxsize\n        self.clock = clock\n        self._cache = OrderedDict()  # key -> (value, expiry)\n\n    def _purge_expired(self):\n        now = self.clock()\n        expired_keys = [k for k, (_, expiry) in self._cache.items() if now >= expiry]\n        for k in expired_keys:\n            del self._cache[k]\n\n    def set(self, key, value, ttl):\n        if ttl <= 0:\n            # Non-positive TTL: item should not remain stored\n            if key in self._cache:\n                del self._cache[key]\n            return\n        expiry = self.clock() + ttl\n        if key in self._cache:\n            # Update existing entry: move to end (most recent)\n            self._cache[key] = (value, expiry)\n            self._cache.move_to_end(key)\n        else:\n            # New key: may need to evict\n            self._cache[key] = (value, expiry)\n            if len(self._cache) > self.maxsize:\n                self._purge_expired()\n                if len(self._cache) > self.maxsize:\n                    # Evict LRU live item\n                    self._cache.popitem(last=False)\n\n    def get(self, key, default=None):\n        if key not in self._cache:\n            return default\n        value, expiry = self._cache[key]\n        if self.clock() >= expiry:\n            del self._cache[key]\n            return default\n        # Refresh LRU recency but not expiry\n        self._cache.move_to_end(key)\n        return value",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "lru_and_refresh",
+          "expiry_and_update",
+          "invalid_and_nonpositive"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "ttl_cache",
+      "timing": {
+        "decode_tps": 73.6018008772093,
+        "ok": true,
+        "reasoning_text": "",
+        "text": "```python\nimport time\nfrom collections import OrderedDict\n\n\nclass TTLCache:\n    def __init__(self, maxsize, clock):\n        if maxsize < 1:\n            raise ValueError(\"maxsize must be >= 1\")\n        self.maxsize = maxsize\n        self.clock = clock\n        self._cache = OrderedDict()  # key -> (value, expiry)\n\n    def _purge_expired(self):\n        now = self.clock()\n        expired_keys = [k for k, (_, expiry) in self._cache.items() if now >= expiry]\n        for k in expired_keys:\n            del self._cache[k]\n\n    def set(self, key, value, ttl):\n        if ttl <= 0:\n            # Non-positive TTL: item should not remain stored\n            if key in self._cache:\n                del self._cache[key]\n            return\n        expiry = self.clock() + ttl\n        if key in self._cache:\n            # Update existing entry: move to end (most recent)\n            self._cache[key] = (value, expiry)\n            self._cache.move_to_end(key)\n        else:\n            # New key: may need to evict\n            self._cache[key] = (value, expiry)\n            if len(self._cache) > self.maxsize:\n                self._purge_expired()\n                if len(self._cache) > self.maxsize:\n                    # Evict LRU live item\n                    self._cache.popitem(last=False)\n\n    def get(self, key, default=None):\n        if key not in self._cache:\n            return default\n        value, expiry = self._cache[key]\n        if self.clock() >= expiry:\n            del self._cache[key]\n            return default\n        # Refresh LRU recency but not expiry\n        self._cache.move_to_end(key)\n        return value\n```",
+        "total_seconds": 5.755358258000342,
+        "ttft_seconds": 0.19836096099970746,
+        "usage": {
+          "completion_tokens": 410,
+          "prompt_tokens": 181,
+          "total_tokens": 591
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "import time\nfrom collections import OrderedDict\n\n\nclass TTLCache:\n    def __init__(self, maxsize, clock):\n        if maxsize < 1:\n            raise ValueError(\"maxsize must be >= 1\")\n        self.maxsize = maxsize\n        self.clock = clock\n        self._cache = OrderedDict()  # key -> (value, expiry)\n\n    def _purge_expired(self):\n        now = self.clock()\n        expired_keys = [k for k, (_, expiry) in self._cache.items() if now >= expiry]\n        for k in expired_keys:\n            del self._cache[k]\n\n    def set(self, key, value, ttl):\n        if ttl <= 0:\n            # Non-positive TTL must not remain stored\n            if key in self._cache:\n                del self._cache[key]\n            return\n        expiry = self.clock() + ttl\n        if key in self._cache:\n            # Update existing entry\n            self._cache[key] = (value, expiry)\n            self._cache.move_to_end(key)\n        else:\n            # Check capacity: purge expired first, then evict LRU if needed\n            if len(self._cache) >= self.maxsize:\n                self._purge_expired()\n                if len(self._cache) >= self.maxsize:\n                    # Evict least recently used live item\n                    self._cache.popitem(last=False)\n            self._cache[key] = (value, expiry)\n\n    def get(self, key, default=None):\n        if key not in self._cache:\n            return default\n        value, expiry = self._cache[key]\n        if self.clock() >= expiry:\n            del self._cache[key]\n            return default\n        # Refresh LRU recency but not expiry\n        self._cache.move_to_end(key)\n        return value",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "lru_and_refresh",
+          "expiry_and_update",
+          "invalid_and_nonpositive"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "ttl_cache",
+      "timing": {
+        "decode_tps": 74.75325401725787,
+        "ok": true,
+        "reasoning_text": "",
+        "text": "```python\nimport time\nfrom collections import OrderedDict\n\n\nclass TTLCache:\n    def __init__(self, maxsize, clock):\n        if maxsize < 1:\n            raise ValueError(\"maxsize must be >= 1\")\n        self.maxsize = maxsize\n        self.clock = clock\n        self._cache = OrderedDict()  # key -> (value, expiry)\n\n    def _purge_expired(self):\n        now = self.clock()\n        expired_keys = [k for k, (_, expiry) in self._cache.items() if now >= expiry]\n        for k in expired_keys:\n            del self._cache[k]\n\n    def set(self, key, value, ttl):\n        if ttl <= 0:\n            # Non-positive TTL must not remain stored\n            if key in self._cache:\n                del self._cache[key]\n            return\n        expiry = self.clock() + ttl\n        if key in self._cache:\n            # Update existing entry\n            self._cache[key] = (value, expiry)\n            self._cache.move_to_end(key)\n        else:\n            # Check capacity: purge expired first, then evict LRU if needed\n            if len(self._cache) >= self.maxsize:\n                self._purge_expired()\n                if len(self._cache) >= self.maxsize:\n                    # Evict least recently used live item\n                    self._cache.popitem(last=False)\n            self._cache[key] = (value, expiry)\n\n    def get(self, key, default=None):\n        if key not in self._cache:\n            return default\n        value, expiry = self._cache[key]\n        if self.clock() >= expiry:\n            del self._cache[key]\n            return default\n        # Refresh LRU recency but not expiry\n        self._cache.move_to_end(key)\n        return value\n```",
+        "total_seconds": 5.622946764999142,
+        "ttft_seconds": 0.19167766200007463,
+        "usage": {
+          "completion_tokens": 407,
+          "prompt_tokens": 181,
+          "total_tokens": 588
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "lru_and_refresh",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 8, in test_lru_and_refresh\nNameError: name 'TTLCache' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "expiry_and_update",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_expiry_and_update\nNameError: name 'TTLCache' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'TTLCache' is not defined\")",
+            "name": "invalid_and_nonpositive",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 30, in test_invalid_and_nonpositive\nNameError: name 'TTLCache' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "ttl_cache",
+      "timing": {
+        "decode_tps": 29.508791535016506,
+        "ok": false,
+        "reasoning_text": "We need answer user wants implement TTLCache class in Python standard library only, return only implementation in one ```python fenced block no prose/tests. Need think carefully. Now produce final code.\n\nNeed satisfy spec:\nTTLCache(maxsize, clock)\ncache.set(key, value, ttl)\ncache.get(key, default=None)\n\nclock zero-arg callable returning seconds. Expire item when clock() >= expiry. get refreshes LRU recency but not expiry. set updates recency and expiry. Before capacity eviction, remove expired items; otherwise evict least-recently-used live item. Non-positive TTL must not remain stored. Raise ValueError when maxsize < 1.\n\nNeed design. Use OrderedDict for LRU. Store entries maybe (value, expiry). On get: if key missing return default. Else check expiry: if clock() >= expiry delete and return default? Spec says expire when clock()>=expiry. If expired, should not be returned; likely remove it. get refreshes LRU recency but not expiry for live item. So move_to_end.\n\nset(key,value,ttl): Need update recency and expiry. Non-positive TTL must not remain stored. What does that mean? If ttl <= 0, set should not store item (or if existing key remove?). \"must not remain stored\" likely means setting with nonpositive ttl results in no entry; maybe delete existing. Should we raise? No. So if ttl <= 0: pop key if exists and return None. But what about expiry = clock()+ttl could be <= current, expired immediately. We can just not store. If maxsize <1 ValueError at init.\n\nCapacity eviction: Before capacity eviction, remove expired items; otherwise evict LRU live item. Need define when to evict. On set adding new key or updating existing? If updating existing key and size unchanged no need evict unless nonpositive deletion? But if ttl positive and key exists, update value/expiry/recency, no capacity issue. If new key and len == maxsize: first remove expired items (all?) until space. Then if still full, evict LRU live item. Need ensure after removing expired there is room. Could implement _purge_expired() removes all currently expired entries. But spec says before capacity eviction, remove expired items; otherwise evict least-recently-used live item. It may mean only enough to make space? \"remove expired items\" could be all expired. Either okay. Need if maxsize=1 and set new key: purge expired (maybe none), then popitem(last=False). If existing key update no eviction.\n\nPotential subtlety: get should remove expired when encountered, but not necessarily purge all. That's fine.\n\nClock callable returning seconds; can be float/int. expiry = clock() + ttl. Expire when clock() >= expiry. For positive ttl, if clock returns same? If ttl >0 then expiry > current at set time (assuming no weird). But if clock changes? okay. Non-positive TTL must not remain stored: if ttl <= 0 don't store. What about ttl very small and clock advances before get; expired removed.\n\nNeed maybe validate maxsize integer? Spec only raise ValueError when maxsize <1. If non-int? Could let TypeError from range? But we can do if maxsize < 1: raise ValueError. If None, comparison error. Fine. Maybe ensure int? Not required.\n\nThread safety? Not specified. Standard library only. Could use threading.Lock? Not necessary but could. Simpler no lock.\n\nNeed return only code fenced. Ensure class name TTLCache. Methods set/get.\n\nPotential issue: OrderedDict move_to_end on existing key after checking expiry. If expired, delete and return default. Should we update recency before or after expiry check? Only live item refreshes. So check first.\n\nImplementation:\nfrom collections import OrderedDict\n\nclass TTLCache:\n    def __init__(self, maxsize, clock):\n        if maxsize < 1:\n            raise ValueError(\"maxsize must be >= 1\")\n        self.maxsize = maxsize\n        self.clock = clock\n        self._data = OrderedDict() # key -> (value, expiry)\n\n    def _is_expired(self, expiry): return self.clock() >= expiry\n\n    def _purge_expired(self):\n        now = self.clock()? Could call once for efficiency. But if clock changes? Use current time. Need remove all expired at that moment. If use one now, okay. But spec expire when clock()>=expiry; using single snapshot fine. However if clock is weird non-monotonic? Not relevant. To be precise maybe check each with self.clock()? Could call many times. Better snapshot = self.clock(); while data and first expiry <= snapshot: popitem(last=False). Since LRU order, expired items may not all at front; need iterate list of keys to remove all expired. Use for key in list(self._data): if self._data[key][1] <= now: del self._data[key]. But if use snapshot, okay. If clock changes between? no.\n\nBut before capacity eviction, \"remove expired items\" maybe should call current clock each check? Not important. Could implement _purge_expired using now = self.clock() and remove all with expiry <= now (since expire when >=). That's fine.\n\n    def set(self,key,value,ttl):\n        if ttl <= 0:\n            self._data.pop(key, None)\n            return None\n        expiry = self.clock() + ttl\n        if key in self._data:\n            self._data[key] = (value, expiry)\n            self._data.move_to_end(key)\n        else:\n            # Need make room. But what if len == maxsize",
+        "text": "",
+        "total_seconds": 41.0736863559996,
+        "ttft_seconds": 0.44159905800006527,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 217,
+          "total_tokens": 1417
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "import asyncio\nfrom typing import Any, AsyncIterable, Awaitable, Callable, Iterable, TypeVar\n\nT = TypeVar(\"T\")\nR = TypeVar(\"R\")\n\n\nasync def async_map_ordered(\n    items: Iterable[T],\n    worker: Callable[[T], Awaitable[R]],\n    limit: int,\n) -> list[R]:\n    if limit < 1:\n        raise ValueError(\"limit must be >= 1\")\n\n    # Convert to a list so we can index by position\n    items_list = list(items)\n    n = len(items_list)\n    if n == 0:\n        return []\n\n    results: list[R] = [None] * n  # type: ignore\n    tasks: list[asyncio.Task] = []\n    semaphore = asyncio.Semaphore(limit)\n\n    async def run(index: int, item: T) -> None:\n        async with semaphore:\n            results[index] = await worker(item)\n\n    # Create all tasks up front; the semaphore enforces the limit\n    for i, item in enumerate(items_list):\n        tasks.append(asyncio.create_task(run(i, item)))\n\n    try:\n        await asyncio.gather(*tasks)\n    except BaseException as exc:\n        # Cancel all outstanding tasks and await them to suppress their exceptions\n        for task in tasks:\n            if not task.done():\n                task.cancel()\n        # Await all tasks to ensure they are fully cancelled\n        await asyncio.gather(*tasks, return_exceptions=True)\n        raise exc\n\n    return results",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "order_and_limit",
+          "invalid_limit",
+          "propagates_exception"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "async_map_ordered",
+      "timing": {
+        "decode_tps": 62.06462203592898,
+        "ok": true,
+        "reasoning_text": "",
+        "text": "```python\nimport asyncio\nfrom typing import Any, AsyncIterable, Awaitable, Callable, Iterable, TypeVar\n\nT = TypeVar(\"T\")\nR = TypeVar(\"R\")\n\n\nasync def async_map_ordered(\n    items: Iterable[T],\n    worker: Callable[[T], Awaitable[R]],\n    limit: int,\n) -> list[R]:\n    if limit < 1:\n        raise ValueError(\"limit must be >= 1\")\n\n    # Convert to a list so we can index by position\n    items_list = list(items)\n    n = len(items_list)\n    if n == 0:\n        return []\n\n    results: list[R] = [None] * n  # type: ignore\n    tasks: list[asyncio.Task] = []\n    semaphore = asyncio.Semaphore(limit)\n\n    async def run(index: int, item: T) -> None:\n        async with semaphore:\n            results[index] = await worker(item)\n\n    # Create all tasks up front; the semaphore enforces the limit\n    for i, item in enumerate(items_list):\n        tasks.append(asyncio.create_task(run(i, item)))\n\n    try:\n        await asyncio.gather(*tasks)\n    except BaseException as exc:\n        # Cancel all outstanding tasks and await them to suppress their exceptions\n        for task in tasks:\n            if not task.done():\n                task.cancel()\n        # Await all tasks to ensure they are fully cancelled\n        await asyncio.gather(*tasks, return_exceptions=True)\n        raise exc\n\n    return results\n```",
+        "total_seconds": 5.640347083000961,
+        "ttft_seconds": 0.19429061400114733,
+        "usage": {
+          "completion_tokens": 339,
+          "prompt_tokens": 145,
+          "total_tokens": 484
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "order_and_limit",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_order_and_limit\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 15, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "invalid_limit",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 28, in test_invalid_limit\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 24, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "propagates_exception",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 42, in test_propagates_exception\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 37, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "async_map_ordered",
+      "timing": {
+        "decode_tps": 23.21383790087723,
+        "ok": false,
+        "reasoning_text": "We need answer user wants implement Python async_map_ordered. Need provide only code fenced block no prose tests. Need think thoroughly here. Requirements:\nasync def async_map_ordered(items, worker, limit):\nCall async worker(item) for each item with at most limit calls active once. Return results in input order even when completion differs. Accept any finite iterable, not only lists. Raise ValueError if limit < 1. If a worker raises, cancel and await all outstanding work, then re-raise original exception.\n\nNeed standard library only. Need robust implementation. Considerations:\n- items can be any finite iterable (generator). We need consume in order? At most limit active. Return list results input order.\n- Worker async function taking item returns result. Could worker be sync? Spec says async worker(item), likely coroutine function. But maybe accept callable returning awaitable? We'll assume coroutine. Need call and create tasks.\n- Limit validation: if limit < 1 raise ValueError. Should validate before consuming items? Probably yes. If limit not int? limit < 1 may TypeError for non comparable; okay. Could bool? True=1, False=0 -> ValueError. Fine.\n- Error handling: If any worker raises, cancel and await all outstanding work, then re-raise original exception. Need ensure if multiple fail, raise first encountered in input order? \"original exception\" likely the one that raised. Since we process items sequentially but tasks may complete out of order. We need detect exceptions as they occur. Could use asyncio.TaskGroup? Python 3.11 has TaskGroup with cancel scope; but ordered results and limit require semaphore. But if worker raises, TaskGroup cancels others and raises ExceptionGroup (not original) unless handle. Need custom to re-raise original exception. Also standard library only; can rely on asyncio.\n- Need accept any finite iterable: cannot index items or len. We need schedule tasks as we iterate. To preserve order, assign result by index. Since at most limit active, we can maintain queue of pending tasks with indices? Approach: Use semaphore and create task for each item up to limit; but if using asyncio.create_task and semaphore inside wrapper, all tasks created immediately (bad for generator maybe infinite? finite but could be huge; also \"at most limit calls active\" if all tasks waiting on semaphore not active? They are tasks but worker not called until acquire. But creating many tasks may be undesirable. Better schedule only up to limit at a time.\n- Need consume iterable lazily and maintain order. We can use an iterator, create first min(limit) tasks, then as each completes, append result to results list by index? Since we start in input order and complete out of order, need store results in array with placeholders. But if we only have up to limit active and process next item when a slot frees, the set of active indices are not necessarily contiguous? Example limit 2: start idx0,1; idx0 completes -> result[0], start idx2; active idx1,2; idx2 completes before idx1 -> result[2] then result[1]. Need results list append in order at end. We can preallocate? Don't know length if generator. Could use dict index->result and track next expected? At end need produce ordered list. If we don't know total count, can maintain results as list with holes? Since indices are assigned sequentially from 0; when a task completes at index i, we can set results[i] = value. But if i > len(results), extend with None placeholders. At the end after all tasks done and iterator exhausted, results will be length max_index+1 and filled. This works. Need ensure no missing holes? All indices scheduled exactly once; when all complete, filled.\n- Alternative: use asyncio.Queue of items? But order? Could have worker wrapper fetch next item from iterator under semaphore, but then tasks don't correspond to input index easily unless we assign before call. We can create a feeder task that schedules? Simpler: manage active tasks dict mapping Task -> index. Iterate initial limit tasks. Then loop while active or not exhausted: await first completed among active (asyncio.wait). On completion, get result/exception; if exception, cancel all outstanding and re-raise. If success, store result by index; then schedule next item from iterator until active count == limit or iterator exhausted. At end return results list.\nNeed be careful with asyncio.wait: It returns done, pending. We can await asyncio.wait(active_tasks) each iteration? But if no active tasks but items remain, need start more. Could structure:\nit = iter(items); active = {} # task -> index; idx=0; results=[]\ndef schedule_next(): nonlocal idx; try item=next(it) except StopIteration return False; task=asyncio.create_task(worker(item)); active[task]=idx; idx+=1; return True\nfor _ in range(limit): if not schedule_next(): break\nwhile active:\n    done, pending = await asyncio.wait(active.keys()) # but active may change? We don't modify during wait except after. okay.\n    for task in done:\n       i=active.pop(task)\n       try: res=task.result()\n       except Exception as exc: \n           # cancel and await all outstanding work (including other done tasks not yet processed?) Need cancel pending active tasks, maybe also other done tasks? \"outstanding work\" likely active/pending. But if multiple done in same wait batch, some may have exceptions too. We should cancel all remaining active tasks (pending) and also perhaps unprocessed done tasks? They are already completed; no need cancel but we might await them to suppress exceptions? If a worker raised, we must re-raise original exception. Other completed tasks with results/exceptions",
+        "text": "",
+        "total_seconds": 52.15034670600107,
+        "ttft_seconds": 0.5000515940009791,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 181,
+          "total_tokens": 1381
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "order_and_limit",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_order_and_limit\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 15, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "invalid_limit",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 28, in test_invalid_limit\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 24, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "propagates_exception",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 42, in test_propagates_exception\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 37, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "async_map_ordered",
+      "timing": {
+        "decode_tps": 26.766288671444258,
+        "ok": false,
+        "reasoning_text": "We need answer user wants implement Python async function. Need produce final only code fenced python no prose tests. Need think thoroughly. Problem: Implement async def async_map_ordered(items, worker, limit): Call async worker(item) for each item with at most limit calls active at once. Return results in input order even when completion order differs. Accept any finite iterable, not only lists. Raise ValueError if limit < 1. If a worker raises, cancel and await all outstanding work, then re-raise original exception.\n\nNeed standard library only. Need consider Python version? asyncio. We need implement robustly. Requirements:\n- items finite iterable (could be generator). Need consume in order. At most limit concurrent calls. Return list results input order. If worker raises, cancel and await all outstanding work, then re-raise original exception.\n\nNeed design. Options: use asyncio.Semaphore? But if one task fails, need cancel others and await. Also preserve order. Could create tasks as we iterate items, limited by semaphore or queue of active futures. Need ensure at most limit calls active at once. If using semaphore acquire before creating task; release after completion. But cancellation handling: if a worker raises, we want cancel outstanding work (other running tasks) and await them, then re-raise original exception. We need not swallow exceptions from cancelled tasks? \"cancel and await all outstanding work\" likely means call .cancel() on pending tasks and gather with return_exceptions=True or suppress CancelledError. Then raise original. Need ensure if multiple workers fail simultaneously, which exception to raise? Original first encountered maybe. If worker raises in one task, we should cancel others and re-raise that exception. But if another also raised before cancellation? We can choose first failure. Need handle tasks completing with exceptions concurrently. Since we process completions as they finish, first exception triggers cleanup.\n\nNeed accept any finite iterable: cannot index by length unless list. Could convert to list? \"Accept any finite iterable, not only lists\" maybe means don't require len or indexing; converting to list is okay if finite but may be memory heavy. Better stream. But need return results in input order; can store results as they complete. If we don't know total length until consumed, can append placeholders? We can maintain result list and when task completes at index i set result[i]. Need know indices: enumerate items as we create tasks. For each item, assign index = len(results); results.append(None). Then on completion set results[index] = value. At end after all tasks done, return results. This works for generator.\n\nNeed limit concurrency. Approach 1: maintain active dict {task: index}. Iterate over items; before creating task, if len(active) >= limit: await wait for one to complete (or use asyncio.wait FIRST_COMPLETED). But need handle exceptions as soon as completion occurs. We can process completions in loop. Simpler: create tasks up to limit, then when active nonempty and we still have more items or need drain, await asyncio.wait(active, return_when=FIRST_COMPLETED) to get done/pending. Process done tasks: if exception raise? But if multiple done, choose first exception maybe. Need cancel outstanding on error.\n\nAlternative use queue/worker pool: limit workers pulling from iterator; but preserving order and cancellation more complex.\n\nCould implement with asyncio.TaskGroup? Python 3.11 TaskGroup cancels siblings on exception and waits. But need ordered results and at most limit. Could create tasks limited by semaphore inside task group. However if one fails, TaskGroup cancels others and raises ExceptionGroup (or first?). Requirement re-raise original exception, not ExceptionGroup. Also standard library but version dependent? Better implement manually for compatibility 3.8+.\n\nNeed careful with cancellation of current function itself? If outer caller cancels async_map_ordered while awaiting tasks, what should happen? Not specified. We can let CancelledError propagate after cleaning up? Maybe need cancel outstanding and re-raise original exception if worker raises; if external cancellation occurs, probably cancel outstanding and raise CancelledError. But not required. Need robust.\n\nPotential implementation:\n\nasync def async_map_ordered(items, worker, limit):\n    if limit < 1: raise ValueError(...)\n    results = []\n    active = {} # task -> index\n    it = iter(items)\n    first_error = None\n    try:\n        while True:\n            # start new tasks up to limit\n            started = False\n            while len(active) < limit:\n                try:\n                    item = next(it)\n                except StopIteration:\n                    break\n                idx = len(results)\n                results.append(None)\n                task = asyncio.ensure_future(worker(item))\n                active[task] = idx\n                started = True\n            if not active:\n                return results\n            # Wait for at least one active to complete. But need process all done.\n            done, _pending = await asyncio.wait(active.keys(), return_when=asyncio.FIRST_COMPLETED)\n            for task in done:\n                idx = active.pop(task)\n                try:\n                    exc = task.exception()\n                except asyncio.CancelledError:\n                    # if cancelled? maybe due to external or our cleanup. If during normal wait, shouldn't be cancelled unless outer cancel. Need handle.\n                    raise\n                else:\n                    results[idx] = exc\n            # But if any done exception, need trigger cleanup. We can check after loop.\n            for task in done: ... but popped. Need store exceptions.\n\nBut issue: If multiple tasks complete and one raises, we should cancel outstanding (pending active) and await them, then raise original. Also what about other completed tasks with exceptions? We might ignore if first error chosen. But need maybe choose earliest completion exception",
+        "text": "",
+        "total_seconds": 44.983904910001,
+        "ttft_seconds": 0.18863715500083345,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 181,
+          "total_tokens": 1381
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "import asyncio\nfrom typing import Any, AsyncIterable, Callable, Iterable, TypeVar\n\nT = TypeVar(\"T\")\nR = TypeVar(\"R\")\n\n\nasync def async_map_ordered(\n    items: Iterable[T], worker: Callable[[T], Any], limit: int\n) -> list[R]:\n    if limit < 1:\n        raise ValueError(\"limit must be >= 1\")\n\n    # Convert to list to handle any finite iterable\n    items_list = list(items)\n    n = len(items_list)\n    results: list[R] = [None] * n\n\n    if n == 0:\n        return results\n\n    # Use a semaphore to limit concurrent workers\n    semaphore = asyncio.Semaphore(limit)\n    tasks: list[asyncio.Task] = []\n\n    async def run_task(index: int, item: T) -> None:\n        async with semaphore:\n            results[index] = await worker(item)\n\n    try:\n        for i, item in enumerate(items_list):\n            task = asyncio.create_task(run_task(i, item))\n            tasks.append(task)\n\n        # Wait for all tasks; if any raises, we handle it below\n        await asyncio.gather(*tasks)\n    except Exception as e:\n        # Cancel all outstanding tasks\n        for task in tasks:\n            if not task.done():\n                task.cancel()\n        # Await all tasks to ensure they are properly cancelled\n        if tasks:\n            await asyncio.gather(*tasks, return_exceptions=True)\n        raise e\n\n    return results",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "order_and_limit",
+          "invalid_limit",
+          "propagates_exception"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "async_map_ordered",
+      "timing": {
+        "decode_tps": 69.36131361126863,
+        "ok": true,
+        "reasoning_text": "",
+        "text": "```python\nimport asyncio\nfrom typing import Any, AsyncIterable, Callable, Iterable, TypeVar\n\nT = TypeVar(\"T\")\nR = TypeVar(\"R\")\n\n\nasync def async_map_ordered(\n    items: Iterable[T], worker: Callable[[T], Any], limit: int\n) -> list[R]:\n    if limit < 1:\n        raise ValueError(\"limit must be >= 1\")\n\n    # Convert to list to handle any finite iterable\n    items_list = list(items)\n    n = len(items_list)\n    results: list[R] = [None] * n\n\n    if n == 0:\n        return results\n\n    # Use a semaphore to limit concurrent workers\n    semaphore = asyncio.Semaphore(limit)\n    tasks: list[asyncio.Task] = []\n\n    async def run_task(index: int, item: T) -> None:\n        async with semaphore:\n            results[index] = await worker(item)\n\n    try:\n        for i, item in enumerate(items_list):\n            task = asyncio.create_task(run_task(i, item))\n            tasks.append(task)\n\n        # Wait for all tasks; if any raises, we handle it below\n        await asyncio.gather(*tasks)\n    except Exception as e:\n        # Cancel all outstanding tasks\n        for task in tasks:\n            if not task.done():\n                task.cancel()\n        # Await all tasks to ensure they are properly cancelled\n        if tasks:\n            await asyncio.gather(*tasks, return_exceptions=True)\n        raise e\n\n    return results\n```",
+        "total_seconds": 5.096671805000369,
+        "ttft_seconds": 0.19351453200033575,
+        "usage": {
+          "completion_tokens": 337,
+          "prompt_tokens": 145,
+          "total_tokens": 482
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "import asyncio\nfrom typing import Any, AsyncIterable, Awaitable, Callable, Iterable, List\n\n\nasync def async_map_ordered(\n    items: Iterable[Any],\n    worker: Callable[[Any], Awaitable[Any]],\n    limit: int,\n) -> List[Any]:\n    if limit < 1:\n        raise ValueError(\"limit must be >= 1\")\n\n    # Convert to list to support any finite iterable\n    items_list = list(items)\n    n = len(items_list)\n    results: List[Any] = [None] * n\n\n    if n == 0:\n        return results\n\n    async def run_task(index: int, item: Any) -> None:\n        results[index] = await worker(item)\n\n    tasks: List[asyncio.Task] = []\n    try:\n        for i, item in enumerate(items_list):\n            if len(tasks) >= limit:\n                # Wait for at least one task to complete before adding more\n                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)\n                # Remove completed tasks from the list\n                for t in done:\n                    tasks.remove(t)\n                # Check if any completed task raised an exception\n                for t in done:\n                    if t.exception() is not None:\n                        raise t.exception()\n            task = asyncio.ensure_future(run_task(i, item))\n            tasks.append(task)\n\n        # Wait for all remaining tasks\n        if tasks:\n            done, pending = await asyncio.wait(tasks)\n            for t in done:\n                if t.exception() is not None:\n                    raise t.exception()\n    except Exception:\n        # Cancel all outstanding tasks and await them\n        for t in tasks:\n            t.cancel()\n        if tasks:\n            await asyncio.gather(*tasks, return_exceptions=True)\n        raise\n\n    return results",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "order_and_limit",
+          "invalid_limit",
+          "propagates_exception"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "async_map_ordered",
+      "timing": {
+        "decode_tps": 64.22730405877033,
+        "ok": true,
+        "reasoning_text": "",
+        "text": "```python\nimport asyncio\nfrom typing import Any, AsyncIterable, Awaitable, Callable, Iterable, List\n\n\nasync def async_map_ordered(\n    items: Iterable[Any],\n    worker: Callable[[Any], Awaitable[Any]],\n    limit: int,\n) -> List[Any]:\n    if limit < 1:\n        raise ValueError(\"limit must be >= 1\")\n\n    # Convert to list to support any finite iterable\n    items_list = list(items)\n    n = len(items_list)\n    results: List[Any] = [None] * n\n\n    if n == 0:\n        return results\n\n    async def run_task(index: int, item: Any) -> None:\n        results[index] = await worker(item)\n\n    tasks: List[asyncio.Task] = []\n    try:\n        for i, item in enumerate(items_list):\n            if len(tasks) >= limit:\n                # Wait for at least one task to complete before adding more\n                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)\n                # Remove completed tasks from the list\n                for t in done:\n                    tasks.remove(t)\n                # Check if any completed task raised an exception\n                for t in done:\n                    if t.exception() is not None:\n                        raise t.exception()\n            task = asyncio.ensure_future(run_task(i, item))\n            tasks.append(task)\n\n        # Wait for all remaining tasks\n        if tasks:\n            done, pending = await asyncio.wait(tasks)\n            for t in done:\n                if t.exception() is not None:\n                    raise t.exception()\n    except Exception:\n        # Cancel all outstanding tasks and await them\n        for t in tasks:\n            t.cancel()\n        if tasks:\n            await asyncio.gather(*tasks, return_exceptions=True)\n        raise\n\n    return results\n```",
+        "total_seconds": 6.492922562998501,
+        "ttft_seconds": 0.18706703699899663,
+        "usage": {
+          "completion_tokens": 406,
+          "prompt_tokens": 145,
+          "total_tokens": 551
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "order_and_limit",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_order_and_limit\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 15, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "invalid_limit",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 28, in test_invalid_limit\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 24, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'async_map_ordered' is not defined\")",
+            "name": "propagates_exception",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 42, in test_propagates_exception\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 194, in run\n    return runner.run(main)\n           ^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/runners.py\", line 118, in run\n    return self._loop.run_until_complete(task)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/asyncio/base_events.py\", line 687, in run_until_complete\n    return future.result()\n           ^^^^^^^^^^^^^^^\n  File \"hidden_tests.py\", line 37, in run\nNameError: name 'async_map_ordered' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "async_map_ordered",
+      "timing": {
+        "decode_tps": 25.22443384154915,
+        "ok": false,
+        "reasoning_text": "We need answer user wants implement Python async_map_ordered. Need provide only code fenced block no prose tests. Must use stdlib. Need think carefully. Now analysis here? We already called with minimal? It says target commentary. I can call again with full analysis? Probably yes. Need final only code.\n\nProblem: Implement async def async_map_ordered(items, worker, limit):\n- Call async worker(item) for each item with at most limit calls active at once.\n- Return results in input order even when completion differs.\n- Accept any finite iterable, not only lists.\n- Raise ValueError if limit < 1.\n- If a worker raises, cancel and await all outstanding work, then re-raise original exception.\n\nNeed robust implementation using asyncio standard library. Need consider items iterable may be async? \"any finite iterable\" likely sync iterable. Could support both? It says accept any finite iterable not only lists. We can consume lazily with iterator. At most limit active calls. Return results in input order. If worker raises, cancel and await all outstanding work then re-raise original exception.\n\nNeed design. Options:\n1) Use asyncio.Semaphore(limit), create tasks for each item as we iterate? But if items is large/infinite? finite but maybe huge; creating all tasks at once may be bad. Need at most limit active, and accept iterable not only lists. Could process in chunks of limit: for chunk from iterator up to limit, start tasks, await gather with return_exceptions=True? If exception occurs, cancel outstanding (other tasks in current chunk) and re-raise. But if we process chunk by chunk, results order preserved because each chunk awaited before next. At most limit active within chunk. This is simple and memory efficient. However \"even when completion order differs\" okay gather returns ordered. If one raises, asyncio.gather cancels others? By default gather: if any child task raises exception, the exception is propagated to caller. Other tasks are not cancelled unless return_exceptions=True? Let's recall: In Python 3.8+? asyncio.gather: \"If a child task raises an exception, it is propagated to the future returned by gather(). Other tasks are not canceled.\" Actually docs: If any child task fails, the exception is immediately propagated... The other tasks continue running unless cancelled? There is note: To cancel all tasks when one fails, use return_exceptions=True and handle. In 3.12 maybe changed? Let's check memory: asyncio.gather(*aws, return_exceptions=False): \"If a child task raises an exception, it is propagated to the caller of gather(). Other tasks are not canceled.\" So need manually cancel outstanding on error. If we use chunked gather with return_exceptions=True, then inspect exceptions; if any, cancel all tasks? But they may already completed/failed. Need await all outstanding work (cancel and await). Then re-raise original exception. Which original? first in input order? \"the original exception\" likely the worker's exception. If multiple fail concurrently, which one? Could be first encountered by gather? With return_exceptions=True, exceptions list ordered; choose first exception in chunk order maybe. But if we want immediate cancellation when any raises, using return_exceptions=True waits for all tasks to finish (including slow ones) before detecting error, not cancel outstanding promptly. Requirement: If a worker raises, cancel and await all outstanding work, then re-raise original. It doesn't explicitly require immediate cancellation on first exception? \"cancel and await all outstanding work\" suggests when one raises, we should cancel others rather than wait for them to complete. Using return_exceptions=True would not cancel; it awaits completion (unless they themselves raise). That may violate. Need implement with task group or manual event to cancel on first failure.\n\nCould use asyncio.TaskGroup? Python 3.11 standard library. But need support maybe older? Standard library only, no version specified. Could assume modern Python? Implementing with TaskGroup easy:\n```\nasync def async_map_ordered(items, worker, limit):\n    if limit < 1: raise ValueError(...)\n    results=[]\n    it=iter(items)\n    while True:\n        chunk=[next(it, sentinel) for _ in range(limit)] # but need stop at end.\n        if not chunk: break\n        async with asyncio.TaskGroup() as tg:\n            tasks = [tg.create_task(worker(item)) for item in chunk]\n        results.extend(t.result() for t in tasks)\n    return results\n```\nTaskGroup cancels all tasks on exception and awaits them, then re-raises ExceptionGroup. But requirement says re-raise original exception, not ExceptionGroup. In Python 3.11 TaskGroup raises ExceptionGroup if any task fails. Could catch BaseExceptionGroup? If only one exception maybe raise its exception? But if multiple, which original? Also worker may raise non-BaseException? All exceptions are BaseException. Need re-raise original exception (singular). If multiple concurrent failures, ambiguous. Could choose first in input order. TaskGroup's ExceptionGroup contains all; we can extract first by task order? But tasks list corresponds chunk order. However if one fails and others cancelled due to cancellation, their exceptions may be CancelledError filtered out? In TaskGroup, on exception it cancels remaining tasks, then raises ExceptionGroup containing original exceptions (not cancellations). If multiple workers raise before cancellation, group has multiple. We can choose first in input order among them. But if worker raises non-Exception? BaseException like KeyboardInterrupt? TaskGroup handles BaseException? It may not catch? Actually TaskGroup catches BaseException from tasks? It uses _TaskGroup._on_task_done; if task.cancelled() ignore? If exception is BaseException, it adds to exceptions and cancels others. At end if exceptions",
+        "text": "",
+        "total_seconds": 47.96695129100044,
+        "ttft_seconds": 0.4336104289996001,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 181,
+          "total_tokens": 1381
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "import copy\n\ndef deep_merge(base, overlay):\n    result = copy.deepcopy(base)\n    for key, value in overlay.items():\n        if value is None:\n            if key in result:\n                del result[key]\n        elif isinstance(value, dict) and isinstance(result.get(key), dict):\n            result[key] = deep_merge(result[key], value)\n        else:\n            result[key] = copy.deepcopy(value)\n    return result",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "recursive_delete_replace",
+          "no_aliases",
+          "none_only_deletes_overlay_key"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "deep_merge",
+      "timing": {
+        "decode_tps": 77.83752279865139,
+        "ok": true,
+        "reasoning_text": "",
+        "text": "```python\nimport copy\n\ndef deep_merge(base, overlay):\n    result = copy.deepcopy(base)\n    for key, value in overlay.items():\n        if value is None:\n            if key in result:\n                del result[key]\n        elif isinstance(value, dict) and isinstance(result.get(key), dict):\n            result[key] = deep_merge(result[key], value)\n        else:\n            result[key] = copy.deepcopy(value)\n    return result\n```",
+        "total_seconds": 1.4757656889996724,
+        "ttft_seconds": 0.1909171190000052,
+        "usage": {
+          "completion_tokens": 101,
+          "prompt_tokens": 127,
+          "total_tokens": 228
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "recursive_delete_replace",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 5, in test_recursive_delete_replace\nNameError: name 'deep_merge' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "no_aliases",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 11, in test_no_aliases\nNameError: name 'deep_merge' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "none_only_deletes_overlay_key",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_none_only_deletes_overlay_key\nNameError: name 'deep_merge' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 1,
+      "task": "deep_merge",
+      "timing": {
+        "decode_tps": 28.111848653315032,
+        "ok": false,
+        "reasoning_text": "We need answer user's request: implement Python function deep_merge(base, overlay). Need return only implementation in one ```python fenced block, no prose/tests. Must use stdlib only. Need think carefully.\n\nProblem: Both args dictionaries. Return a deep copy merge without mutating or aliasing either input. Recursively merge values only when both corresponding values are dictionaries. An overlay value of None deletes that key. Lists and all other values replace base value and must also be deep-copied.\n\nNeed implement robustly. Need consider nested deletion: if overlay has key with None, delete from result even if base had dict/list etc. If overlay key absent, keep base (deep copied). If both dicts, recursively merge. If one or both not dict, replace with deepcopy of overlay value. But what about overlay value None? It deletes key; do not copy None. What about base values that are custom objects? Use copy.deepcopy for all non-dict replacement and maybe for recursive dict creation? Need avoid aliasing inputs: result must be deep copy merge without mutating or aliasing either input. For dicts, we can create new dict and recursively process. For values, use deepcopy. But if both dicts, need not deepcopy entire base then overlay? We can build new dict from base keys with deepcopy of non-dict values; for dict values recurse. Then apply overlay: if key in overlay:\n- if value is None: delete (if present) and do not set.\n- elif isinstance(value, dict): result[key] = deep_merge(result.get(key), value)? But careful: if base had non-dict at that key, should replace with deepcopy of overlay dict? Requirement: Recursively merge values only when both corresponding values are dictionaries. If base value is not dict and overlay is dict, overlay replaces base (deep-copied). So cannot call deep_merge(non_dict, dict) expecting dict. Need handle: if isinstance(overlay_val, dict):\n   if key in result and isinstance(result[key], dict): result[key] = deep_merge(result[key], overlay_val)\n   else: result[key] = deepcopy(overlay_val)\n  else: result[key]=deepcopy(overlay_val) (unless None handled).\n\nBut need ensure base values are deep-copied initially. Approach:\nfrom copy import deepcopy\n\ndef deep_merge(base, overlay):\n    merged = {}\n    for k, v in base.items():\n        if isinstance(v, dict):\n            merged[k] = deep_merge(v, {}) ? That would create recursive empty merge? But if no overlay, need deepcopy. Could use deepcopy(v) or recursively copy. Simpler: merged[k] = deepcopy(v). Then process overlay. However if both dicts and overlay has nested keys, we can call deep_merge(base_val, overlay_val), which will deepcopy base_val internally. That's fine. Need ensure not aliasing. If using deepcopy for all non-dict values and recursive merge for dict/dict, okay.\n\nPotential issue: deepcopy of a dict that contains references to input objects? It copies them. Good.\n\nNeed consider if base or overlay is not dict? Problem says both dictionaries. Could still handle by returning deepcopy(overlay) maybe? But no need. Maybe type check? Not necessary but could be safe. If base/overlay are subclasses of dict? isinstance(v, dict) only true for exact dict and subclasses? isinstance includes subclasses. Requirement values are dictionaries; probably okay. But if custom mapping not dict? It says dictionaries. Use isinstance(value, dict).\n\nNeed ensure overlay None deletes key even if base didn't have it (no effect). If result initially from base deep copied, then overlay processing: for k,v in overlay.items():\n    if v is None: merged.pop(k, None)\n    elif isinstance(v, dict):\n        existing = merged.get(k) # but if existing missing or not dict. Need distinguish key absent vs value None? If base had None and overlay dict, should replace with deepcopy of overlay dict. Using get returns None for both absent and base None; then we can't tell but both lead to replacement (since existing not dict). Good.\n        if isinstance(existing, dict): merged[k] = deep_merge(existing, v)\n        else: merged[k] = deepcopy(v)\n    else:\n        merged[k] = deepcopy(v)\n\nBut initial merged from base: for k,v in base.items():\n   if isinstance(v, dict): maybe we can leave as deepcopy? If later overlay has dict at same key, deep_merge(existing, v) will deepcopy existing again. That's okay but extra copy. Could optimize by not copying until needed? But must avoid aliasing; if no overlay for that key, need deepcopy. Simpler: merged[k] = deepcopy(v). Then if both dicts, call deep_merge(merged[k], v), which copies base dict again and returns new. The previous copied dict becomes garbage. Fine.\n\nBut there is subtlety: If base value is a dict and overlay value is None, we pop; okay. If base value is dict and overlay value non-dict, replace with deepcopy overlay. Good.\n\nNeed consider identity of None? Overlay value of `None` deletes key. What if legitimate value should be None? Spec says None deletes, so no way to set None. Fine.\n\nNeed ensure no mutation: We don't mutate base or overlay. deep_merge doesn't modify inputs. It creates new dict. deepcopy may call __deepcopy__ on objects; standard library only. Good.\n\nPotential issue with recursive merge and deletion in nested dicts: If overlay nested has None, deep_merge will delete from merged subdict. Good.\n\nNeed maybe use copy.deepcopy for base values that are dicts? Could implement custom _copy_value to deepcopy all non-dict and recursively merge dict",
+        "text": "",
+        "total_seconds": 43.0936292539991,
+        "ttft_seconds": 0.4424467230001028,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 163,
+          "total_tokens": 1363
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "recursive_delete_replace",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 5, in test_recursive_delete_replace\nNameError: name 'deep_merge' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "no_aliases",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 11, in test_no_aliases\nNameError: name 'deep_merge' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "none_only_deletes_overlay_key",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_none_only_deletes_overlay_key\nNameError: name 'deep_merge' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "deep_merge",
+      "timing": {
+        "decode_tps": 24.749820643839683,
+        "ok": false,
+        "reasoning_text": "We need answer user's request: implement Python function deep_merge(base, overlay). Need return only code fenced block no prose tests. Must use stdlib. Need careful semantics.\n\nProblem: Both arguments dictionaries. Return a deep copy merge without mutating or aliasing either input. Recursively merge values only when both corresponding values are dictionaries. An overlay value of None deletes that key. Lists and all other values replace base value and must also be deep-copied.\n\nNeed implement def deep_merge(base, overlay):\n- Inputs dicts? It says both arguments are dictionaries. But recursive values may be dict/list/other. Need return new dict.\n- Start with deep copy of base? Then apply overlay: for key,value in overlay.items(): if value is None: delete key (if present). Else if key in result and isinstance(result[key], dict) and isinstance(value, dict): recursively merge. Else set result[key] = deepcopy(value). But careful: If base has key with dict and overlay value non-dict (including list/None? None deletes; other replaces deep copy). If base has key non-dict and overlay dict: replace with deep copy of overlay dict? Since only merge when both corresponding values are dictionaries. So yes if not both dicts, replace.\n- Need no aliasing either input. Use copy.deepcopy for all copied values. Could deepcopy entire base initially then modify; but if we deepcopy base, then set overlay values deepcopy. That's okay. But if recursively merging, need avoid mutating base. If result = deepcopy(base), then for dict-dict case: result[key] = deep_merge(result[key], value)? But result[key] is already a copy of base subdict; deep_merge will return new merged dict without mutating inputs? It may mutate its first argument? We can implement pure by building new dict each recursion. If we call deep_merge(base_sub, overlay_sub) where base_sub from original base (not mutated), returns new dict. That's fine. But if result = deepcopy(base) and then assign recursively, okay.\n- Potential issue: overlay value None deletes key; what about nested? Only top-level overlay None deletes that key. If overlay has key with dict containing None values, recursive merge handles deletion in subdict. Good.\n- Need consider identity of None? Use is None to avoid treating falsey 0 etc. Overlay value of `None` deletes that key. So if value is None: result.pop(key, None). Else if both dicts: result[key] = deep_merge(base.get(key)? Actually base may not have key; but condition both corresponding values are dictionaries means only if key in base and isinstance(base[key], dict) and isinstance(value, dict). If key not in base or base value not dict, replace with deepcopy(value). So use if key in base and isinstance(base[key], dict) and isinstance(value, dict): result[key] = deep_merge(base[key], value). But if we already have result = deepcopy(base), can check result? Better use original base to avoid any accidental. Since no mutation, either okay.\n- Need ensure lists and all other values replace base value and must also be deep-copied. Use copy.deepcopy(value). For dict overlay replacing non-dict or new key: deepcopy(value) will recursively copy nested dicts/lists. Good.\n- Could optimize by not deepcopying base if we build from scratch? But easiest: result = copy.deepcopy(base); then for each overlay item. However, if recursive merge returns new dict and assign to result[key], the previous deepcopied subdict is discarded; okay no mutation. If overlay value None deletes key from result (which is copy). Good.\n- Need import copy inside function or top-level? Return only implementation in fenced block. Could include `import copy` at top. Function uses copy.deepcopy. Standard library allowed.\n- Edge cases: base and overlay may contain non-hashable keys? Dicts require hashable. deepcopy handles.\n- If overlay value is dict but base value is dict, recursive merge; if overlay subvalue None deletes nested key. Good.\n- If overlay value is a custom object that equals None? Use `is None` per spec.\n- Need no aliasing: result = copy.deepcopy(base) ensures no shared with base. For values from overlay, deepcopy. Recursive deep_merge returns new dict; but if it uses deepcopy of its base and overlay values, no aliasing. However, in recursive call, if we pass `base[key]` original and `value` original, function will deepcopy them internally. Good.\n- But potential issue: If result = copy.deepcopy(base), then for key where both dicts, we assign result[key] = deep_merge(base[key], value). That's fine. For keys not in overlay but present in base, they remain deepcopied. For overlay new dict values, deepcopy. No aliasing.\n- Could implement without initial full deepcopy by iterating base and overlay? But need preserve order? Python dicts preserve insertion. Deep merge likely should produce base order then overlay additions/updates? If we start with deepcopy(base), order of existing keys preserved; updated keys remain original position (assignment doesn't change order); new keys appended. That's reasonable. If building from scratch maybe same.\n- Need consider if base or overlay not dict? Spec says both dictionaries, no need validate. But recursive values only merge when both dicts; other types replace.\n- Could there be a case where overlay value is None and key absent: pop default none. Good.\n\nNeed final output exactly:\n```python\nimport copy\n\ndef deep_merge(base, overlay):\n    result = copy.deepcopy(base)\n    for key, value in overlay.items():\n        if value is None:\n            result.pop(key, None)\n        elif key in base and isinstance(base[key], dict) and",
+        "text": "",
+        "total_seconds": 48.63711612299994,
+        "ttft_seconds": 0.19203089700022247,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 163,
+          "total_tokens": 1363
+        }
+      },
+      "url": "http://cpgaming:8000"
+    },
+    {
+      "code": "import copy\n\ndef deep_merge(base, overlay):\n    \"\"\"\n    Deep merge two dictionaries.\n    - Returns a new dictionary (deep copy merge).\n    - Does not mutate or alias either input.\n    - Recursively merges values only when both corresponding values are dicts.\n    - An overlay value of None deletes that key.\n    - Lists and all other values replace the base value and are deep-copied.\n    \"\"\"\n    result = {}\n    for key in base:\n        if key in overlay:\n            if overlay[key] is None:\n                continue\n            base_val = base[key]\n            overlay_val = overlay[key]\n            if isinstance(base_val, dict) and isinstance(overlay_val, dict):\n                result[key] = deep_merge(base_val, overlay_val)\n            else:\n                result[key] = copy.deepcopy(overlay_val)\n        else:\n            result[key] = copy.deepcopy(base[key])\n    for key in overlay:\n        if key not in base:\n            if overlay[key] is None:\n                continue\n            result[key] = copy.deepcopy(overlay[key])\n    return result",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "recursive_delete_replace",
+          "no_aliases",
+          "none_only_deletes_overlay_key"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 2,
+      "task": "deep_merge",
+      "timing": {
+        "decode_tps": 81.93177652911496,
+        "ok": true,
+        "reasoning_text": "",
+        "text": "```python\nimport copy\n\ndef deep_merge(base, overlay):\n    \"\"\"\n    Deep merge two dictionaries.\n    - Returns a new dictionary (deep copy merge).\n    - Does not mutate or alias either input.\n    - Recursively merges values only when both corresponding values are dicts.\n    - An overlay value of None deletes that key.\n    - Lists and all other values replace the base value and are deep-copied.\n    \"\"\"\n    result = {}\n    for key in base:\n        if key in overlay:\n            if overlay[key] is None:\n                continue\n            base_val = base[key]\n            overlay_val = overlay[key]\n            if isinstance(base_val, dict) and isinstance(overlay_val, dict):\n                result[key] = deep_merge(base_val, overlay_val)\n            else:\n                result[key] = copy.deepcopy(overlay_val)\n        else:\n            result[key] = copy.deepcopy(base[key])\n    for key in overlay:\n        if key not in base:\n            if overlay[key] is None:\n                continue\n            result[key] = copy.deepcopy(overlay[key])\n    return result\n```",
+        "total_seconds": 3.2320195470001636,
+        "ttft_seconds": 0.19278763600050297,
+        "usage": {
+          "completion_tokens": 250,
+          "prompt_tokens": 127,
+          "total_tokens": 377
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "import copy\n\ndef deep_merge(base, overlay):\n    result = copy.deepcopy(base)\n    for key, value in overlay.items():\n        if value is None:\n            if key in result:\n                del result[key]\n        elif isinstance(value, dict) and isinstance(result.get(key), dict):\n            result[key] = deep_merge(result[key], value)\n        else:\n            result[key] = copy.deepcopy(value)\n    return result",
+      "endpoint": "local",
+      "grade": {
+        "exit_code": 0,
+        "failures": [],
+        "passed": [
+          "recursive_delete_replace",
+          "no_aliases",
+          "none_only_deletes_overlay_key"
+        ]
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "deep_merge",
+      "timing": {
+        "decode_tps": 77.92512606963611,
+        "ok": true,
+        "reasoning_text": "",
+        "text": "```python\nimport copy\n\ndef deep_merge(base, overlay):\n    result = copy.deepcopy(base)\n    for key, value in overlay.items():\n        if value is None:\n            if key in result:\n                del result[key]\n        elif isinstance(value, dict) and isinstance(result.get(key), dict):\n            result[key] = deep_merge(result[key], value)\n        else:\n            result[key] = copy.deepcopy(value)\n    return result\n```",
+        "total_seconds": 1.4778501019991381,
+        "ttft_seconds": 0.19449569400057953,
+        "usage": {
+          "completion_tokens": 101,
+          "prompt_tokens": 127,
+          "total_tokens": 228
+        }
+      },
+      "url": "http://127.0.0.1:8000"
+    },
+    {
+      "code": "",
+      "endpoint": "cpgaming",
+      "grade": {
+        "exit_code": 0,
+        "failures": [
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "recursive_delete_replace",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 5, in test_recursive_delete_replace\nNameError: name 'deep_merge' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "no_aliases",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 11, in test_no_aliases\nNameError: name 'deep_merge' is not defined\n"
+          },
+          {
+            "error": "NameError(\"name 'deep_merge' is not defined\")",
+            "name": "none_only_deletes_overlay_key",
+            "traceback": "Traceback (most recent call last):\n  File \"<string>\", line 7, in check\n  File \"hidden_tests.py\", line 18, in test_none_only_deletes_overlay_key\nNameError: name 'deep_merge' is not defined\n"
+          }
+        ],
+        "passed": []
+      },
+      "model": "qwen3.8-27b",
+      "round": 3,
+      "task": "deep_merge",
+      "timing": {
+        "decode_tps": 25.937587123941842,
+        "ok": false,
+        "reasoning_text": "We need answer user's request: implement Python function deep_merge(base, overlay). Need return only implementation in one ```python fenced block, no prose/tests. Need think carefully. Requirements:\n- Both args dictionaries.\n- Return a deep copy merge without mutating or aliasing either input.\n- Recursively merge values only when both corresponding values are dictionaries.\n- An overlay value of None deletes that key.\n- Lists and all other values replace base value and must also be deep-copied.\n\nNeed use standard library only. Need likely import copy? Could implement recursive deepcopy to avoid aliasing. Since standard library allowed, can use copy.deepcopy. But need ensure no mutation/aliasing inputs. If we do result = copy.deepcopy(base), then for each key in overlay: if value is None delete; elif isinstance(value, dict) and key in base and isinstance(result[key], dict): result[key] = deep_merge(result[key], value)? But careful: deep_merge returns new dict, not mutating? It can take base as already copied? If we call deep_merge(base_sub, overlay_sub), it will deepcopy base_sub again. That's okay but maybe inefficient. Need ensure no aliasing inputs. Could implement helper merge_into(target, overlay) where target is fresh copy of base; for each key: if None delete; elif dict and existing dict: recursively merge into target[key] (which may be copied from base or newly created? If key not in base and overlay value dict, need deepcopy overlay dict). But requirement says return deep copy merge without mutating/aliasing either input. We can create result = {} and for each key union? Need preserve order? Not specified. Usually merge base then overlay: start with base keys, apply overlay. Could do result = copy.deepcopy(base) then process overlay. That's simplest.\n\nPotential pitfalls:\n- Overlay value None deletes that key. If key not present, no effect.\n- Recursively merge values only when both corresponding values are dictionaries. What if base has dict and overlay non-dict? Replace with deep-copied overlay (including lists). What if base non-dict and overlay dict? Since both corresponding values are not dictionaries (base isn't), replace base value with deep copy of overlay dict. That matches \"only when both ... are dictionaries\".\n- Lists and all other values replace base value and must also be deep-copied. So use copy.deepcopy for any replacement non-dict, and for new keys. For recursive merge into existing dict: if we do result[key] = deep_merge(result[key], overlay_value), that returns a new dict; but result[key] is already deepcopy of base subdict. That's okay. But if we want avoid double copying? Fine.\n- Need not mutate inputs. copy.deepcopy(base) ensures result independent. Then when assigning recursively, no mutation to input. If using helper merge_into(target, overlay), target may be a dict from result (copied). We can mutate target because it's our output, not input. But if key exists and both dicts, we need ensure target[key] is independent of base before mutating. Since result = deepcopy(base), yes. For new keys, assign deepcopy(overlay value) or recursively build. If overlay dict for new key, could call merge_into({}, overlay_value)? Need deep copy. Simpler: use recursive function that returns new dict and doesn't mutate any input except maybe its own newly created target? Let's design robust.\n\nOption 1:\n```python\nimport copy\n\ndef deep_merge(base, overlay):\n    result = copy.deepcopy(base)\n    for key, value in overlay.items():\n        if value is None:\n            result.pop(key, None)\n        elif isinstance(value, dict) and isinstance(result.get(key), dict):\n            result[key] = deep_merge(result[key], value)\n        else:\n            result[key] = copy.deepcopy(value)\n    return result\n```\nBut check aliasing: If overlay has nested dict for existing base dict, we call deep_merge(result[key], value). result[key] is a deepcopy of base subdict. deep_merge will deepcopy it again into its own result and return new dict; assign to result[key]. This creates extra copy but no aliasing. Inputs not mutated. Good.\nBut subtle: If overlay has nested dict for key that exists in base as dict, but inside overlay there is None deletion etc. Works.\nIf overlay value is dict and base key missing or non-dict, else branch deepcopies entire overlay dict. That's correct (replace). But if overlay dict contains None values? They are just values in replacement dict; not deletions because only top-level overlay values delete keys of the dictionary being merged? Requirement: \"An overlay value of `None` deletes that key.\" In recursive merge, when merging two dicts, an overlay subvalue None should delete corresponding key in that subdict. If we simply deepcopy overlay dict for non-recursive replacement (because base not dict), then None values remain as values, which is correct because no base dict to delete from; it's a replacement value. But if both are dicts, recursive deep_merge handles deletions at each level. Good.\n\nPotential issue: `isinstance(result.get(key), dict)` uses result after previous overlay keys processed? Since iterating overlay items, order can matter if duplicate keys impossible in dict. Fine. If base has key with dict and earlier overlay set it to non-dict? Can't same key twice. So okay.\n\nBut requirement \"Lists and all other values replace the base value and must also be deep-copied.\" Our else branch deepcopy(value) for lists, scalars, etc. For new keys too. Good.\n\nCould avoid import copy by custom deepcopy? Standard library allowed; use copy. Need only implementation in fenced block. Could include `",
+        "text": "",
+        "total_seconds": 46.53361055999994,
+        "ttft_seconds": 0.3071951780002564,
+        "usage": {
+          "completion_tokens": 1200,
+          "completion_tokens_details": {
+            "reasoning_tokens": 1200
+          },
+          "prompt_tokens": 163,
+          "total_tokens": 1363
+        }
+      },
+      "url": "http://cpgaming:8000"
+    }
+  ],
+  "rounds": 3,
+  "summary": {
+    "cpgaming": {
+      "fully_correct": 1,
+      "median_decode_tps": 26.57495368486541,
+      "median_total_seconds": 45.74006246799945,
+      "median_ttft_seconds": 0.4336104289996001,
+      "runs": 15,
+      "tests_passed": 3,
+      "tests_total": 45
+    },
+    "local": {
+      "fully_correct": 15,
+      "median_decode_tps": 74.47936540244385,
+      "median_total_seconds": 3.8652611350007646,
+      "median_ttft_seconds": 0.19351453200033575,
+      "runs": 15,
+      "tests_passed": 45,
+      "tests_total": 45
+    }
+  },
+  "tasks": [
+    {
+      "id": "coalesce_ranges",
+      "prompt": "Implement:\n\ndef coalesce_ranges(ranges):\n\n`ranges` is an iterable of inclusive integer `(start, end)` pairs. Normalize a\nreversed pair, merge overlapping or touching ranges (for example `(1, 2)` and\n`(3, 5)`), and return sorted `(start, end)` tuples. Do not mutate the input."
+    },
+    {
+      "id": "topological_order",
+      "prompt": "Implement:\n\ndef topological_order(nodes, edges):\n\n`nodes` is an iterable of unique strings and `edges` contains `(before, after)`\npairs. Return the lexicographically smallest valid topological ordering,\nincluding isolated nodes. Ignore duplicate edges. Raise `ValueError` for an\nedge containing an unknown node or when the graph has a cycle. Do not mutate\nthe inputs."
+    },
+    {
+      "id": "ttl_cache",
+      "prompt": "Implement an `TTLCache` class:\n\nTTLCache(maxsize, clock)\ncache.set(key, value, ttl)\ncache.get(key, default=None)\n\n`clock` is a zero-argument callable returning seconds. Expire an item when\n`clock() >= expiry`. `get` refreshes LRU recency but not expiry. `set` updates\nrecency and expiry. Before capacity eviction, remove expired items; otherwise\nevict the least-recently-used live item. A non-positive TTL must not remain\nstored. Raise `ValueError` when `maxsize < 1`."
+    },
+    {
+      "id": "async_map_ordered",
+      "prompt": "Implement:\n\nasync def async_map_ordered(items, worker, limit):\n\nCall async `worker(item)` for each item with at most `limit` calls active at\nonce. Return results in input order even when completion order differs. Accept\nany finite iterable, not only lists. Raise `ValueError` if `limit < 1`. If a\nworker raises, cancel and await all outstanding work, then re-raise the original\nexception."
+    },
+    {
+      "id": "deep_merge",
+      "prompt": "Implement:\n\ndef deep_merge(base, overlay):\n\nBoth arguments are dictionaries. Return a deep copy merge without mutating or\naliasing either input. Recursively merge values only when both corresponding\nvalues are dictionaries. An overlay value of `None` deletes that key. Lists and\nall other values replace the base value and must also be deep-copied."
+    }
+  ],
+  "temperature": 0.2
+}

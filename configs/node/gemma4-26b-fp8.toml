@@ -14,7 +14,7 @@
 # top_p 0.95). Same base model as the
 # gemma4-26b-a4b-nvfp4 config — sampling is per-model, quant only changes serve flags.
 
-match  = ["gemma4-26b-fp8", "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"]
+match  = ["gemma4-26b-fp8", "gemma4-26b-fp8-mtp", "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"]
 source = "https://huggingface.co/RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
 
 [capabilities]

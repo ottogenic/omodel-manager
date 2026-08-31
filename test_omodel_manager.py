@@ -16,6 +16,7 @@ import json
 import os
 import pathlib
 import socket
+import subprocess
 import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
@@ -398,8 +399,56 @@ class NonBlockingLaunchTests(unittest.TestCase):
         self.assertIn("OTOOLS_LAUNCH_OK", cmd)
         self.assertIn("OTOOLS_LAUNCH_FAILED", cmd)
         self.assertIn("launch-k.log", cmd)
-        self.assertTrue(cmd.rstrip().endswith("&"))   # backgrounds itself
+        self.assertIn("launch-k.pid", cmd)
+        self.assertIn("launch-k.cancel", cmd)
+        self.assertIn("& echo $!", cmd)
         self.assertIn("nohup", cmd)
+        self.assertIn("setsid sh -c", cmd)
+
+    def test_cancel_background_launch_sets_guard_for_running_dispatch(self):
+        completed = SimpleNamespace(returncode=0, stdout="cancelled\n", stderr="")
+        with mock.patch.object(mm.subprocess, "run", return_value=completed) as run:
+            self.assertTrue(mm._cancel_background_launch("k"))
+        command = run.call_args.args[0]
+        self.assertEqual(command[:2], ["sh", "-c"])
+        self.assertIn("launch-k.pid", command[2])
+        self.assertIn("launch-k.cancel", command[2])
+        self.assertIn("kill -TERM -- -$launch_pid", command[2])
+        self.assertIn("while kill -0 -- -$launch_pid", command[2])
+        self.assertIn("kill -KILL -- -$launch_pid", command[2])
+        subprocess.run(["sh", "-n"], input=command[2], text=True, check=True)
+
+    def test_stop_succeeds_when_pending_launch_is_cancelled_before_container_exists(self):
+        key = next(iter(mm.load_config()["models"]))
+        failed_remove = SimpleNamespace(returncode=1, stdout="", stderr="not found")
+        args = SimpleNamespace(target=key, remote=None, yes=True)
+        with mock.patch.object(mm, "need_docker"), \
+                mock.patch.object(mm, "_cancel_background_launch", return_value=True), \
+                mock.patch.object(mm, "docker", return_value=failed_remove), \
+                mock.patch.object(mm.time, "sleep"), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(mm.cmd_stop(args))
+
+    def test_failed_background_dispatch_does_not_report_success(self):
+        key = "glm-4.7-flash"
+        args = SimpleNamespace(
+            key=key, host=None, remote=None, local=True, dry_run=False,
+            foreground=False, keep=True, force=False, no_fetch=True,
+            refresh=False, wait=False, node_only=True,
+        )
+        empty = SimpleNamespace(returncode=0, stdout="", stderr="")
+        failed = SimpleNamespace(returncode=7, stdout="", stderr="dispatch failed")
+        with mock.patch.object(mm, "need_docker"), \
+                mock.patch.object(mm, "resolve_assets", return_value=[]), \
+                mock.patch.object(mm, "list_managed", return_value=[]), \
+                mock.patch.object(mm, "_image_present", return_value=False), \
+                mock.patch.object(mm, "docker", return_value=empty), \
+                mock.patch.object(mm.subprocess, "run", return_value=failed), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()), \
+                self.assertRaises(SystemExit) as raised:
+            mm.cmd_launch(args)
+        self.assertEqual(raised.exception.code, 7)
 
     def test_bg_command_quotes_json_arg(self):
         # A JSON vLLM arg must survive as one shell token inside the backgrounded run.
@@ -566,6 +615,271 @@ class LaunchClusterDispatchTests(unittest.TestCase):
             mm.cmd_launch(self.args(keep=True))
 
 
+class UnifiedInventoryTests(unittest.TestCase):
+    def setUp(self):
+        self.old = (mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.DEVICES_FILE,
+                    mm.DEPLOYMENTS_FILE, mm.REMOTE)
+        root = tempfile.mkdtemp()
+        mm.HOSTS_FILE = os.path.join(root, "hosts")
+        mm.CLUSTERS_FILE = os.path.join(root, "clusters.json")
+        mm.DEVICES_FILE = os.path.join(root, "devices.json")
+        mm.DEPLOYMENTS_FILE = os.path.join(root, "deployments.json")
+        mm.REMOTE = None
+
+    def tearDown(self):
+        (mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.DEVICES_FILE,
+         mm.DEPLOYMENTS_FILE, mm.REMOTE) = self.old
+
+    def test_device_inventory_merges_builtins_hosts_clusters_and_explicit(self):
+        mm.save_hosts([("DGX1", "otto@gpu.example")])
+        mm.save_clusters({"Pair": {"head": "DGX1", "worker": "otto@gpu2.example"}})
+        mm.save_devices({
+            "dgx1": {"hardware": "gb10", "note": "explicit extension"},
+            "B70": {"note": "qualified card"},
+            "lab": {"kind": "node", "target": "user@lab.example"},
+        })
+        devices = mm.device_inventory()
+        self.assertEqual(devices["local"]["kind"], "node")
+        self.assertEqual(devices["b70"]["kind"], "card")
+        self.assertEqual(devices["DGX1"]["target"], "otto@gpu.example")
+        self.assertEqual(devices["DGX1"]["hardware"], "gb10")
+        self.assertEqual(devices["Pair"]["kind"], "cluster")
+        self.assertEqual(devices["Pair"]["member_targets"],
+                         ["otto@gpu.example", "otto@gpu2.example"])
+        self.assertEqual(mm.resolve_device("pAiR")["name"], "Pair")
+
+    def test_device_names_must_be_globally_case_insensitive_unique(self):
+        mm.save_hosts([("gpu", "user@one")])
+        mm.save_clusters({"GPU": {"head": "local", "worker": "user@two"}})
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            mm.device_inventory()
+
+    def test_profile_filters_by_compatible_kind(self):
+        node_key = next(iter(mm.DEFAULT_CONFIG["models"]))
+        cluster_key = next(iter(mm.CLUSTER_PROFILES))
+        self.assertIn(node_key, mm.profile_inventory("node"))
+        self.assertIn(cluster_key, mm.profile_inventory("cluster"))
+        self.assertNotIn(mm.CARD_PROFILE_KEY, mm.profile_inventory("node"))
+        card = mm.profile_inventory("card")[mm.CARD_PROFILE_KEY]
+        self.assertEqual(card["hardware"], "intel-arc-pro-b70")
+        self.assertEqual(card["backend"], "vllm-xpu-docker")
+        self.assertEqual(card["model_config"],
+                         f"card/{mm.CARD_PROFILE_KEY}.toml")
+
+    def test_every_profile_variant_references_an_existing_model_config(self):
+        for profile in mm.profile_inventory().values():
+            for variant in profile["variants"].values():
+                path = os.path.join(mm.CONFIGS_DIR, variant["model_config"])
+                self.assertTrue(os.path.isfile(path), path)
+
+
+class DeploymentContractTests(unittest.TestCase):
+    def setUp(self):
+        self.old = (mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.DEVICES_FILE,
+                    mm.DEPLOYMENTS_FILE)
+        root = tempfile.mkdtemp()
+        mm.HOSTS_FILE = os.path.join(root, "hosts")
+        mm.CLUSTERS_FILE = os.path.join(root, "clusters.json")
+        mm.DEVICES_FILE = os.path.join(root, "devices.json")
+        mm.DEPLOYMENTS_FILE = os.path.join(root, "deployments.json")
+
+    def tearDown(self):
+        (mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.DEVICES_FILE,
+         mm.DEPLOYMENTS_FILE) = self.old
+
+    def test_atomic_deployment_round_trip_is_versioned(self):
+        records = {"dgx1": {"device": "dgx1", "kind": "node", "profile": "model-a",
+                            "served_model": "served-a", "model_config": "model-a",
+                            "base_url": "http://gpu.example:8000/v1"}}
+        mm.save_deployments(records)
+        self.assertEqual(mm.load_deployments(), records)
+        with open(mm.DEPLOYMENTS_FILE) as f:
+            body = json.load(f)
+        self.assertEqual(body["version"], 1)
+        self.assertEqual(body["$otools"], "model_deployments")
+        self.assertEqual(os.stat(mm.DEPLOYMENTS_FILE).st_mode & 0o777, 0o600)
+        self.assertEqual([name for name in os.listdir(os.path.dirname(mm.DEPLOYMENTS_FILE))
+                          if name.startswith(".deployments-")], [])
+
+    def test_endpoint_values_strip_ssh_user_and_use_loopback(self):
+        node_key = next(iter(mm.profile_inventory("node")))
+        node_profile = mm.profile_inventory("node")[node_key]
+        self.assertTrue(os.path.isfile(os.path.join(
+            mm.CONFIGS_DIR, node_profile["variants"]["node"]["model_config"])))
+        remote = {"name": "dgx1", "kind": "node", "target": "otto@gpu.example"}
+        local = {"name": "local", "kind": "node", "target": None}
+        self.assertTrue(mm.deployment_record(remote, node_profile)["base_url"].startswith(
+            "http://gpu.example:"))
+        self.assertTrue(mm.deployment_record(local, node_profile)["base_url"].startswith(
+            "http://127.0.0.1:"))
+
+        cluster_key = next(iter(mm.CLUSTER_PROFILES))
+        cluster_profile = mm.profile_inventory("cluster")[cluster_key]
+        self.assertTrue(os.path.isfile(os.path.join(
+            mm.CONFIGS_DIR, cluster_profile["variants"]["cluster"]["model_config"])))
+        cluster = {"name": "pair", "kind": "cluster", "target": "pair",
+                   "head": "otto@head.example", "worker": "otto@worker.example"}
+        self.assertEqual(mm.deployment_record(cluster, cluster_profile)["base_url"],
+                         f"http://head.example:{mm.CLUSTER_PROFILES[cluster_key]['port']}/v1")
+        card = {"name": "b70", "kind": "card", "target": "local"}
+        card_profile = mm.profile_inventory("card")[mm.CARD_PROFILE_KEY]
+        self.assertEqual(mm.deployment_record(card, card_profile)["base_url"],
+                         "http://127.0.0.1:8000/v1")
+
+
+class DeviceFirstFacadeTests(unittest.TestCase):
+    def setUp(self):
+        self.old = (mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.DEVICES_FILE,
+                    mm.DEPLOYMENTS_FILE, mm.REMOTE)
+        root = tempfile.mkdtemp()
+        mm.HOSTS_FILE = os.path.join(root, "hosts")
+        mm.CLUSTERS_FILE = os.path.join(root, "clusters.json")
+        mm.DEVICES_FILE = os.path.join(root, "devices.json")
+        mm.DEPLOYMENTS_FILE = os.path.join(root, "deployments.json")
+        mm.REMOTE = None
+        mm.save_hosts([("dgx1", "otto@gpu.example")])
+        mm.save_clusters({"pair": {
+            "head": "dgx1", "worker": "otto@gpu2.example",
+            "fabric": {"interfaces": ["eth1"], "head_ips": ["10.0.0.1"],
+                       "worker_ips": ["10.0.0.2"], "ucx_devices": ["mlx5_0:1"],
+                       "mtu": 9000},
+        }})
+        self.node_key = next(iter(mm.profile_inventory("node")))
+        self.cluster_key = next(iter(mm.profile_inventory("cluster")))
+
+    def tearDown(self):
+        (mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.DEVICES_FILE,
+         mm.DEPLOYMENTS_FILE, mm.REMOTE) = self.old
+
+    @staticmethod
+    def args(device=None, model=None):
+        return SimpleNamespace(device=device, model=model, foreground=False, keep=False,
+                               force=False, no_fetch=False, refresh=False, wait=False)
+
+    def test_launch_arities_guide_with_concrete_device_first_commands(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            mm.cmd_device_launch(self.args())
+        self.assertIn("omm launch b70", out.getvalue())
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            mm.cmd_device_launch(self.args("dgx1"))
+        self.assertIn(self.node_key, out.getvalue())
+        self.assertIn(f"omm launch dgx1 {self.node_key}", out.getvalue())
+
+    def test_parser_passes_device_then_model_and_allows_both_omitted(self):
+        with mock.patch.object(mm.sys, "argv", ["omm", "launch", "dgx1", self.node_key]), \
+                mock.patch.object(mm, "cmd_device_launch") as launch:
+            mm.main()
+        parsed = launch.call_args.args[0]
+        self.assertEqual((parsed.device, parsed.model), ("dgx1", self.node_key))
+
+        with mock.patch.object(mm.sys, "argv", ["omm", "launch"]), \
+                mock.patch.object(mm, "cmd_device_launch") as launch:
+            mm.main()
+        parsed = launch.call_args.args[0]
+        self.assertIsNone(parsed.device)
+        self.assertIsNone(parsed.model)
+
+    def test_node_and_cluster_dispatch_are_device_first(self):
+        with mock.patch.object(mm, "_ensure_device_available"), \
+                mock.patch.object(mm, "record_deployment"), \
+                mock.patch.object(mm, "cmd_launch") as node_launch, \
+                contextlib.redirect_stdout(io.StringIO()):
+            mm.cmd_device_launch(self.args("DGX1", self.node_key))
+        forwarded = node_launch.call_args.args[0]
+        self.assertEqual(forwarded.key, self.node_key)
+        self.assertEqual(forwarded.remote, "otto@gpu.example")
+        self.assertTrue(forwarded.node_only)
+        self.assertTrue(forwarded.keep)
+
+        with mock.patch.object(mm, "_ensure_device_available"), \
+                mock.patch.object(mm, "record_deployment"), \
+                mock.patch.object(mm, "cmd_cluster_launch") as cluster_launch, \
+                contextlib.redirect_stdout(io.StringIO()):
+            mm.cmd_device_launch(self.args("pair", self.cluster_key))
+        forwarded = cluster_launch.call_args.args[0]
+        self.assertEqual(forwarded.name, "pair")
+        self.assertEqual(forwarded.profile, self.cluster_key)
+        self.assertFalse(forwarded.dry_run)
+        self.assertEqual(forwarded.cluster_config["head"], "dgx1")
+        self.assertEqual(forwarded.cluster_config["fabric"]["mtu"], 9000)
+
+    def test_explicit_cluster_override_is_forwarded_to_backend(self):
+        mm.save_devices({"pair": {"kind": "cluster", "head": "otto@new-head",
+                                  "worker": "otto@new-worker"}})
+        with mock.patch.object(mm, "_ensure_device_available"), \
+                mock.patch.object(mm, "record_deployment"), \
+                mock.patch.object(mm, "cmd_cluster_launch") as cluster_launch, \
+                contextlib.redirect_stdout(io.StringIO()):
+            mm.cmd_device_launch(self.args("pair", self.cluster_key))
+        forwarded = cluster_launch.call_args.args[0]
+        self.assertEqual(forwarded.cluster_config["head"], "otto@new-head")
+        self.assertEqual(forwarded.cluster_config["worker"], "otto@new-worker")
+
+    def test_plan_uses_dry_run_without_registry_mutation(self):
+        with mock.patch.object(mm, "cmd_launch") as launch, \
+                mock.patch.object(mm, "save_deployments") as save, \
+                contextlib.redirect_stdout(io.StringIO()):
+            mm.cmd_plan(self.args("dgx1", self.node_key))
+        self.assertTrue(launch.call_args.args[0].dry_run)
+        save.assert_not_called()
+
+    def test_card_plan_dispatches_checked_in_helper_with_python(self):
+        helper = SimpleNamespace(DOCKER_RUNNER=None, main=mock.Mock(return_value=0))
+        mm.REMOTE = "otto@wrong-host"
+        with mock.patch.object(mm, "CARD_HELPER", mm.DEFAULT_CARD_HELPER), \
+                mock.patch.object(mm, "_load_card_helper", return_value=helper), \
+                mock.patch.object(mm, "save_deployments") as save, \
+                contextlib.redirect_stdout(io.StringIO()):
+            mm.cmd_plan(self.args("b70", mm.CARD_PROFILE_KEY))
+        helper.main.assert_called_once_with(["plan", "b70", mm.CARD_PROFILE_KEY])
+        self.assertIs(helper.DOCKER_RUNNER, mm.docker)
+        self.assertIsNone(mm.REMOTE)
+        save.assert_not_called()
+
+    def test_aborted_internal_stop_does_not_remove_deployment(self):
+        mm.save_deployments({
+            "dgx1": {"device": "dgx1", "kind": "node", "profile": self.node_key},
+        })
+        args = SimpleNamespace(device="dgx1", yes=False)
+        with mock.patch.object(mm, "cmd_stop", return_value=False), \
+                mock.patch.object(mm, "remove_deployment") as remove:
+            mm.cmd_device_stop(args)
+        remove.assert_not_called()
+
+    def test_aborted_card_stop_does_not_call_helper_or_remove_deployment(self):
+        mm.save_deployments({
+            "b70": {"device": "b70", "kind": "card",
+                    "profile": mm.CARD_PROFILE_KEY},
+        })
+        args = SimpleNamespace(device="b70", yes=False)
+        with mock.patch("builtins.input", return_value="n"), \
+                mock.patch.object(mm, "dispatch_card") as dispatch, \
+                mock.patch.object(mm, "remove_deployment") as remove, \
+                contextlib.redirect_stdout(io.StringIO()):
+            mm.cmd_device_stop(args)
+        dispatch.assert_not_called()
+        remove.assert_not_called()
+
+    def test_public_launch_parser_rejects_backend_tuning_flags(self):
+        for flag in ("--foreground", "--keep", "--force", "--no-fetch",
+                     "--refresh", "--wait"):
+            with self.subTest(flag=flag), \
+                    mock.patch.object(mm.sys, "argv", [
+                        "omm", "launch", "dgx1", self.node_key, flag,
+                    ]), contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit):
+                mm.main()
+
+    def test_old_model_first_order_is_not_guessed(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+            mm.cmd_device_launch(self.args(self.node_key, "dgx1"))
+        self.assertIn("unknown device", err.getvalue())
+
+
 class ListManagedTests(unittest.TestCase):
     """list_managed tells 'can't query the host' (None) from 'nothing running' ([])."""
 
@@ -660,8 +974,9 @@ class PsUnreachableTests(unittest.TestCase):
         body = out.getvalue()
         self.assertLess(body.index("HOST"), body.index("CLUSTER"))
         self.assertIn("Beebo", body)
-        self.assertIn("omm cluster status Beebo", body)
-        self.assertIn("omm cluster health Beebo deepseek-v4-flash-0731", body)
+        self.assertIn("omm health Beebo", body)
+        self.assertIn("omm logs Beebo -f", body)
+        self.assertIn("omm stop Beebo", body)
 
     def test_single_host_model_shows_registered_cluster_membership(self):
         mm.save_clusters({"Beebo": {"head": "dgx1", "worker": "user@b", "fabric": {}}})
@@ -1663,7 +1978,7 @@ class ClusterRegistryTests(unittest.TestCase):
         self.assertTrue(commands)
         self.assertTrue(all(command[:3] == ["docker", "container", "inspect"]
                             for command in commands))
-        self.assertIn("cluster stop spark -y", stderr.getvalue())
+        self.assertIn("stop spark -y", stderr.getvalue())
         verify.assert_not_called()
         drop.assert_not_called()
 
@@ -1705,7 +2020,7 @@ class ClusterRegistryTests(unittest.TestCase):
         })
         self.assertFalse(any(command[:3] == ["docker", "rm", "-f"] for command in commands))
         self.assertIn("Retained rank containers", stderr.getvalue())
-        self.assertIn("cluster stop spark -y", stderr.getvalue())
+        self.assertIn("stop spark -y", stderr.getvalue())
 
     def test_vllm_default_cleanup_accepts_auto_removed_rank(self):
         cfg = self.config()

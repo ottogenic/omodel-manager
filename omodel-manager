@@ -31,17 +31,17 @@ Design:
 
 Stdlib only. Commands:
   omodel-manager install user@192.0.2.101 dgx1 --fix   # bootstrap + name a host
-  omodel-manager --... launch <key> --host dgx1
+  omodel-manager launch dgx1 <key>
   omodel-manager ps                 # running managed containers (default)
   omodel-manager ps --all           # also list other vllm/* containers
-  omodel-manager models             # profiles defined in the config file
-  omodel-manager launch qwen3.6     # launch a profile (detached)
-  omodel-manager launch qwen3.6 --dry-run     # print docker cmd, don't run
-  omodel-manager launch qwen3.6 --foreground  # run -it instead of -d
+  omodel-manager models node        # node-compatible profiles
+  omodel-manager devices            # local, registered hosts, cards, clusters
+  omodel-manager launch local qwen3.6     # device first; launch detached
+  omodel-manager plan local qwen3.6       # print a non-mutating launch plan
   omodel-manager fetch nemotron-3-super-120b-nvfp4   # pre-download its assets
-  omodel-manager stop qwen3.6       # stop+remove (alias: kill)
-  omodel-manager logs qwen3.6 -f    # follow container logs
-  omodel-manager health             # GET /v1/models on each running one
+  omodel-manager stop local         # stop+remove the deployment on a device
+  omodel-manager logs local -f      # follow deployment logs
+  omodel-manager health local       # check the device's current deployment
   omodel-manager config --path|--init|--edit
 """
 
@@ -49,6 +49,7 @@ import argparse
 import concurrent.futures
 import hashlib
 import ipaddress
+import importlib.util
 import json
 import getpass
 import os
@@ -60,10 +61,11 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import urllib.error
 import urllib.request
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 
 def _default_config_path():
@@ -81,6 +83,10 @@ CONFIG_PATH = _default_config_path()
 # Secret store -- kept in ~/.config/otools (NOT next to the script / repo).
 HF_TOKEN_FILE = os.path.expanduser("~/.config/otools/hf_token")
 HOSTS_FILE = os.path.expanduser("~/.config/otools/hosts")  # remote hosts `ps` queries (managed by `install`)
+DEVICES_FILE = os.path.expanduser(os.environ.get(
+    "OMODEL_MANAGER_DEVICES", "~/.config/otools/devices.json"))
+DEPLOYMENTS_FILE = os.path.expanduser(os.environ.get(
+    "OMODEL_MANAGER_DEPLOYMENTS", "~/.config/otools/deployments.json"))
 CLUSTERS_FILE = os.path.expanduser(os.environ.get(
     "OMODEL_MANAGER_CLUSTERS", "~/.config/otools/clusters.json"))
 CLUSTER_DATA_DIR = os.path.expanduser(os.environ.get(
@@ -93,8 +99,14 @@ LABEL_PORT = "otools.port"
 LABEL_CLUSTER = "otools.cluster"
 LABEL_ROLE = "otools.role"
 LABEL_BACKEND = "otools.backend"
+LABEL_DEVICE = "otools.device"
 NAME_PREFIX = "otools-vllm-"
 DEFAULT_IMAGE = "vllm/vllm-openai:nightly"
+DEFAULT_CARD_HELPER = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "utils", "card", "deploy_b70_vllm.py")
+CARD_HELPER = os.environ.get("OMODEL_MANAGER_CARD_HELPER", DEFAULT_CARD_HELPER)
+CARD_PROFILE_KEY = "qwen3.8-27b-gptq-int4-b70"
+CONFIGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs")
 
 # Two-node profiles are deliberately separate from DEFAULT_CONFIG: normal profiles
 # describe one vLLM container, while these require coordinated role-aware lifecycles.
@@ -1866,6 +1878,9 @@ def build_run_argv(key, merged, foreground=False, target=None, keep=False):
 # ============================================================================
 # Commands
 # ============================================================================
+_SUPPRESS_INTERNAL_SUGGESTIONS = False
+
+
 def _prog():
     return sys.argv[0]
 
@@ -1893,6 +1908,8 @@ def _rsuf():
 
 def _suggest(items, header="Next steps"):
     """items: list of (description, command-string). Prints a breadcrumb block."""
+    if _SUPPRESS_INTERNAL_SUGGESTIONS:
+        return
     items = [it for it in items if it]
     if not items:
         return
@@ -1906,12 +1923,11 @@ def cmd_home(args):
     """First-run-friendly landing screen: status + suggested next steps. No docker calls."""
     cfg = load_config()
     models = cfg.get("models", {})
-    sample = next(iter(sorted(models)), "<profile>")
     p, setup_done = _cli_name(), os.path.exists(OTOOLS_SSH_KEY)
     print("otools_model_manager -- manage vLLM Docker containers (local or over SSH)\n")
     print("Status:")
     print(f"  config : {CONFIG_PATH}  ({len(models)} model profile(s))")
-    print(f"  host   : {REMOTE or 'local (no default host; use --host, or set defaults.remote)'}")
+    print(f"  devices: {len(device_inventory())} available (run `{_cli_name()} devices`)")
     print(f"  setup  : {'done -- key ' + OTOOLS_SSH_KEY if setup_done else 'not run yet'}")
     host = REMOTE or "user@host"
     items = []
@@ -1919,9 +1935,9 @@ def cmd_home(args):
         items.append(("Bootstrap + name a host (keyless SSH, docker, HF token)",
                       f"{p} install {host} dgx1 --fix"))
     items += [
-        ("List available models (context, concurrency, use-case)", f"{p} list"),
-        ("Run a model", f"{p} launch {sample}{_rsuf()}"),
-        ("See what's running", f"{p} ps{_rsuf()}"),
+        ("List available models", f"{p} models"),
+        ("Choose a model for the local device", f"{p} launch local"),
+        ("See what's running", f"{p} ps"),
     ]
     _suggest(items, header="Suggested next steps")
 
@@ -1979,6 +1995,260 @@ def save_hosts(pairs):
         print("# Format: `alias<TAB>user@host`  (or a bare `user@host`). Safe to hand-edit.", file=f)
         for alias, target in uniq:
             print(target if alias == target else "%s\t%s" % (alias, target), file=f)
+
+
+def _load_versioned_registry(path, field, contract):
+    """Read one of the public v1 JSON contracts. Missing files are empty."""
+    try:
+        with open(path) as f:
+            body = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"ERROR: could not read {contract} registry {path}: {e}", file=sys.stderr)
+        sys.exit(1)
+    if not isinstance(body, dict) or body.get("version") != 1:
+        print(f"ERROR: {contract} registry {path} must be a version 1 JSON object.",
+              file=sys.stderr)
+        sys.exit(1)
+    records = body.get(field, {})
+    if not isinstance(records, dict):
+        print(f"ERROR: malformed {contract} registry {path}: '{field}' must be an object.",
+              file=sys.stderr)
+        sys.exit(1)
+    if _has_secret_field(records):
+        print(f"ERROR: {contract} registry {path} contains a secret field.", file=sys.stderr)
+        sys.exit(1)
+    return records
+
+
+def _has_secret_field(value):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized = str(key).lower().replace("-", "_")
+            if (normalized in ("token", "password", "secret", "private_key", "api_key")
+                    or normalized.endswith(("_token", "_password", "_secret"))):
+                return True
+            if _has_secret_field(child):
+                return True
+    elif isinstance(value, list):
+        return any(_has_secret_field(item) for item in value)
+    return False
+
+
+def _save_versioned_registry(path, field, records, contract):
+    """Atomically replace a v1 registry with owner-only permissions."""
+    if not isinstance(records, dict):
+        raise TypeError(f"{field} must be a dict")
+    if _has_secret_field(records):
+        raise ValueError(f"{contract} registry cannot contain secret fields")
+    parent = os.path.dirname(path) or "."
+    os.makedirs(parent, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f".{field}-", dir=parent, text=True)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump({"$otools": contract, "version": 1, field: records}, f, indent=2)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def load_devices(path=None):
+    return _load_versioned_registry(path or DEVICES_FILE, "devices", "model_devices")
+
+
+def save_devices(devices, path=None):
+    _save_versioned_registry(path or DEVICES_FILE, "devices", devices, "model_devices")
+
+
+def load_deployments(path=None):
+    return _load_versioned_registry(path or DEPLOYMENTS_FILE, "deployments",
+                                    "model_deployments")
+
+
+def save_deployments(deployments, path=None):
+    _save_versioned_registry(path or DEPLOYMENTS_FILE, "deployments", deployments,
+                             "model_deployments")
+
+
+def _device_collision(name, existing):
+    print(f"ERROR: device name '{name}' conflicts case-insensitively with "
+          f"'{existing['name']}'. Device names must be globally unambiguous.", file=sys.stderr)
+    sys.exit(1)
+
+
+def device_inventory(kind=None):
+    """Normalized card/node/cluster inventory, including legacy host registries."""
+    by_fold = {}
+
+    def add(name, record, override=False):
+        if not isinstance(name, str) or not name.strip():
+            print("ERROR: every device needs a non-empty string name.", file=sys.stderr)
+            sys.exit(1)
+        name = name.strip()
+        folded = name.casefold()
+        current = by_fold.get(folded)
+        if current and not override:
+            _device_collision(name, current)
+        base = current if current and override else {}
+        if not isinstance(record, dict):
+            print(f"ERROR: device '{name}' must be a JSON object.", file=sys.stderr)
+            sys.exit(1)
+        merged = _deep_merge(base, record)
+        merged["name"] = current["name"] if current and override else name
+        if folded == "local":
+            merged["kind"] = "node"
+        elif folded == "b70":
+            merged["kind"] = "card"
+        if merged.get("kind") not in ("card", "node", "cluster"):
+            print(f"ERROR: device '{name}' has invalid kind '{merged.get('kind')}'.",
+                  file=sys.stderr)
+            sys.exit(1)
+        if merged["kind"] == "cluster":
+            head_value, worker_value = merged.get("head"), merged.get("worker")
+            merged["members"] = [head_value, worker_value]
+            merged["member_targets"] = [
+                None if value in (None, "local", "localhost") else resolve_host(value)
+                for value in (head_value, worker_value)
+            ]
+        by_fold[folded] = merged
+
+    add("local", {"kind": "node", "target": None, "builtin": True})
+    add("b70", {"kind": "card", "target": "local", "hardware": "intel-arc-pro-b70",
+                "builtin": True})
+    for alias, target in load_hosts():
+        add(alias, {"kind": "node", "target": target, "source": "hosts"})
+    for name, cfg in load_clusters().items():
+        if not isinstance(cfg, dict):
+            continue
+        head_value, worker_value = cfg.get("head"), cfg.get("worker")
+        record = dict(cfg)
+        record.update({"kind": "cluster", "target": name,
+                       "head": head_value, "worker": worker_value,
+                       "members": [head_value, worker_value],
+                       "member_targets": [
+                           None if value in ("local", "localhost") else resolve_host(value)
+                           for value in (head_value, worker_value)
+                       ], "source": "clusters"})
+        add(name, record)
+    explicit = load_devices()
+    seen_explicit = set()
+    for name, record in explicit.items():
+        folded = name.casefold() if isinstance(name, str) else name
+        if folded in seen_explicit:
+            _device_collision(name, by_fold[folded])
+        seen_explicit.add(folded)
+        add(name, record, override=True)
+    records = {record["name"]: record for record in by_fold.values()
+               if kind is None or record["kind"] == kind}
+    return dict(sorted(records.items(), key=lambda item: item[0].casefold()))
+
+
+def resolve_device(name):
+    if not name:
+        return None
+    matches = [record for record in device_inventory().values()
+               if record["name"].casefold() == name.casefold()]
+    if not matches:
+        available = ", ".join(device_inventory())
+        print(f"ERROR: unknown device '{name}'. Available: {available or '(none)'}.\n"
+              f"Run `{_cli_name()} devices` to inspect devices.", file=sys.stderr)
+        sys.exit(1)
+    return matches[0]
+
+
+def profile_inventory(kind=None):
+    """One row per profile key, with all compatible device kinds attached."""
+    profiles = {}
+
+    def add(key, profile_kind, details):
+        row = profiles.setdefault(key, {"key": key, "kinds": [], "variants": {}})
+        if profile_kind not in row["kinds"]:
+            row["kinds"].append(profile_kind)
+        row["variants"][profile_kind] = details
+        for field in ("served_model", "model_config", "port", "status", "backend",
+                      "hardware", "context", "users", "tok_s", "usecase"):
+            if field not in row and field in details:
+                row[field] = details[field]
+
+    def model_config(profile_kind, *identities):
+        root = os.path.join(CONFIGS_DIR, profile_kind)
+        candidates = []
+        for current, _, files in os.walk(root):
+            for filename in sorted(files):
+                if not filename.endswith(".toml"):
+                    continue
+                path = os.path.join(current, filename)
+                with open(path, "rb") as stream:
+                    declared = tomllib.load(stream).get("match") or []
+                if not isinstance(declared, list):
+                    declared = [declared]
+                candidates.append((
+                    os.path.relpath(path, CONFIGS_DIR).replace(os.sep, "/"),
+                    {str(value).casefold() for value in declared},
+                ))
+        for identity in identities:
+            if not identity:
+                continue
+            matches = [path for path, declared in candidates
+                       if str(identity).casefold() in declared]
+            if len(matches) == 1:
+                return matches[0]
+            if len(matches) > 1:
+                raise RuntimeError(
+                    f"profile identity {identity!r} resolves to multiple {profile_kind} "
+                    f"model configs: {', '.join(matches)}"
+                )
+        joined = ", ".join(str(value) for value in identities if value)
+        raise RuntimeError(
+            f"profile identities [{joined}] resolve to no {profile_kind} model config"
+        )
+
+    cfg = load_config()
+    for key in sorted(cfg.get("models", {})):
+        entry = merge_model(cfg, key)
+        va = entry.get("vllm_args", {})
+        add(key, "node", {
+            "served_model": va.get("served-model-name") or entry.get("model", key),
+            "model_config": model_config(
+                "node", key, va.get("served-model-name"), entry.get("model")),
+            "port": entry.get("port", 8000),
+            "status": entry.get("status", "validated"), "backend": "vllm-docker",
+            "context": va.get("max-model-len") or entry.get("limit", {}).get("context"),
+            "users": va.get("max-num-seqs", 1), "tok_s": entry.get("tok_s"),
+            "usecase": entry.get("usecase", []),
+        })
+    for key in sorted(CLUSTER_PROFILES):
+        entry = CLUSTER_PROFILES[key]
+        add(key, "cluster", {
+            "served_model": entry.get("served_model_name") or entry.get("model", key),
+            "model_config": model_config(
+                "cluster", key, entry.get("served_model_name"), entry.get("model")),
+            "port": entry["port"],
+            "status": entry["status"],
+            "backend": entry["backend"], "context": entry.get("max_model_len"),
+            "users": entry.get("max_num_seqs") or entry.get("max_batch_size", 1),
+            "usecase": entry.get("usecase", []),
+        })
+    add(CARD_PROFILE_KEY, "card", {
+        "served_model": CARD_PROFILE_KEY,
+        "model_config": model_config("card", CARD_PROFILE_KEY), "port": 8000,
+        "status": "validated", "hardware": "intel-arc-pro-b70",
+        "backend": "vllm-xpu-docker", "users": 1, "usecase": [],
+    })
+    for row in profiles.values():
+        row["kinds"].sort(key=("card", "node", "cluster").index)
+        row["kind"] = row["kinds"][0] if len(row["kinds"]) == 1 else None
+    if kind:
+        profiles = {key: row for key, row in profiles.items() if kind in row["kinds"]}
+    return dict(sorted(profiles.items()))
 
 
 def _host_machine_id(target):
@@ -3910,7 +4180,8 @@ def cmd_ps(args):
         targets = [REMOTE]
         show_idle = False
     elif registered:
-        targets = [t for _, t in registered]
+        # A remote registry must not hide local node or card containers.
+        targets = [t for _, t in registered] + ([None] if shutil.which("docker") else [])
         show_idle = True
     else:
         targets = [None]
@@ -3918,7 +4189,7 @@ def cmd_ps(args):
 
     if None in targets:
         need_docker()
-    elif any(targets) and not shutil.which("ssh"):
+    if any(targets) and not shutil.which("ssh"):
         print("ERROR: `ssh` not found on PATH (needed for --host).", file=sys.stderr)
         sys.exit(1)
     targets = _dedupe_host_targets(targets, machine_ids)
@@ -3939,8 +4210,8 @@ def cmd_ps(args):
         print("No running managed vLLM containers."
               + ("" if args.all else "  (try --all to include unmanaged ones)"))
         _suggest([
-            ("List available models", f"{p} list"),
-            ("Run a model", f"{p} launch <profile>{_rsuf()}"),
+            ("List available devices", f"{p} devices"),
+            ("Choose a model for the local device", f"{p} launch local"),
         ])
         return
 
@@ -3969,17 +4240,14 @@ def cmd_ps(args):
                     for r in all_rows if _label(r.get("Labels", ""), LABEL_CLUSTER)]
     if cluster_rows:
         row, cluster = cluster_rows[0]
-        profile = _label(row.get("Labels", ""), LABEL_MODEL) or "<profile>"
         _suggest([
-            ("Inspect the cluster", f"{p} cluster status {cluster}"),
-            ("Check cluster readiness", f"{p} cluster health {cluster} {profile}"),
-            ("Follow cluster logs", f"{p} cluster logs {cluster} {profile} -f"),
-            ("Stop the cluster", f"{p} cluster stop {cluster}"),
+            ("Check cluster readiness", f"{p} health {cluster}"),
+            ("Follow cluster logs", f"{p} logs {cluster} -f"),
+            ("Stop the cluster", f"{p} stop {cluster}"),
         ])
     elif all_rows:                                   # address a one-node model by its stable host
         fh = all_rows[0].get("_host")
-        ref = hlabel(fh) if fh else (_label(all_rows[0].get("Labels", ""), LABEL_MODEL)
-                                     or all_rows[0].get("Names"))
+        ref = hlabel(fh) if fh else "local"
         _suggest([
             ("View a model's logs (by host; Ctrl-C to stop)", f"{p} logs {ref} -f"),
             ("Check readiness", f"{p} health {ref}"),
@@ -3988,8 +4256,8 @@ def cmd_ps(args):
     else:
         idle = [hlabel(t) for t in targets if state.get(t) == "idle"]
         _suggest([
-            ("Launch on a free host", f"{p} launch <profile> {idle[0] if idle else '<host>'}"),
-            ("List available models", f"{p} list"),
+            ("Choose a model for a free device", f"{p} launch {idle[0] if idle else 'local'}"),
+            ("List available models", f"{p} models"),
         ])
 
 
@@ -4682,7 +4950,7 @@ def _launch_vllm_cluster(profile_key, profile, cfg, dry=False, startup_timeout=1
             existing.append(f"{role} {name}")
     if existing:
         print("ERROR: cluster rank container(s) already exist: " + ", ".join(existing) + ". "
-              f"Run `{_cli_name()} cluster stop {cfg['name']} -y` before relaunching.",
+              f"Run `{_cli_name()} stop {cfg['name']} -y` before relaunching.",
               file=sys.stderr)
         sys.exit(1)
 
@@ -4775,9 +5043,9 @@ def _launch_vllm_cluster(profile_key, profile, cfg, dry=False, startup_timeout=1
             action = "stop retained" if keep else "remove"
             print(f"ERROR: cleanup could not {action}: " + ", ".join(failures), file=sys.stderr)
         if keep and started:
-            print(f"Retained rank containers. Inspect with `{_cli_name()} cluster logs "
-                  f"{cfg['name']} {profile_key} --role head` (or `--role worker`), then remove "
-                  f"them with `{_cli_name()} cluster stop {cfg['name']} -y`.", file=sys.stderr)
+            print(f"Retained rank containers. Inspect with `{_cli_name()} logs "
+                  f"{cfg['name']} head -f` (or role `worker`), then remove them with "
+                  f"`{_cli_name()} stop {cfg['name']} -y`.", file=sys.stderr)
         if isinstance(e, KeyboardInterrupt):
             raise
         sys.exit(1)
@@ -5159,7 +5427,7 @@ def _launch_deepseek_cluster(profile_key, profile, cfg, dry=False, startup_timeo
 
 
 def cmd_cluster_launch(args):
-    cfg = cluster_config(args.name)
+    cfg = getattr(args, "cluster_config", None) or cluster_config(args.name)
     profile = cluster_profile(args.profile)
     keep = getattr(args, "keep", False)
     if keep and profile["backend"] != "vllm-mp":
@@ -5183,7 +5451,7 @@ def cmd_cluster_launch(args):
 
 
 def cmd_cluster_status(args):
-    cfg = cluster_config(args.name)
+    cfg = getattr(args, "cluster_config", None) or cluster_config(args.name)
     cluster_name = cfg["name"]
     head, worker = _cluster_targets(cfg)
     print(f"{'ROLE':<8} {'HOST':<18} {'CONTAINER':<55} STATUS")
@@ -5209,13 +5477,13 @@ def cmd_cluster_status(args):
 
 
 def cmd_cluster_stop(args):
-    cfg = cluster_config(args.name)
+    cfg = getattr(args, "cluster_config", None) or cluster_config(args.name)
     cluster_name = cfg["name"]
     head, worker = _cluster_targets(cfg)
     if not args.yes:
         reply = input(f"Stop all managed ranks in cluster '{cluster_name}'? [y/N] ").strip().lower()
         if reply not in ("y", "yes"):
-            print("Aborted."); return
+            print("Aborted."); return False
     stopped, failures = 0, []
     for role, target in (("head", head), ("worker", worker)):
         rows = list_managed(remote=target, include_stopped=True)
@@ -5236,10 +5504,11 @@ def cmd_cluster_stop(args):
     if failures:
         print("ERROR: " + "; ".join(failures), file=sys.stderr)
         sys.exit(1)
+    return True
 
 
 def cmd_cluster_logs(args):
-    cfg = cluster_config(args.name)
+    cfg = getattr(args, "cluster_config", None) or cluster_config(args.name)
     profile = cluster_profile(args.profile)
     head, worker = _cluster_targets(cfg)
     role, target = ("worker", worker) if args.role == "worker" else ("head", head)
@@ -5257,7 +5526,7 @@ def cmd_cluster_logs(args):
 
 
 def cmd_cluster_health(args):
-    cfg = cluster_config(args.name)
+    cfg = getattr(args, "cluster_config", None) or cluster_config(args.name)
     profile = cluster_profile(args.profile)
     head, _ = _cluster_targets(cfg)
     path = "/health_generate" if profile["backend"] == "trtllm-mpi" else "/v1/models"
@@ -5301,41 +5570,407 @@ def _fmt_tokps(v):
 
 
 def cmd_models(args):
-    cfg = load_config()
-    models = cfg.get("models", {})
+    kind = getattr(args, "kind", None)
+    models = profile_inventory(kind)
     if not models:
-        print("No models defined. Edit the config or run `config --init`.")
+        print(f"No {kind + ' ' if kind else ''}model profiles defined.")
         return
-
     rows = []
-    for key in sorted(models):
-        e = resolve_entry(cfg, key)               # apply `extends` so inherited fields show
-        va = e.get("vllm_args", {})
-        served = va.get("served-model-name") or e.get("model", "?")
-        rows.append((
-            key,
-            served,
-            _fmt_tokens(va.get("max-model-len") or e.get("limit", {}).get("context")),
-            str(va.get("max-num-seqs", 1)),
-            _fmt_tokps(e.get("tok_s")),          # decode tok/s, 1 user @ ~100k (from benchmark)
-            ", ".join(e.get("usecase", [])) or "-",
-        ))
-
-    headers = ("PROFILE", "MODEL", "CONTEXT", "USERS", "Tk/s", "USE-CASE")
+    for key, entry in models.items():
+        selected = entry["variants"].get(kind) if kind else entry["variants"][entry["kinds"][0]]
+        rows.append((key, ",".join(entry["kinds"]), selected.get("served_model", "?"),
+                     _fmt_tokens(selected.get("context")), str(selected.get("users", 1)),
+                     _fmt_tokps(selected.get("tok_s")), selected.get("status", "?")))
+    headers = ("PROFILE", "KINDS", "MODEL", "CONTEXT", "USERS", "Tk/s", "STATUS")
     w = [max(len(str(c)) for c in col) for col in zip(headers, *rows)]
-    print(f"Models defined in {CONFIG_PATH}:\n")
+    print(f"{kind.title() + ' ' if kind else ''}model profiles:\n")
     print("  " + "  ".join(h.ljust(w[i]) for i, h in enumerate(headers)))
     print("  " + "  ".join("-" * w[i] for i in range(len(headers))))
     for r in rows:
         print("  " + "  ".join(str(r[i]).ljust(w[i]) for i in range(len(headers))))
+    compatible = [device for device in device_inventory(kind).values()
+                  if any(device["kind"] in row["kinds"] for row in models.values())]
+    if compatible:
+        device = compatible[0]
+        sample = next(key for key, row in models.items() if device["kind"] in row["kinds"])
+        _suggest([("Plan a deployment", f"{_cli_name()} plan {device['name']} {sample}"),
+                  ("Launch it", f"{_cli_name()} launch {device['name']} {sample}")])
 
-    p, sample, host = _cli_name(), next(iter(sorted(models))), (REMOTE or "user@host")
-    _suggest([
-        ("Run a model", f"{p} launch {sample}{_rsuf()}"),
-        ("Run a model on a specific host", f"{p} launch {sample} --host {host}"),
-        ("Run a model and watch its logs",
-         f"{p} launch {sample} --host {host} && {p} logs {sample} --host {host} -f"),
-    ])
+
+def cmd_devices(args):
+    kind = getattr(args, "kind", None)
+    devices = device_inventory(kind)
+    if not devices:
+        print(f"No {kind + ' ' if kind else ''}devices defined.")
+        return
+    rows = []
+    for name, device in devices.items():
+        target = (", ".join(str(value) for value in device.get("members", [])
+                            if value is not None) if device["kind"] == "cluster"
+                  else device.get("target") or "local")
+        rows.append((name, device["kind"], target))
+    headers = ("DEVICE", "KIND", "TARGET/MEMBERS")
+    widths = [max(len(str(cell)) for cell in column) for column in zip(headers, *rows)]
+    print(f"{kind.title() + ' ' if kind else ''}devices:\n")
+    print("  " + "  ".join(h.ljust(widths[i]) for i, h in enumerate(headers)))
+    print("  " + "  ".join("-" * widths[i] for i in range(len(headers))))
+    for row in rows:
+        print("  " + "  ".join(str(row[i]).ljust(widths[i]) for i in range(len(headers))))
+    if getattr(args, "suggest", True):
+        sample = rows[0][0]
+        _suggest([("See compatible models", f"{_cli_name()} launch {sample}"),
+                  ("List all model profiles", f"{_cli_name()} models")])
+
+
+def _compatible_profiles(device):
+    return profile_inventory(device["kind"])
+
+
+def _host_for_url(target):
+    if not target:
+        return "127.0.0.1"
+    host = str(target).rsplit("@", 1)[-1]
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return host
+
+
+def _device_member_targets(device):
+    targets = device.get("member_targets")
+    if targets is not None:
+        return targets
+    members = device.get("members")
+    if members is None:
+        members = [device.get("head"), device.get("worker")]
+    return [None if value in (None, "local", "localhost") else resolve_host(value)
+            for value in members]
+
+
+def deployment_record(device, profile):
+    variant = profile["variants"][device["kind"]]
+    if device["kind"] == "cluster":
+        targets = _device_member_targets(device)
+        target = targets[0] if targets else None
+    elif device["kind"] == "node":
+        target = device.get("target")
+    else:
+        target = None
+    return {
+        "device": device["name"], "kind": device["kind"], "profile": profile["key"],
+        "served_model": variant["served_model"], "model_config": variant["model_config"],
+        "base_url": f"http://{_host_for_url(target)}:{variant['port']}/v1",
+    }
+
+
+def record_deployment(device, profile):
+    deployments = load_deployments()
+    for name in list(deployments):
+        record = deployments[name]
+        record_name = record.get("device", name) if isinstance(record, dict) else name
+        if str(record_name).casefold() == device["name"].casefold():
+            del deployments[name]
+    deployments[device["name"]] = deployment_record(device, profile)
+    save_deployments(deployments)
+
+
+def remove_deployment(device):
+    deployments = load_deployments()
+    changed = False
+    for name in list(deployments):
+        record = deployments[name]
+        record_name = record.get("device", name) if isinstance(record, dict) else name
+        if str(record_name).casefold() == device["name"].casefold():
+            del deployments[name]
+            changed = True
+    if changed:
+        save_deployments(deployments)
+
+
+def _registered_deployment(device):
+    for name, record in load_deployments().items():
+        if (isinstance(record, dict)
+                and str(record.get("device", name)).casefold() == device["name"].casefold()):
+            return record
+    return None
+
+
+def _current_deployment(device):
+    """Registry-first lookup with label inference for pre-facade deployments."""
+    recorded = _registered_deployment(device)
+    if recorded and recorded.get("profile"):
+        return recorded
+    if device["kind"] == "card":
+        return None
+    if device["kind"] == "cluster":
+        target = (_device_member_targets(device) or [None])[0]
+        cluster_name = device.get("target") or device["name"]
+        rows = list_managed(remote=target, include_stopped=True)
+        matches = [] if rows is None else [row for row in rows
+                   if (_label(row.get("Labels", ""), LABEL_CLUSTER) or "").casefold()
+                   == str(cluster_name).casefold()]
+    else:
+        rows = list_managed(remote=device.get("target"), include_stopped=True)
+        matches = [] if rows is None else rows
+    for row in matches:
+        profile = _label(row.get("Labels", ""), LABEL_MODEL)
+        if profile:
+            return {"device": device["name"], "kind": device["kind"], "profile": profile}
+    return None
+
+
+def _require_current_deployment(device):
+    deployment = _current_deployment(device)
+    if not deployment:
+        print(f"ERROR: no current deployment is known for device '{device['name']}'. "
+              f"Run `{_cli_name()} ps` to inspect runtime state or "
+              f"`{_cli_name()} launch {device['name']}` to choose a model.", file=sys.stderr)
+        sys.exit(1)
+    return deployment
+
+
+def _ensure_device_available(device):
+    if device["kind"] == "card":
+        if _registered_deployment(device):
+            print(f"ERROR: device '{device['name']}' already has a deployment intent. "
+                  f"Stop it with `{_cli_name()} stop {device['name']}` first.", file=sys.stderr)
+            sys.exit(1)
+        return
+    targets = ([device.get("target")] if device["kind"] == "node"
+               else _device_member_targets(device))
+    for target in targets:
+        rows = list_managed(remote=target, include_stopped=True)
+        if rows is None:
+            print(f"ERROR: cannot verify that device '{device['name']}' is available.",
+                  file=sys.stderr)
+            sys.exit(1)
+        pulling = _pulling_keys(target)
+        if rows or pulling:
+            occupied = [_label(row.get("Labels", ""), LABEL_MODEL) or row.get("Names", "?")
+                        for row in rows] + pulling
+            print(f"ERROR: device '{device['name']}' is already reserved by "
+                  f"{', '.join(occupied)}. Stop it with "
+                  f"`{_cli_name()} stop {device['name']}` first.", file=sys.stderr)
+            sys.exit(1)
+
+
+def _call_internal(func, args):
+    global _SUPPRESS_INTERNAL_SUGGESTIONS
+    previous = _SUPPRESS_INTERNAL_SUGGESTIONS
+    _SUPPRESS_INTERNAL_SUGGESTIONS = True
+    try:
+        return func(args)
+    finally:
+        _SUPPRESS_INTERNAL_SUGGESTIONS = previous
+
+
+def _card_helper_command():
+    if (os.path.abspath(CARD_HELPER) == os.path.abspath(DEFAULT_CARD_HELPER)
+            or CARD_HELPER.endswith(".py")):
+        return [sys.executable, CARD_HELPER]
+    return [CARD_HELPER]
+
+
+def _load_card_helper():
+    spec = importlib.util.spec_from_file_location("otools_card_deploy", CARD_HELPER)
+    helper = importlib.util.module_from_spec(spec)
+    helper_dir = os.path.dirname(CARD_HELPER)
+    sys.path.insert(0, helper_dir)
+    try:
+        spec.loader.exec_module(helper)
+    finally:
+        sys.path.remove(helper_dir)
+    return helper
+
+
+def dispatch_card(action, device, profile=None, role=None, follow=False, yes=False,
+                  dry_run=False):
+    """Dispatch card lifecycle to the checked-in helper or an explicit override."""
+    global REMOTE
+    REMOTE = None
+    argv = _card_helper_command() + [action, device["name"]]
+    if profile:
+        argv.append(profile["key"] if isinstance(profile, dict) else profile)
+    if role:
+        argv += ["--role", role]
+    if follow:
+        argv.append("-f")
+    if yes:
+        argv.append("-y")
+    helper_available = (os.path.isfile(CARD_HELPER) if os.path.dirname(CARD_HELPER)
+                        else shutil.which(CARD_HELPER))
+    if not helper_available:
+        print(f"ERROR: card helper '{CARD_HELPER}' is unavailable. Restore the checked-in "
+              "helper or set $OMODEL_MANAGER_CARD_HELPER to an executable.", file=sys.stderr)
+        sys.exit(1)
+    if os.path.abspath(CARD_HELPER) == os.path.abspath(DEFAULT_CARD_HELPER):
+        helper = _load_card_helper()
+        helper.DOCKER_RUNNER = docker
+        result = helper.main(argv[2:])
+        if result:
+            sys.exit(result)
+    else:
+        result = subprocess.run(argv)
+        if result.returncode != 0:
+            sys.exit(result.returncode)
+    return True
+
+
+def _facade_suggestions(device, profile=None, stopped=False):
+    p, name = _cli_name(), device["name"]
+    if stopped:
+        _suggest([("Choose another compatible model", f"{p} launch {name}"),
+                  ("Inspect all devices", f"{p} devices")])
+    elif profile:
+        _suggest([("Check readiness", f"{p} health {name}"),
+                  ("Follow logs", f"{p} logs {name} -f"),
+                  ("Stop this deployment", f"{p} stop {name}")])
+    else:
+        _suggest([("See compatible models", f"{p} launch {name}")])
+
+
+def _dispatch_facade_launch(device, profile, args, dry_run):
+    global REMOTE
+    kind = device["kind"]
+    if kind == "card":
+        return dispatch_card("plan" if dry_run else "launch", device, profile,
+                             dry_run=dry_run)
+    if kind == "cluster":
+        unsupported = [flag for attr, flag in (("foreground", "--foreground"),
+                       ("force", "--force"), ("no_fetch", "--no-fetch"),
+                       ("refresh", "--refresh"), ("wait", "--wait"))
+                       if getattr(args, attr, False)]
+        if unsupported:
+            print("ERROR: these options apply only to node profiles: " + ", ".join(unsupported),
+                  file=sys.stderr)
+            sys.exit(1)
+        return _call_internal(cmd_cluster_launch, argparse.Namespace(
+            name=device.get("target") or device["name"], profile=profile["key"],
+            dry_run=dry_run, startup_timeout=1800,
+            cluster_config=device,
+            keep=CLUSTER_PROFILES[profile["key"]]["backend"] == "vllm-mp"))
+    REMOTE = device.get("target")
+    return _call_internal(cmd_launch, argparse.Namespace(
+        key=profile["key"], host=None, remote=REMOTE, local=REMOTE is None,
+        dry_run=dry_run, foreground=False, keep=True, force=False,
+        no_fetch=False, refresh=False, wait=False, node_only=True,
+        device=device["name"]))
+
+
+def _resolve_facade_operands(args):
+    device = resolve_device(args.device)
+    profiles = _compatible_profiles(device)
+    if not args.model:
+        print(f"Compatible profiles for {device['name']} ({device['kind']}):")
+        for key in profiles:
+            print(f"  {key}")
+        if profiles:
+            sample = next(iter(profiles))
+            _suggest([("Plan this deployment", f"{_cli_name()} plan {device['name']} {sample}"),
+                      ("Launch it", f"{_cli_name()} launch {device['name']} {sample}")])
+        return device, None
+    profile = profiles.get(args.model)
+    if not profile:
+        exact = ", ".join(profiles) or "(none)"
+        print(f"ERROR: model '{args.model}' is not compatible with {device['kind']} device "
+              f"'{device['name']}'. Compatible profiles: {exact}.", file=sys.stderr)
+        sys.exit(1)
+    return device, profile
+
+
+def cmd_device_launch(args):
+    if not args.device:
+        cmd_devices(argparse.Namespace(kind=None, suggest=False))
+        devices = device_inventory()
+        if devices:
+            _suggest([("Choose a model for a device",
+                       f"{_cli_name()} launch {next(iter(devices))}")])
+        return
+    device, profile = _resolve_facade_operands(args)
+    if not profile:
+        return
+    _ensure_device_available(device)
+    _dispatch_facade_launch(device, profile, args, dry_run=False)
+    record_deployment(device, profile)
+    _facade_suggestions(device, profile)
+
+
+def cmd_plan(args):
+    device, profile = _resolve_facade_operands(args)
+    if not profile:
+        return
+    _dispatch_facade_launch(device, profile, args, dry_run=True)
+    _suggest([("Launch this plan", f"{_cli_name()} launch {device['name']} {profile['key']}")])
+
+
+def _node_lifecycle_args(device, deployment, **values):
+    global REMOTE
+    REMOTE = device.get("target")
+    base = {"target": deployment.get("profile"), "remote": REMOTE or "local-facade",
+            "all": False, "tail": 200, "follow": False, "yes": False}
+    base.update(values)
+    return argparse.Namespace(**base)
+
+
+def cmd_device_logs(args):
+    device = resolve_device(args.device)
+    deployment = _require_current_deployment(device)
+    role = args.role or "head"
+    if device["kind"] != "cluster" and args.role:
+        print("ERROR: ROLE is only valid for cluster devices.", file=sys.stderr)
+        sys.exit(1)
+    try:
+        if device["kind"] == "cluster":
+            _call_internal(cmd_cluster_logs, argparse.Namespace(
+                name=device.get("target") or device["name"], profile=deployment["profile"],
+                role=role, follow=args.follow, tail=200, cluster_config=device))
+        elif device["kind"] == "card":
+            dispatch_card("logs", device, deployment["profile"], follow=args.follow)
+        else:
+            _call_internal(cmd_logs, _node_lifecycle_args(
+                device, deployment, follow=args.follow, tail=200))
+    except SystemExit as e:
+        if e.code not in (None, 0):
+            raise
+    _facade_suggestions(device, {"key": deployment["profile"]})
+
+
+def cmd_device_stop(args):
+    device = resolve_device(args.device)
+    deployment = _require_current_deployment(device)
+    if device["kind"] == "cluster":
+        stopped = _call_internal(cmd_cluster_stop, argparse.Namespace(
+            name=device.get("target") or device["name"], yes=args.yes,
+            cluster_config=device))
+    elif device["kind"] == "card":
+        if not args.yes:
+            reply = input(
+                f"Stop the deployment on card '{device['name']}'? [y/N] "
+            ).strip().lower()
+            if reply not in ("y", "yes"):
+                print("Aborted.")
+                return
+        stopped = dispatch_card("stop", device, deployment["profile"], yes=True)
+    else:
+        stopped = _call_internal(cmd_stop, _node_lifecycle_args(
+            device, deployment, yes=args.yes))
+    if stopped is False:
+        return
+    remove_deployment(device)
+    _facade_suggestions(device, stopped=True)
+
+
+def cmd_device_health(args):
+    device = resolve_device(args.device)
+    deployment = _require_current_deployment(device)
+    if device["kind"] == "cluster":
+        _call_internal(cmd_cluster_health, argparse.Namespace(
+            name=device.get("target") or device["name"], profile=deployment["profile"],
+            cluster_config=device))
+    elif device["kind"] == "card":
+        dispatch_card("health", device, deployment["profile"])
+    else:
+        _call_internal(cmd_health, _node_lifecycle_args(device, deployment))
+    _facade_suggestions(device, {"key": deployment["profile"]})
 
 
 def format_run(argv, target=None):
@@ -5453,15 +6088,44 @@ def _launch_bg_command(key, image, run_argv):
     uses (local shell or the remote over SSH). The cache drop happens after the pull and
     right before `docker run`, grouped `|| true` so it can never fail the launch."""
     run_str = "docker " + " ".join(shlex.quote(a) for a in run_argv)
+    cancel = '"$HOME/.config/otools/launch-%s.cancel"' % key
+    pid = '"$HOME/.config/otools/launch-%s.pid"' % key
     steps = [
         "docker pull %s" % shlex.quote(image),
+        "test ! -e %s" % cancel,
         "{ %s || true; }" % DROP_CACHES_CMD,
+        "test ! -e %s" % cancel,
         run_str,
     ]
     inner = "%s && echo OTOOLS_LAUNCH_OK || echo OTOOLS_LAUNCH_FAILED" % " && ".join(steps)
-    log = "$HOME/.config/otools/launch-%s.log" % key
+    log = '"$HOME/.config/otools/launch-%s.log"' % key
     return ('mkdir -p "$HOME/.config/otools"; '
-            "nohup sh -c %s > %s 2>&1 &" % (shlex.quote(inner), log))
+            "rm -f %s %s; nohup setsid sh -c %s > %s 2>&1 & echo $! > %s"
+            % (cancel, pid, shlex.quote(inner), log, pid))
+
+
+def _cancel_background_launch(key, target=None):
+    """Prevent an in-flight cold pull from starting its container."""
+    pid = '"$HOME/.config/otools/launch-%s.pid"' % key
+    log = '"$HOME/.config/otools/launch-%s.log"' % key
+    cancel = '"$HOME/.config/otools/launch-%s.cancel"' % key
+    command = (f"if test -f {pid} && ! grep -qE "
+               f"'OTOOLS_LAUNCH_OK|OTOOLS_LAUNCH_FAILED' {log} 2>/dev/null; "
+               f"then : > {cancel}; launch_pid=$(cat {pid}); "
+               f"case $launch_pid in (*[!0-9]*|'') ;; (*) "
+               f"kill -TERM -- -$launch_pid 2>/dev/null || kill -TERM $launch_pid 2>/dev/null; "
+               f"count=0; while kill -0 -- -$launch_pid 2>/dev/null "
+               f"&& test $count -lt 50; do sleep 0.1; count=$((count + 1)); done; "
+               f"if kill -0 -- -$launch_pid 2>/dev/null; then "
+               f"kill -KILL -- -$launch_pid 2>/dev/null; count=0; "
+               f"while kill -0 -- -$launch_pid 2>/dev/null && test $count -lt 50; "
+               f"do sleep 0.1; count=$((count + 1)); done; fi; "
+               f"if ! kill -0 -- -$launch_pid 2>/dev/null; then echo cancelled; fi;; esac; fi")
+    if target:
+        result = run_remote(target, command, capture=True, batch=True)
+    else:
+        result = subprocess.run(["sh", "-c", command], text=True, capture_output=True)
+    return result.returncode == 0 and result.stdout.strip() == "cancelled"
 
 
 def _launch_status(body):
@@ -5476,7 +6140,7 @@ def _launch_status(body):
 
 
 def cmd_launch(args):
-    if args.key in CLUSTER_PROFILES:
+    if args.key in CLUSTER_PROFILES and not getattr(args, "node_only", False):
         cluster_name = getattr(args, "host", None) or getattr(args, "remote", None)
         if not cluster_name:
             print(f"ERROR: cluster profile '{args.key}' requires a registered cluster: "
@@ -5565,9 +6229,13 @@ def cmd_launch(args):
         print(f"Image '{image}' is not cached {loc}; pulling in the background and starting "
               f"'{args.key}' when it's ready (container '{name}', port {merged['port']}).")
         if REMOTE:
-            run_remote(REMOTE, bg, batch=True)
+            dispatched = run_remote(REMOTE, bg, batch=True)
         else:
-            subprocess.run(["sh", "-c", bg])
+            dispatched = subprocess.run(["sh", "-c", bg])
+        if dispatched.returncode != 0:
+            print(f"ERROR: could not dispatch background launch for '{args.key}'{where}.",
+                  file=sys.stderr)
+            sys.exit(dispatched.returncode)
         p = _cli_name()
         _suggest([
             ("Check pull/launch progress", f"{p} pull-status {args.key}{_rsuf()}"),
@@ -5598,8 +6266,9 @@ def cmd_launch(args):
         time.sleep(5)
         running = docker(["ps", "--format", "{{.Names}}"], capture=True)
         if running.returncode == 0 and name not in running.stdout.split():
+            log_target = getattr(args, "device", args.key)
             print(f"\nWARNING: '{name}' is NOT running ~5s after launch -- it likely crashed on "
-                  f"startup. Read the log:\n  {p} logs {args.key}{_rsuf()}", file=sys.stderr)
+                  f"startup. Read the log:\n  {p} logs {log_target}", file=sys.stderr)
             return
         print(f"\nStarted '{args.key}' (container '{name}'). The vLLM server inside is now "
               f"INITIALIZING -- weights + torch.compile + warmup take a few minutes.")
@@ -5670,19 +6339,22 @@ def cmd_pull_status(args):
         running = any(r.get("Names") == container_name(args.key)
                       for r in list_managed(remote=REMOTE) or [])
         if running:
+            device = _host_label(REMOTE) if REMOTE else "local"
             print(f"'{args.key}': launched directly (image was cached); the container is "
                   f"running{where}. There's no pull to track -- poll `{p} health "
-                  f"{args.key}{_rsuf()}` until READY.")
+                  f"{device}` until READY.")
         else:
+            device = _host_label(REMOTE) if REMOTE else "local"
             print(f"No background launch in progress for '{args.key}'{where}. "
-                  f"Start one with `{p} launch {args.key}{_rsuf()}`.")
+                  f"Start one with `{p} launch {device} {args.key}`.")
         return
     lines = body.strip().splitlines()
     if status == "ok":
+        device = _host_label(REMOTE) if REMOTE else "local"
         print(f"'{args.key}': image pulled and container started{where}.")
         _suggest([
-            ("Check readiness", f"{p} health {args.key}{_rsuf()}"),
-            ("Watch logs", f"{p} logs {args.key}{_rsuf()} -f"),
+            ("Check readiness", f"{p} health {device}"),
+            ("Watch logs", f"{p} logs {device} -f"),
         ])
     elif status == "failed":
         print(f"'{args.key}': background launch FAILED{where}. Last lines:")
@@ -5708,13 +6380,22 @@ def cmd_fetch(args):
 def cmd_stop(args):
     _apply_profile_remote(args)
     need_docker()
+    cfg = load_config(create=False) if os.path.exists(CONFIG_PATH) else {"models": {}}
+    key = args.target if args.target in cfg.get("models", {}) else None
     target = resolve_target(args.target) if args.target else _managed_on(REMOTE)[0]
     if not args.yes:
         reply = input(f"Stop and remove container '{target}'? [y/N] ").strip().lower()
         if reply not in ("y", "yes"):
             print("Aborted.")
-            return
-    res = docker(["rm", "-f", target])
+            return False
+    cancelled = _cancel_background_launch(key, REMOTE) if key else False
+    res = docker(["rm", "-f", target], capture=cancelled)
+    if cancelled and res.returncode != 0:
+        for _ in range(10):
+            time.sleep(0.1)
+            res = docker(["rm", "-f", target], capture=True)
+            if res.returncode == 0:
+                break
     if res.returncode == 0:
         print(f"Stopped {target}.")
         p = _cli_name()
@@ -5723,6 +6404,10 @@ def cmd_stop(args):
             ("Launch a model", f"{p} launch <profile>{_rsuf()}"),
             ("See available models", f"{p} list"),
         ])
+        return True
+    elif cancelled:
+        print(f"Cancelled the pending launch for {key}.")
+        return True
     else:
         sys.exit(res.returncode)
 
@@ -6157,8 +6842,8 @@ def cmd_sync(args):
     if removed:
         print(f"  removed (were local-only or renamed): {', '.join(removed)}")
     _suggest([
-        ("See the refreshed roster", f"{p} list"),
-        ("Run a model", f"{p} launch <profile>{_rsuf()}"),
+        ("See the refreshed roster", f"{p} models"),
+        ("Choose a device and model", f"{p} devices"),
     ])
 
 
@@ -6209,28 +6894,25 @@ def main():
     p.set_defaults(func=cmd_ps)
 
     for alias in ("models", "list"):
-        p = sub.add_parser(alias, help="table of profiles: context, concurrency, use-case")
+        p = sub.add_parser(alias, help="list unified card/node/cluster model profiles")
+        p.add_argument("kind", nargs="?", choices=("card", "node", "cluster"),
+                       help="show profiles compatible with this device kind")
         p.set_defaults(func=cmd_models)
 
-    p = sub.add_parser("launch", help="launch a model or two-node cluster profile",
-                       parents=[remote_parent])
-    p.add_argument("key", help="model or cluster profile key (see `models` / `cluster profiles`)")
-    p.add_argument("host", nargs="?", metavar="HOST|CLUSTER",
-                   help="host for a model profile, or registered cluster for a cluster profile")
-    p.add_argument("--dry-run", action="store_true", help="print the docker command, don't run")
-    p.add_argument("--foreground", action="store_true", help="run with -it instead of detached -d")
-    p.add_argument("--keep", action="store_true",
-                   help="don't auto-remove on exit (--rm) so a crashed container stays for `logs`")
-    p.add_argument("--force", action="store_true", help="launch even if the port looks busy")
-    p.add_argument("--no-fetch", action="store_true", help="don't download declared assets first")
-    p.add_argument("--refresh", action="store_true", help="re-download assets even if cached")
-    p.add_argument("--wait", action="store_true",
-                   help="pull inline and block until the container starts (default: if the image "
-                        "is uncached, pull + launch in the background and return immediately)")
-    p.add_argument("--local", action="store_true",
-                   help="force a local launch, overriding a config defaults.remote / "
-                        "per-model remote (without it, no host given already means local)")
-    p.set_defaults(func=cmd_launch)
+    p = sub.add_parser("devices", help="list unified card/node/cluster devices")
+    p.add_argument("kind", nargs="?", choices=("card", "node", "cluster"),
+                   help="show only this device kind")
+    p.set_defaults(func=cmd_devices)
+
+    p = sub.add_parser("launch", help="launch MODEL on DEVICE (device first)")
+    p.add_argument("device", nargs="?", metavar="DEVICE", help="device from `devices`")
+    p.add_argument("model", nargs="?", metavar="MODEL", help="compatible profile from `models`")
+    p.set_defaults(func=cmd_device_launch)
+
+    p = sub.add_parser("plan", help="print a non-mutating launch plan for DEVICE MODEL")
+    p.add_argument("device", metavar="DEVICE")
+    p.add_argument("model", metavar="MODEL")
+    p.set_defaults(func=cmd_plan)
 
     p = sub.add_parser("pull", help="pre-pull a profile's image so `launch` starts instantly",
                        parents=[remote_parent])
@@ -6248,27 +6930,21 @@ def main():
     p.add_argument("--refresh", action="store_true", help="re-download even if cached")
     p.set_defaults(func=cmd_fetch)
 
-    for alias in ("stop", "kill"):
-        p = sub.add_parser(alias, help="stop and remove a managed container",
-                           parents=[remote_parent])
-        p.add_argument("target", nargs="?",
-                       help="profile key, container name, or a host (alias/user@ip) running one model")
-        p.add_argument("--yes", "-y", action="store_true", help="skip confirmation")
-        p.set_defaults(func=cmd_stop)
+    p = sub.add_parser("stop", help="stop the deployment on DEVICE")
+    p.add_argument("device", metavar="DEVICE")
+    p.add_argument("--yes", "-y", action="store_true", help="skip confirmation")
+    p.set_defaults(func=cmd_device_stop)
 
-    p = sub.add_parser("logs", help="show/follow a container's logs", parents=[remote_parent])
-    p.add_argument("target", nargs="?",
-                   help="profile key, container name, or a host (alias/user@ip) running one model")
+    p = sub.add_parser("logs", help="show/follow the deployment logs on DEVICE")
+    p.add_argument("device", metavar="DEVICE")
+    p.add_argument("role", nargs="?", choices=("head", "worker"), metavar="ROLE",
+                   help="cluster rank (default: head)")
     p.add_argument("--follow", "-f", action="store_true", help="stream new logs")
-    p.add_argument("--tail", type=int, default=200, help="lines from the end (default 200)")
-    p.set_defaults(func=cmd_logs)
+    p.set_defaults(func=cmd_device_logs)
 
-    p = sub.add_parser("health", help="GET /v1/models on running containers",
-                       parents=[remote_parent])
-    p.add_argument("target", nargs="?",
-                   help="profile key, container name, or a host (default: all running)")
-    p.add_argument("--all", action="store_true", help="include unmanaged vllm containers")
-    p.set_defaults(func=cmd_health)
+    p = sub.add_parser("health", help="check the deployment on DEVICE")
+    p.add_argument("device", metavar="DEVICE")
+    p.set_defaults(func=cmd_device_health)
 
     cluster = sub.add_parser("cluster", help="manage one model across two DGX Sparks")
     cluster_sub = cluster.add_subparsers(dest="cluster_cmd", required=True)
@@ -6324,47 +7000,16 @@ def main():
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_cluster_prepare)
 
-    p = cluster_sub.add_parser("launch", help="launch one profile across both exclusive nodes")
-    p.add_argument("name")
-    p.add_argument("profile", choices=sorted(CLUSTER_PROFILES))
-    p.add_argument("--dry-run", action="store_true", help="print rank commands without host changes")
-    p.add_argument("--startup-timeout", type=int, default=1800, metavar="SECONDS",
-                   help="cluster health, generation, and NET/IB deadline (default: 1800)")
-    p.add_argument("--keep", action="store_true",
-                   help="retain exited vllm-mp rank containers so crash logs survive")
-    p.set_defaults(func=cmd_cluster_launch)
-
-    p = cluster_sub.add_parser("status", help="show managed rank containers on both nodes")
-    p.add_argument("name")
-    p.set_defaults(func=cmd_cluster_status)
-
-    p = cluster_sub.add_parser("stop", help="stop all managed rank containers in a cluster")
-    p.add_argument("name")
-    p.add_argument("--yes", "-y", action="store_true")
-    p.set_defaults(func=cmd_cluster_stop)
-
-    p = cluster_sub.add_parser("logs", help="show one cluster rank's logs")
-    p.add_argument("name")
-    p.add_argument("profile", choices=sorted(CLUSTER_PROFILES))
-    p.add_argument("--role", choices=("head", "worker"), default="head")
-    p.add_argument("--follow", "-f", action="store_true")
-    p.add_argument("--tail", type=int, default=200)
-    p.set_defaults(func=cmd_cluster_logs)
-
-    p = cluster_sub.add_parser("health", help="GET /v1/models from the cluster head API")
-    p.add_argument("name")
-    p.add_argument("profile", choices=sorted(CLUSTER_PROFILES))
-    p.set_defaults(func=cmd_cluster_health)
-
     p = sub.add_parser("install", aliases=["setup"],
                        help="bootstrap/register hosts and discover DGX cluster pairs")
     p.add_argument("target", nargs="?",
                    help="USER@HOST to install (default: this machine); comma-separate several "
                          "(a,b) when giving no alias. "
-                         "Reachable hosts are saved to ~/.config/otools/hosts so `ps` and `--host` "
-                         "find them; an identity-verified NVIDIA Sync pair is registered automatically.")
+                          "Reachable hosts are saved to ~/.config/otools/hosts so `devices` and "
+                          "device-first lifecycle commands find them; an identity-verified NVIDIA "
+                          "Sync pair is registered automatically.")
     p.add_argument("alias", nargs="?",
-                   help="short name for this host, e.g. dgx1 (then `launch <model> --host dgx1`)")
+                   help="short device name, e.g. dgx1 (then `launch dgx1 <model>`)")
     p.add_argument("--fix", action="store_true", help="remediate failures (installs docker, adds "
                                                       "docker group; remote setup also adds SSH keys)")
     p.set_defaults(func=cmd_install)

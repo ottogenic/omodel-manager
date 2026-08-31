@@ -8,7 +8,7 @@
 # each preset carries its own chat_template_kwargs. Nemotron has `low_effort`
 # (a variant), not Qwen's clear/preserve_thinking.
 
-match  = ["nemotron-3-super", "nvidia/nemotron-3-super", "Nemotron-3-Super", "NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4"]
+match  = ["nemotron-3-super", "nemotron-3-super-120b-a12b-nvfp4-256k", "nemotron-3-super-120b-a12b-nvfp4-1m", "nvidia/nemotron-3-super", "Nemotron-3-Super", "NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4"]
 source = "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4"
 thinking_control = "none"     # recipe-level: don't auto-inject; presets set options explicitly
 

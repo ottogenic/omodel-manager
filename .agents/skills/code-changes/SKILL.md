@@ -37,12 +37,13 @@ Top-to-bottom, the meaningful sections:
   `resolve_target` (key ↔ container name), `resolve_host` (alias → `user@host`),
   `load_hosts`/`save_hosts`/`host_targets`, and `_image_present`/`_launch_bg_command`/
   `_launch_status` (the non-blocking launch path).
-- **CLI** — `main()` (argparse subparsers; `--version`; a shared `--host`/`--remote` parent).
+- **CLI** — `main()` (argparse subparsers; `--version`; public lifecycle resolves
+  positional `DEVICE MODEL`, while backend maintenance commands retain scoped options).
 
 ## How to extend
 
-- **New model:** prototype it in your **local `model_manager.json`** (`launch <key>
-  --dry-run`, then launch to validate). Once proven and approved, **promote** it: add the
+- **New model:** prototype it in your **local `model_manager.json`** (`plan DEVICE <key>`,
+  then `launch DEVICE <key>` to validate). Once proven and approved, **promote** it: add the
   `models.<key>` entry (+ `usecase`) to **`DEFAULT_CONFIG`** and commit. `config --init
   --force` regenerates the local JSON from the updated defaults. Verify with `list` and the
   tests. This is the **add-a-model** skill's flow — follow it for onboarding. Respect the
@@ -61,7 +62,7 @@ Top-to-bottom, the meaningful sections:
 python3 -m py_compile omodel-manager     # must pass
 python3 -m unittest                          # test suite (no docker, no network, fast)
 python3 omodel-manager list               # profile table renders
-python3 omodel-manager launch <profile> --dry-run   # exact docker command, masked
+python3 omodel-manager plan local <profile>      # exact docker command, masked
 ```
 
 Prefer `--dry-run` while iterating. Tests must not launch containers, hit the network, or

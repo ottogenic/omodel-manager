@@ -1,0 +1,34 @@
+# Cohere North-Mini-Code 1.0 official W4A16 quant. The launch profile remains
+# blocked until the qualified runtime supports RoutedExperts w2_bias.
+
+match = [
+  "north-mini-code-w4a16",
+  "cohere/north-mini-code",
+  "CohereLabs/North-Mini-Code-1.0-w4a16",
+]
+source = "https://huggingface.co/CohereLabs/North-Mini-Code-1.0-w4a16"
+
+[capabilities]
+vision           = false
+reasoning        = true
+tool_call        = true
+concurrency      = 4
+thinking_control = "none"
+
+[context]
+native       = 262144
+min_thinking = 131072
+
+[presets.plan]
+thinking   = true
+max_output = 65536
+[presets.plan.sampling]
+temperature = 1.0
+top_p       = 0.95
+
+[presets.build]
+thinking   = true
+max_output = 65536
+[presets.build.sampling]
+temperature = 1.0
+top_p       = 0.95
