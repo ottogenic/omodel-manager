@@ -1740,6 +1740,17 @@ class ClusterRegistryTests(unittest.TestCase):
             },
         }
 
+    def test_idempotent_host_probe_retries_ssh_session_failure(self):
+        failed = SimpleNamespace(returncode=255, args=["ssh"], stdout="", stderr="timeout")
+        passed = SimpleNamespace(returncode=0, args=["ssh"], stdout="ok\n", stderr="")
+        with mock.patch.object(mm, "_host_exec", side_effect=[failed, passed]) as execute, \
+                mock.patch.object(mm.time, "sleep") as sleep:
+            result = mm._host_exec_retry("user@host", ["cat", "/etc/machine-id"],
+                                         capture=True, check=True)
+        self.assertEqual(result.stdout, "ok\n")
+        self.assertEqual(execute.call_count, 2)
+        sleep.assert_called_once_with(2)
+
     def vllm_identity_fixture(self):
         profile = dict(mm.CLUSTER_PROFILES["qwen3.8-flash-next-fp8"])
         metadata = {

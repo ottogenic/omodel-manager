@@ -2661,6 +2661,21 @@ def _host_exec(target, args, capture=False, check=False, tty=False):
     return subprocess.run(args, text=True, capture_output=capture, check=check)
 
 
+def _host_exec_retry(target, args, capture=False, check=False, attempts=3):
+    """Retry idempotent host probes when SSH fails before opening a session."""
+    result = None
+    for attempt in range(attempts):
+        result = _host_exec(target, args, capture=capture, check=False)
+        if not target or result.returncode != 255:
+            break
+        if attempt + 1 < attempts:
+            time.sleep(2)
+    if check and result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode, result.args, output=result.stdout, stderr=result.stderr)
+    return result
+
+
 def _host_text(target, args):
     try:
         res = _host_exec(target, args, capture=True)
@@ -3325,9 +3340,9 @@ if total != expected_size:
 print(json.dumps({"sha256": aggregate.hexdigest(), "files": len(files),
                   "shards": len(shards), "size": total}, sort_keys=True))
 '''
-    result = _host_exec(target, ["python3", "-c", script, snapshot,
-                                 profile["model_file_count"], profile["model_size"],
-                                 profile["model_shards"]], capture=True)
+    result = _host_exec_retry(target, ["python3", "-c", script, snapshot,
+                                        profile["model_file_count"], profile["model_size"],
+                                        profile["model_shards"]], capture=True)
     detail = ((result.stdout or "") + ("\n" + result.stderr if result.stderr else "")).strip()
     if result.returncode != 0:
         return None, detail
@@ -3367,7 +3382,7 @@ def _write_host_json(target, path, value):
               "fd,tmp=tempfile.mkstemp(prefix='.certificate-',dir=p.parent,text=True); "
               "os.write(fd,(sys.argv[2]+'\\n').encode()); os.close(fd); os.chmod(tmp,0o600); "
               "os.replace(tmp,p)")
-    _host_exec(target, ["python3", "-c", script, path, body.rstrip("\n")], check=True)
+    _host_exec_retry(target, ["python3", "-c", script, path, body.rstrip("\n")], check=True)
 
 
 def _deepseek_snapshot_identity(target, profile):
@@ -3389,7 +3404,7 @@ print(json.dumps({"files":len(files),"shards":len(shards),
                   "size":sum(x.resolve().stat().st_size for x in files),
                   "metadata_sha256":metadata.hexdigest()},sort_keys=True))
 '''
-    result = _host_exec(target, ["python3", "-c", script, snapshot], capture=True)
+    result = _host_exec_retry(target, ["python3", "-c", script, snapshot], capture=True)
     if result.returncode != 0:
         return None
     try:
@@ -3672,7 +3687,8 @@ def _prepare_deepseek(cfg, profile, build=False, weights=False, dry=False):
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2); f.write("\n")
     for role, target in (("head", head), ("worker", worker)):
-        machine_id = _host_exec(target, ["cat", "/etc/machine-id"], capture=True, check=True)
+        machine_id = _host_exec_retry(
+            target, ["cat", "/etc/machine-id"], capture=True, check=True)
         certificate = {
             "schema": 1,
             "profile_fingerprint": _deepseek_profile_fingerprint(profile),
