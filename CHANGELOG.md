@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **DeepSeek smpcache runtime.** Promoted a qualified derivative over the reviewed c8r
+  image that pins Reederey's promoted indexer-capture, C128A-stride, and cached sampler-state
+  postimages. Its build manifest binds every source tree and file digest, and launch now rejects
+  conflated low/high/max tokenizer mappings before declaring the cluster ready. It passed Beebo
+  quality, 12-way concurrency, 15K-token generation, and cached retrieval at 200K
+  and 943K tokens. A controlled c8r performance A/B found parity at concurrency 1 and no
+  regression at concurrency 2. Smpcache is now the preferred profile; c8r and cand7 remain
+  explicit rollback lanes.
 - **Qwen3.8-Flash-Next FP8 on two DGX Sparks.** Added a digest- and revision-pinned
   `vllm-mp` profile validated on a two-Spark cluster for text, image, reasoning, tools, 240K
   retrieval, and 20 tok/s decode at approximately 50K context. Video is excluded

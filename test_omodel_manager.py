@@ -1586,11 +1586,11 @@ class ClusterProfileTests(unittest.TestCase):
             self.assertEqual(profile["runtime_image"],
                              "otools/trtllm-mpi:1.3.0rc8-reviewed")
 
-    def test_deepseek_uses_official_weights_and_c8r_source_pins(self):
-        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+    def test_deepseek_c8r_rollback_uses_official_weights_and_source_pins(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731-c8r"]
         self.assertEqual(profile["model"], "deepseek-ai/DeepSeek-V4-Flash-0731")
         self.assertEqual(profile["served_model_name"], "deepseek-v4-flash-dspark")
-        self.assertEqual(profile["status"], "validated")
+        self.assertEqual(profile["status"], "rollback")
         self.assertEqual(profile["revision"], "9e165c30e2704aec5d9d593cce3eebd58bbef1cb")
         self.assertEqual(profile["runtime_lane"], "c8r")
         self.assertEqual(profile["runtime_revision"],
@@ -1612,6 +1612,40 @@ class ClusterProfileTests(unittest.TestCase):
         self.assertEqual(profile["max_model_len"], 1048576)
         self.assertEqual(profile["max_num_seqs"], 12)
         self.assertTrue(profile["enable_prefix_caching"])
+
+    def test_deepseek_preferred_profile_pins_promoted_smpcache_chain(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        self.assertEqual(profile["runtime_lane"], "smpcache")
+        self.assertEqual(profile["status"], "validated")
+        self.assertEqual(profile["tok_s"], 38)
+        self.assertEqual(profile["image"],
+                         "otools/vllm-deepseek-v4-flash-0731:smpcache-reviewed")
+        self.assertEqual(profile["runtime_revision"],
+                         "cc0d826b00629240f918bdf9b943feb59074c0d6")
+        self.assertEqual(profile["base_image"],
+                         "otools/vllm-deepseek-v4-flash-0731:c8r-reviewed")
+        self.assertEqual(len(profile["runtime_patch_trees"]), 4)
+        self.assertEqual(len(profile["runtime_files"]), 3)
+        self.assertEqual(
+            profile["runtime_files"]["patches/vllm-0261-main-ixfix/attention.py"]["target"],
+            "models/deepseek_v4/attention.py")
+        self.assertTrue(profile["enable_prefix_caching"])
+
+    def test_deepseek_smpcache_manifest_binds_base_and_patch_postimages(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        manifest = mm._deepseek_manifest_inputs(profile)
+        self.assertEqual(manifest["build_schema"], 5)
+        self.assertEqual(manifest["runtime_lane"], "smpcache")
+        self.assertEqual(manifest["base_image_signature"], profile["base_image_signature"])
+        self.assertEqual(manifest["runtime_patch_trees"], profile["runtime_patch_trees"])
+        self.assertEqual(manifest["runtime_files"], profile["runtime_files"])
+        dockerfile = mm._deepseek_dockerfile(
+            profile, "/usr/local/lib/python3.12/dist-packages/vllm")
+        self.assertIn("FROM ${VLLM_BASE}", dockerfile)
+        self.assertIn("attention.py", dockerfile)
+        self.assertIn("sparse_mla.py", dockerfile)
+        self.assertIn("sampler.py", dockerfile)
+        self.assertNotIn("pip install", dockerfile)
 
     def test_deepseek_cand7_remains_an_isolated_rollback(self):
         profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731-cand7"]
@@ -1654,7 +1688,7 @@ class ClusterProfileTests(unittest.TestCase):
         self.assertEqual(len(mm.DEEPSEEK_VLLM_PREIMAGES), 14)
 
     def test_deepseek_manifest_binds_all_supply_chain_and_model_inputs(self):
-        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731-c8r"]
         manifest = mm._deepseek_manifest_inputs(profile)
         self.assertEqual(manifest["build_schema"], 4)
         self.assertEqual(manifest["runtime_lane"], "c8r")
@@ -1804,7 +1838,7 @@ class ClusterRegistryTests(unittest.TestCase):
         ])
 
     def test_certificate_fast_path_uses_inventory_without_full_hash(self):
-        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731-c8r"]
         snapshot_identity = {"files": 74, "shards": 48, "size": 166898660330,
                              "metadata_sha256": "b" * 64}
         certificate = {
@@ -1826,7 +1860,7 @@ class ClusterRegistryTests(unittest.TestCase):
             self.assertTrue(mm._deepseek_certificate_valid("user@host", profile, certificate))
 
     def test_ensure_deepseek_rebuilds_local_manifest_from_host_certificates(self):
-        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731-c8r"]
         cfg = self.config()
         cfg["head"] = "user@head"
         cfg["worker"] = "user@worker"
@@ -2184,7 +2218,7 @@ class ClusterRegistryTests(unittest.TestCase):
         })
         defaults = json.loads(head[head.index("--default-chat-template-kwargs") + 1])
         self.assertEqual(defaults, {"thinking": True, "reasoning_effort": "high"})
-        self.assertIn("VLLM_CACHE_ROOT=/cache/runtime/vllm-cache-c8r", head)
+        self.assertIn("VLLM_CACHE_ROOT=/cache/runtime/vllm-cache-smpcache", head)
         self.assertIn("NCCL_IB_ADDR_FAMILY=AF_INET", head)
         self.assertIn("--distributed-timeout-seconds", head)
         self.assertNotIn("--enforce-eager", head)
@@ -2193,11 +2227,16 @@ class ClusterRegistryTests(unittest.TestCase):
         self.assertNotIn("--headless", head)
         self.assertIn("--headless", worker)
 
-        rollback = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731-cand7"]
-        _, rollback_head = mm.build_deepseek_cluster_argv(
-            "deepseek-v4-flash-0731-cand7", rollback, cfg, "head", None)
-        self.assertIn("VLLM_CACHE_ROOT=/cache/runtime/vllm-cache-cand7", rollback_head)
-        self.assertNotIn("--enable-prefix-caching", rollback_head)
+        c8r = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731-c8r"]
+        _, c8r_head = mm.build_deepseek_cluster_argv(
+            "deepseek-v4-flash-0731-c8r", c8r, cfg, "head", None)
+        self.assertIn("VLLM_CACHE_ROOT=/cache/runtime/vllm-cache-c8r", c8r_head)
+
+        cand7 = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731-cand7"]
+        _, cand7_head = mm.build_deepseek_cluster_argv(
+            "deepseek-v4-flash-0731-cand7", cand7, cfg, "head", None)
+        self.assertIn("VLLM_CACHE_ROOT=/cache/runtime/vllm-cache-cand7", cand7_head)
+        self.assertNotIn("--enable-prefix-caching", cand7_head)
 
     def test_deepseek_warmups_cover_agent_paths(self):
         profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
@@ -2225,6 +2264,7 @@ class ClusterRegistryTests(unittest.TestCase):
         response = SimpleNamespace(returncode=0, stdout="data: {}\n", stderr="")
         with mock.patch.object(mm, "_deepseek_warmup_requests", return_value=[
                 ("sampled streaming", 10, {"stream": True})]), \
+                mock.patch.object(mm, "_verify_deepseek_effort_encoding"), \
                 mock.patch.object(mm, "_host_exec", return_value=response), \
                 contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
             mm._warm_deepseek_cluster(None, profile)
@@ -2237,6 +2277,7 @@ class ClusterRegistryTests(unittest.TestCase):
             stderr="")
         with mock.patch.object(mm, "_deepseek_warmup_requests", return_value=[
                 ("sampled streaming", 10, {"stream": True})]), \
+                mock.patch.object(mm, "_verify_deepseek_effort_encoding"), \
                 mock.patch.object(mm, "_host_exec", return_value=response), \
                 contextlib.redirect_stdout(io.StringIO()), \
                 self.assertRaisesRegex(RuntimeError, "worker failed"):
@@ -2248,6 +2289,7 @@ class ClusterRegistryTests(unittest.TestCase):
             "choices": [{"message": {"content": "4"}}]}), stderr="")
         with mock.patch.object(mm, "_deepseek_warmup_requests", return_value=[
                 ("think high", 10, {})]), \
+                mock.patch.object(mm, "_verify_deepseek_effort_encoding"), \
                 mock.patch.object(mm, "_host_exec", return_value=response), \
                 contextlib.redirect_stdout(io.StringIO()), \
                 self.assertRaisesRegex(RuntimeError, "emitted no reasoning"):
@@ -2260,10 +2302,32 @@ class ClusterRegistryTests(unittest.TestCase):
             stderr="")
         with mock.patch.object(mm, "_deepseek_warmup_requests", return_value=[
                 ("non-thinking decode", 10, {})]), \
+                mock.patch.object(mm, "_verify_deepseek_effort_encoding"), \
                 mock.patch.object(mm, "_host_exec", return_value=response), \
                 contextlib.redirect_stdout(io.StringIO()), \
                 self.assertRaisesRegex(RuntimeError, "unexpectedly emitted reasoning"):
             mm._warm_deepseek_cluster(None, profile)
+
+    def test_deepseek_effort_encoding_requires_three_ordered_prefixes(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        responses = [
+            (True, json.dumps({"tokens": [1, 2]})),
+            (True, json.dumps({"tokens": [1, 3, 2]})),
+            (True, json.dumps({"tokens": [1, 4, 5, 2]})),
+        ]
+        with mock.patch.object(mm, "_host_text", side_effect=responses):
+            mm._verify_deepseek_effort_encoding(None, profile)
+
+    def test_deepseek_effort_encoding_rejects_conflated_levels(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731"]
+        responses = [
+            (True, json.dumps({"tokens": [1, 2]})),
+            (True, json.dumps({"tokens": [1, 2]})),
+            (True, json.dumps({"tokens": [1, 3, 2]})),
+        ]
+        with mock.patch.object(mm, "_host_text", side_effect=responses), \
+                self.assertRaisesRegex(RuntimeError, "do not encode distinctly"):
+            mm._verify_deepseek_effort_encoding(None, profile)
 
     def test_local_runtime_sync_never_removes_its_source(self):
         cfg = self.config()

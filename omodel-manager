@@ -172,7 +172,7 @@ CLUSTER_PROFILES = {
         "disable_flashinfer_sampling": True,
         "status": "validated",
     },
-    "deepseek-v4-flash-0731": {
+    "deepseek-v4-flash-0731-c8r": {
         "backend": "deepseek-vllm-mp",
         "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
         "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
@@ -206,6 +206,62 @@ CLUSTER_PROFILES = {
         "gpu_memory_utilization": 0.85,
         "kv_cache_memory_bytes": 21316272128,
         "enable_prefix_caching": True,
+        "status": "rollback",
+    },
+    "deepseek-v4-flash-0731": {
+        "backend": "deepseek-vllm-mp",
+        "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+        "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+        "model_file_count": 74,
+        "model_size": 166898660330,
+        "model_shards": 48,
+        "runtime_repo": "https://github.com/Reederey87/dgx-spark-2x-deepseek-v4-flash.git",
+        "runtime_lane": "smpcache",
+        "runtime_revision": "cc0d826b00629240f918bdf9b943feb59074c0d6",
+        "runtime_tree": "807ff2a054d9421b746ae14f5e1b8c832891e48b",
+        "runtime_patch_trees": {
+            "patches/vllm-0261-main-tbfix": "d2f63ceb884776c1ad6cdf9c71db08105e62931b",
+            "patches/vllm-0261-main-ixfix": "7976d6c75f03cbf969ad996fa7cec5ace00f51a0",
+            "patches/vllm-0261-main-c128arev": "db4640441dafd96c11e7bfeea9771bdf48f8e185",
+            "patches/vllm-0261-main-smpcache": "b7d5c3030cb9a123751977834dc4e277696fffcc",
+        },
+        "runtime_files": {
+            "patches/vllm-0261-main-ixfix/attention.py": {
+                "target": "models/deepseek_v4/attention.py",
+                "sha256": "b32959cda1119a013de8b845db8da9c60a401e54c18bb651d68a16fff56591f5",
+            },
+            "patches/vllm-0261-main-c128arev/sparse_mla.py": {
+                "target": "models/deepseek_v4/sparse_mla.py",
+                "sha256": "ffde58338ebe59c63ffc127626f183097d2378b73962b76b5b1952f53b6b0edf",
+            },
+            "patches/vllm-0261-main-smpcache/sampler.py": {
+                "target": "v1/worker/gpu/sample/sampler.py",
+                "sha256": "1d864eec709d01e066abdf7e626c6c37d9a5e9ddec9142f9979e6950f668bc33",
+            },
+        },
+        "vllm_revision": "48bada6ea49ad7f3ecbe03128aa76562089c8b00",
+        "vllm_tree": "f09fd70f445d3213377b8790743a5d37711b6d6e",
+        "deepgemm_revision": "a6b593d2826719dcf4892609af7b84ee23aaf32a",
+        "b12x_revision": "7dc6fb8fcc6446ea093537d1657df81985fa5f43",
+        "b12x_license_provenance": ("Apache-2.0 declared in pyproject metadata; no bundled "
+                                    "license file; operator accepted 2026-08-10"),
+        "flashinfer_version": "0.6.16.post3",
+        "base_image": "otools/vllm-deepseek-v4-flash-0731:c8r-reviewed",
+        "base_image_signature": "f4cccdf85c55cc164e0d6143e0aed73beda3a369e22685e83934b1197f5fffdb",
+        "download_image": ("nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc5@"
+                            "sha256:fd231812c9cacc3cf41eb159a4ec8efefbd998ec51e43337bb9b3b65e559a944"),
+        "image": "otools/vllm-deepseek-v4-flash-0731:smpcache-reviewed",
+        "served_model_name": "deepseek-v4-flash-dspark",
+        "port": 8000,
+        "max_model_len": 1048576,
+        "max_num_seqs": 12,
+        "max_num_batched_tokens": 8192,
+        "long_prefill_token_threshold": 4096,
+        "max_cudagraph_capture_size": 72,
+        "gpu_memory_utilization": 0.85,
+        "kv_cache_memory_bytes": 21316272128,
+        "enable_prefix_caching": True,
+        "tok_s": 38,
         "status": "validated",
     },
     "deepseek-v4-flash-0731-cand7": {
@@ -2820,7 +2876,8 @@ def _clone_reviewed_runtime(profile, dry=False):
         print("ERROR: reviewed DeepSeek runtime checkout is not the expected clean commit.",
               file=sys.stderr)
         sys.exit(1)
-    if profile.get("runtime_lane") == "c8r":
+    lane = profile.get("runtime_lane")
+    if lane == "c8r":
         kit = subprocess.run(
             ["git", "-C", root, "rev-parse", "HEAD:patches/vllm-0261-main-c8r"],
             text=True, capture_output=True, check=True).stdout.strip()
@@ -2832,6 +2889,18 @@ def _clone_reviewed_runtime(profile, dry=False):
             print("ERROR: reviewed DeepSeek c8r kit does not match its pinned trees.",
                   file=sys.stderr)
             sys.exit(1)
+    elif lane == "smpcache":
+        for relative, expected in profile["runtime_patch_trees"].items():
+            tree = subprocess.run(
+                ["git", "-C", root, "rev-parse", f"HEAD:{relative}"], text=True,
+                capture_output=True, check=True).stdout.strip()
+            if tree != expected:
+                print(f"ERROR: reviewed DeepSeek patch kit changed: {relative}", file=sys.stderr)
+                sys.exit(1)
+        for relative, metadata in profile["runtime_files"].items():
+            if _sha256_file(os.path.join(root, relative)) != metadata["sha256"]:
+                print(f"ERROR: reviewed DeepSeek runtime file changed: {relative}", file=sys.stderr)
+                sys.exit(1)
     else:
         patch = os.path.join(root, "patches", "vllm-026-rebase", "gx10-overlay-026.patch")
         if _sha256_file(patch) != profile["runtime_patch_sha256"]:
@@ -2885,6 +2954,36 @@ def _download_verified_source(url, path, expected_sha256):
 
 
 def _deepseek_dockerfile(profile, package_dir):
+    if profile.get("runtime_lane") == "smpcache":
+        copies = []
+        for relative, metadata in profile["runtime_files"].items():
+            name = os.path.basename(relative)
+            copies.append(f"COPY artifacts/{name} ${{VLLM_PKG_DIR}}/{metadata['target']}")
+        return f'''ARG VLLM_BASE={profile["base_image"]}
+FROM ${{VLLM_BASE}}
+ARG VLLM_PKG_DIR={package_dir}
+LABEL org.opencontainers.image.source="{profile["runtime_repo"]}"
+LABEL org.opencontainers.image.revision="{profile["runtime_revision"]}"
+LABEL org.opencontainers.image.description="Reviewed DeepSeek V4 Flash smpcache derivative"
+{chr(10).join(copies)}
+RUN python3 -m py_compile \
+      ${{VLLM_PKG_DIR}}/models/deepseek_v4/attention.py \
+      ${{VLLM_PKG_DIR}}/models/deepseek_v4/sparse_mla.py \
+      ${{VLLM_PKG_DIR}}/v1/worker/gpu/sample/sampler.py && \
+    grep -q 'is_current_stream_capturing' \
+      ${{VLLM_PKG_DIR}}/models/deepseek_v4/attention.py && \
+    ! grep -q 'active_topk_width' \
+      ${{VLLM_PKG_DIR}}/models/deepseek_v4/sparse_mla.py && \
+    grep -q 'global_decode_buffer.stride(0)' \
+      ${{VLLM_PKG_DIR}}/models/deepseek_v4/sparse_mla.py && \
+    ! grep -q '_requires_logits_processing' \
+      ${{VLLM_PKG_DIR}}/v1/worker/gpu/sample/sampler.py && \
+    grep -q 'needs_logits_processing' \
+      ${{VLLM_PKG_DIR}}/v1/worker/gpu/sample/sampler.py && \
+    grep -q 'use_thinking_budget' \
+      ${{VLLM_PKG_DIR}}/v1/worker/gpu/sample/sampler.py
+ENTRYPOINT ["vllm", "serve"]
+'''
     return f'''ARG VLLM_BASE={profile["base_image"]}
 FROM ${{VLLM_BASE}}
 ARG VLLM_PKG_DIR={package_dir}
@@ -2957,9 +3056,38 @@ def _deepseek_runtime_context(profile, dry=False):
     if profile.get("runtime_lane") == "c8r":
         raise RuntimeError("c8r is built by its pinned full-source kit, not the cand7 builder")
     source = _clone_reviewed_runtime(profile, dry=dry)
-    root = os.path.join(CLUSTER_DATA_DIR, "builds", "deepseek-v4-flash-0731")
+    lane = profile.get("runtime_lane")
+    root = (_deepseek_build_dir(profile) if lane == "smpcache" else
+            os.path.join(CLUSTER_DATA_DIR, "builds", "deepseek-v4-flash-0731"))
     if dry:
         print(f"  would stage hash-verified DeepSeek build context: {root}")
+        return root
+    if lane == "smpcache":
+        if os.path.isdir(root):
+            shutil.rmtree(root)
+        artifacts = os.path.join(root, "artifacts")
+        licenses = os.path.join(root, "licenses")
+        os.makedirs(artifacts)
+        os.makedirs(licenses)
+        for relative, metadata in profile["runtime_files"].items():
+            destination = os.path.join(artifacts, os.path.basename(relative))
+            shutil.copyfile(os.path.join(source, relative), destination)
+            if _sha256_file(destination) != metadata["sha256"]:
+                raise RuntimeError(f"staged DeepSeek derivative changed: {relative}")
+        shutil.copyfile(os.path.join(source, "LICENSE"),
+                        os.path.join(licenses, "LICENSE.Apache-2.0"))
+        package_dir = "/usr/local/lib/python3.12/dist-packages/vllm"
+        dockerfile_path = os.path.join(root, "Dockerfile")
+        with open(dockerfile_path, "w") as f:
+            f.write(_deepseek_dockerfile(profile, package_dir))
+        manifest = _deepseek_manifest_inputs(profile)
+        manifest["vllm_package_dir"] = package_dir
+        manifest["dockerfile_sha256"] = _sha256_file(dockerfile_path)
+        manifest["files"] = _tree_manifest(root, excluded=("manifest.json",))
+        canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+        manifest["context_sha256"] = hashlib.sha256(canonical).hexdigest()
+        with open(os.path.join(root, "manifest.json"), "w") as f:
+            json.dump(manifest, f, indent=2); f.write("\n")
         return root
     if os.uname().machine not in ("aarch64", "arm64"):
         raise RuntimeError("DeepSeek overlay extraction must run on an ARM64 control/head host")
@@ -3056,7 +3184,8 @@ def _deepseek_runtime_context(profile, dry=False):
 def _deepseek_runtime_signature(target, image):
     profile = next((value for value in CLUSTER_PROFILES.values()
                     if value.get("image") == image), {})
-    if profile.get("runtime_lane") == "c8r":
+    lane = profile.get("runtime_lane")
+    if lane in ("c8r", "smpcache"):
         overlay_files = [
             "config/cache.py", "config/speculative.py", "config/vllm.py", "envs.py",
             "model_executor/layers/fused_moe/experts/b12x_mxfp4_moe.py",
@@ -3069,6 +3198,18 @@ def _deepseek_runtime_signature(target, image):
             "v1/attention/backends/mla/flashmla_sparse.py",
             "v1/attention/backends/mla/sparse_swa.py", "v1/kv_cache_interface.py",
         ]
+        derivative_checks = ""
+        if lane == "smpcache":
+            overlay_files.append("v1/worker/gpu/sample/sampler.py")
+            derivative_checks = (
+                "assert 'is_current_stream_capturing' in "
+                "(p/'models/deepseek_v4/attention.py').read_text(); "
+                "assert 'active_topk_width' not in "
+                "(p/'models/deepseek_v4/sparse_mla.py').read_text(); "
+                "assert '_requires_logits_processing' not in "
+                "(p/'v1/worker/gpu/sample/sampler.py').read_text(); "
+                "assert 'needs_logits_processing' in "
+                "(p/'v1/worker/gpu/sample/sampler.py').read_text(); ")
         smoke = (
             "import glob,hashlib,importlib.metadata as md,pathlib,vllm,b12x,flashinfer; "
             "p=pathlib.Path(vllm.__file__).parent; "
@@ -3078,6 +3219,7 @@ def _deepseek_runtime_signature(target, image):
             "assert 'upstream guard downgraded' in (p/'config/speculative.py').read_text(); "
             "assert '_dg_sm12x_packed_ue8m0_layout' in (p/'utils/deep_gemm.py').read_text(); "
             "assert 'disable_tp' not in (p/'model_executor/models/qwen3_dspark.py').read_text(); "
+            + derivative_checks +
             "assert glob.glob(str(p/'third_party/deep_gemm/_C.cpython-312-*.so')); "
             "h=hashlib.sha256(); "
             "roots=[pathlib.Path(b12x.__file__).parent,pathlib.Path(flashinfer.__file__).parent,"
@@ -3329,6 +3471,31 @@ def _find_deepseek_image_donor(profile, excluded):
     return None
 
 
+def _ensure_reviewed_base_image(cfg, profile):
+    signature = profile.get("base_image_signature")
+    if not signature:
+        return
+    head, worker = _cluster_targets(cfg)
+    roles = {"head": head, "worker": worker}
+    missing = [target for target in roles.values()
+               if _deepseek_image_signature(target, profile["base_image"]) != signature]
+    if not missing:
+        return
+    donor = next((target for target in roles.values() if target not in missing), None)
+    if donor is None:
+        excluded = set(roles.values())
+        donor = next((target for _, target in load_hosts()
+                      if target not in excluded
+                      and _deepseek_image_signature(target, profile["base_image"]) == signature),
+                     None)
+    if donor is None:
+        raise RuntimeError("certified DeepSeek base image is unavailable on registered hosts")
+    for target in missing:
+        _transfer_deepseek_image(donor, target, profile["base_image"])
+        if _deepseek_image_signature(target, profile["base_image"]) != signature:
+            raise RuntimeError("transferred DeepSeek base image content mismatch")
+
+
 def _ensure_deepseek_deployment(cfg, profile):
     head, worker = _cluster_targets(cfg)
     roles = {"head": head, "worker": worker}
@@ -3433,11 +3600,14 @@ def _prepare_deepseek(cfg, profile, build=False, weights=False, dry=False):
         verified = _verify_deepseek_context(target, remote_context)
         if verified != staged_manifest["context_sha256"]:
             raise RuntimeError(f"DeepSeek build context verification failed on {role}")
+    if profile.get("base_image_signature"):
+        _ensure_reviewed_base_image(cfg, profile)
     remote_contexts = {}
     for role, target in (("head", head), ("worker", worker)):
-        print(f"Pulling official DeepSeek base on {role} ({target or 'local'}) ...")
-        if _host_exec(target, ["docker", "pull", profile["base_image"]]).returncode != 0:
-            raise RuntimeError(f"official DeepSeek base pull failed on {role}")
+        if not profile.get("base_image_signature"):
+            print(f"Pulling official DeepSeek base on {role} ({target or 'local'}) ...")
+            if _host_exec(target, ["docker", "pull", profile["base_image"]]).returncode != 0:
+                raise RuntimeError(f"official DeepSeek base pull failed on {role}")
         architecture = _host_exec(target, ["docker", "image", "inspect", "--format",
                                            "{{.Architecture}}", profile["base_image"]], capture=True)
         if architecture.returncode != 0 or architecture.stdout.strip() != "arm64":
@@ -3457,7 +3627,7 @@ def _prepare_deepseek(cfg, profile, build=False, weights=False, dry=False):
     if not head_signature:
         raise RuntimeError("cannot record the head DeepSeek image signature")
     if worker_signature != head_signature:
-        archive_name = "deepseek-cand7-image.tar.zst"
+        archive_name = f"deepseek-{profile.get('runtime_lane', 'cand7')}-image.tar.zst"
         head_archive = os.path.join(remote_contexts["head"], archive_name)
         worker_archive = os.path.join(remote_contexts["worker"], archive_name)
         for role, target in (("head", head), ("worker", worker)):
@@ -3526,6 +3696,19 @@ def _prepare_deepseek(cfg, profile, build=False, weights=False, dry=False):
     manifest["model_signatures"] = model_signatures
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2); f.write("\n")
+    for role, target in (("head", head), ("worker", worker)):
+        machine_id = _host_exec(target, ["cat", "/etc/machine-id"], capture=True, check=True)
+        certificate = {
+            "schema": 1,
+            "profile_fingerprint": _deepseek_profile_fingerprint(profile),
+            "machine_id": machine_id.stdout.strip(),
+            "image_id": built_images[role],
+            "image_signature": image_signatures[role],
+            "runtime_signature": runtime_signatures[role],
+            "model_signature": model_signatures[role],
+            "snapshot_identity": _deepseek_snapshot_identity(target, profile),
+        }
+        _write_host_json(target, _deepseek_certificate_path(target, profile), certificate)
     print("DeepSeek runtime built and smoke-tested on both nodes; launch still requires fabric.")
 
 
@@ -5054,6 +5237,30 @@ def _launch_vllm_cluster(profile_key, profile, cfg, dry=False, startup_timeout=1
 
 
 def _deepseek_manifest_inputs(profile):
+    if profile.get("runtime_lane") == "smpcache":
+        return {
+            "build_schema": 5,
+            "runtime_lane": "smpcache",
+            "runtime_repository": profile["runtime_repo"],
+            "runtime_commit": profile["runtime_revision"],
+            "runtime_tree": profile["runtime_tree"],
+            "runtime_patch_trees": profile["runtime_patch_trees"],
+            "runtime_files": profile["runtime_files"],
+            "base_image": profile["base_image"],
+            "base_image_signature": profile["base_image_signature"],
+            "vllm_commit": profile["vllm_revision"],
+            "vllm_tree": profile["vllm_tree"],
+            "deepgemm_commit": profile["deepgemm_revision"],
+            "b12x_commit": profile["b12x_revision"],
+            "flashinfer_version": profile["flashinfer_version"],
+            "image": profile["image"],
+            "model": profile["model"],
+            "model_revision": profile["revision"],
+            "model_file_count": profile["model_file_count"],
+            "model_size": profile["model_size"],
+            "model_shards": profile["model_shards"],
+            "build_network": "none",
+        }
     if profile.get("runtime_lane") == "c8r":
         return {
             "build_schema": 4,
@@ -5219,7 +5426,39 @@ def _deepseek_warmup_requests(profile):
     ]
 
 
+def _verify_deepseek_effort_encoding(head, profile):
+    endpoint = f"http://127.0.0.1:{profile['port']}/tokenize"
+    encoded = {}
+    for effort in ("low", "high", "max"):
+        payload = {
+            "model": profile["served_model_name"],
+            "messages": [{"role": "user", "content": "Reply with ok."}],
+            "chat_template_kwargs": {"thinking": True, "reasoning_effort": effort},
+        }
+        ok, body = _host_text(head, [
+            "curl", "--fail-with-body", "-sS", "--max-time", "60",
+            "-H", "Content-Type: application/json", "--data-binary",
+            json.dumps(payload, separators=(",", ":")), endpoint,
+        ])
+        if not ok:
+            raise RuntimeError(f"DeepSeek {effort} tokenization failed: {body[-500:]}")
+        try:
+            response = json.loads(body)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"DeepSeek {effort} tokenization returned invalid JSON: {e}") from e
+        tokens = response.get("tokens")
+        if not isinstance(tokens, list) or not tokens:
+            raise RuntimeError(f"DeepSeek {effort} tokenization returned no token IDs")
+        encoded[effort] = tokens
+    if len({tuple(tokens) for tokens in encoded.values()}) != 3:
+        raise RuntimeError("DeepSeek low/high/max reasoning efforts do not encode distinctly")
+    if not len(encoded["low"]) < len(encoded["high"]) < len(encoded["max"]):
+        raise RuntimeError("DeepSeek reasoning-effort prefixes do not have the expected lengths")
+
+
 def _warm_deepseek_cluster(head, profile):
+    print("Verifying DeepSeek low/high/max tokenizer mapping ...")
+    _verify_deepseek_effort_encoding(head, profile)
     endpoint = f"http://127.0.0.1:{profile['port']}/v1/chat/completions"
     for label, timeout, payload in _deepseek_warmup_requests(profile):
         print(f"Warming DeepSeek {label} path ...")
@@ -5299,8 +5538,8 @@ def _launch_deepseek_cluster(profile_key, profile, cfg, dry=False, startup_timeo
             sys.exit(1)
 
     lane = profile.get("runtime_lane", "cand7")
-    manifest_root = (_deepseek_build_dir(profile) if lane == "c8r" else
-                     os.path.join(CLUSTER_DATA_DIR, "builds", "deepseek-v4-flash-0731"))
+    manifest_root = (_deepseek_build_dir(profile) if lane in ("c8r", "smpcache") else
+                      os.path.join(CLUSTER_DATA_DIR, "builds", "deepseek-v4-flash-0731"))
     manifest_path = os.path.join(manifest_root, "manifest.json")
     try:
         with open(manifest_path) as f:

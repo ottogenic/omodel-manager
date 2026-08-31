@@ -6,6 +6,8 @@
 
 match = [
   "deepseek-v4-flash-0731",
+  "deepseek-v4-flash-0731-c8r",
+  "deepseek-v4-flash-0731-smpcache",
   "deepseek-v4-flash-0731-cand7",
   "deepseek-v4-flash-dspark",
   "deepseek-ai/DeepSeek-V4-Flash-0731",
@@ -21,7 +23,7 @@ thinking_control = "none" # Explicit native kwargs below; do not inject Qwen con
 
 [context]
 native       = 1048576
-min_thinking = 393216 # Think Max requires max-model-len >= 384K.
+min_thinking = 393216 # Capacity prerequisite for the 384K high/max output cap, not a minimum trace length.
 
 [presets.plan]
 thinking   = true
