@@ -72,19 +72,18 @@ under `notes/card/`; those non-vLLM paths are evidence, not normal deployments.
 | `ps [--all]` | Running containers plus every registered host, with host and cluster columns and each target `running`/`idle`/`pulling`/`unreachable` |
 | `stop DEVICE` | Stop the device's current deployment (`-y` to skip confirmation) |
 | `fetch <profile>` | Pre-download a profile's declared assets |
-| `install [<user@ip> [alias]] [--fix]` (alias `setup`) | Bootstrap this machine; for remotes, register the host and discover unambiguous DGX cluster pairs |
+| `install [<user@ip> [alias]] [--fix] [--card b70]` (alias `setup`) | Bootstrap this machine; for remotes, register the host/card and discover unambiguous DGX cluster pairs |
 | `uninstall <alias\|host> [--purge]` | Unregister a host + revoke the otools key (`--purge` also drops docker-group/containers + drop-caches rule) |
 | `sync` | Reset `model_manager.json` from the committed `DEFAULT_CONFIG` — run after `git pull` to pick up newly merged profiles (backs up a differing old file to `.bak`; pairs with `omw sync`) |
 | `config [--path/--init/--edit]` | Show/init/edit the config file |
 | `shell-init` (alias `install-aliases`) | Add the `omm` shell alias |
 
-Lifecycle commands resolve the device first. `local` always means this machine, host aliases
-come from `install`, and cluster names come from the cluster registry. Names are
-case-insensitive and globally unambiguous. Machine-local extensions live in
-`~/.config/otools/devices.json`; successful launch intents are published atomically in
-`~/.config/otools/deployments.json` for downstream consumers. Override those paths with
-`$OMODEL_MANAGER_DEVICES` and `$OMODEL_MANAGER_DEPLOYMENTS`. These registries are versioned,
-contain no secrets, and deployment entries may be stale, so consumers should probe liveness.
+Lifecycle commands resolve the device first and inspect that device's live Docker state over
+SSH. `local` always means this machine, host aliases come from `install`, and cluster names
+come from the cluster registry. Names are case-insensitive and globally unambiguous.
+Machine-local extensions live in versioned `~/.config/otools/devices.json` (override with
+`$OMODEL_MANAGER_DEVICES`). No caller-local deployment file is authoritative: any controller
+with the same targets registered can launch, inspect, and stop their models independently.
 Remote vLLM listeners remain loopback-only. Their published `base_url` uses the device/head
 target and assumes the operator's Tailgate route exposes that port; `omm` does not create
 tunnels or broaden the listener. Local node and card URLs remain on `127.0.0.1`.
@@ -247,6 +246,20 @@ that list so other hosts stay. Then `ps` fans across every host by default and l
 commands accept `dgx1` as the device. A bare `user@host` line works too; the file is safe to
 hand-edit. After registration, `install` probes the registered DGXs directly and offers to
 name a newly discovered two-node cluster once both members are present.
+
+For a host with the qualified Intel Arc Pro B70, register both the host and its card on every
+controller that should manage it:
+
+```bash
+omm install otto@otto-home otto-home --card b70 --fix
+omm launch otto-home-b70 qwen3.8-27b-gptq-int4-b70
+omm health otto-home-b70
+omm stop otto-home-b70 -y
+```
+
+Remote card actions stage the checked-in manager bundle and run the normal qualified `b70`
+lifecycle on that host. The serving proxy remains loopback-only; clients on another machine
+still need the documented Tailgate route (or another deliberate route) for `otto-home:8000`.
 
 `uninstall <alias|host>` reverses it: drops the host from the registry and revokes the
 otools key from the remote's `authorized_keys`. It leaves Docker, the docker group, and

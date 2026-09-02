@@ -77,5 +77,5 @@ The direct helper contract is available for diagnosis:
 python3 utils/card/deploy_b70_vllm.py plan b70 qwen3.8-27b-gptq-int4-b70
 ```
 
-Normal lifecycle should use `omm` so successful launch/stop state is reflected
-in `~/.config/otools/deployments.json`.
+Normal lifecycle should use `omm` so ownership, drift checks, and local or remote Docker
+transport remain consistent.

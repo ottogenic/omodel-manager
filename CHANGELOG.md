@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Lifecycle is no longer tied to the controller that launched a model.** Device commands infer
+  current and pending state from the addressed host instead of a caller-local deployment file.
+  Remote B70 cards can be registered with `install HOST ALIAS --card b70` and managed through
+  the same qualified helper from any controller where that host is registered.
+
 ### Added
 - **DeepSeek smpcache runtime.** Promoted a qualified derivative over the reviewed c8r
   image that pins Reederey's promoted indexer-capture, C128A-stride, and cached sampler-state
@@ -27,8 +33,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 - **Lifecycle is now device-first across cards, nodes, and clusters.** Public commands use
-  `plan DEVICE MODEL`, `launch DEVICE MODEL`, and `logs`/`health`/`stop DEVICE`; successful
-  launches publish strict versioned deployment intent for adapters. Model configs are grouped
+  `plan DEVICE MODEL`, `launch DEVICE MODEL`, and `logs`/`health`/`stop DEVICE`. Model configs are grouped
   under `configs/{card,node,cluster}/`, and every profile resolves to one exact TOML.
 - **Qwen3.8-Flash-Next output headroom now matches Qwen3.8-27B.** Plan and Build use a
   131,072-token combined reasoning-and-response ceiling, verified against the live endpoint.

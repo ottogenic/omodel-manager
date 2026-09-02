@@ -85,8 +85,6 @@ HF_TOKEN_FILE = os.path.expanduser("~/.config/otools/hf_token")
 HOSTS_FILE = os.path.expanduser("~/.config/otools/hosts")  # remote hosts `ps` queries (managed by `install`)
 DEVICES_FILE = os.path.expanduser(os.environ.get(
     "OMODEL_MANAGER_DEVICES", "~/.config/otools/devices.json"))
-DEPLOYMENTS_FILE = os.path.expanduser(os.environ.get(
-    "OMODEL_MANAGER_DEPLOYMENTS", "~/.config/otools/deployments.json"))
 CLUSTERS_FILE = os.path.expanduser(os.environ.get(
     "OMODEL_MANAGER_CLUSTERS", "~/.config/otools/clusters.json"))
 CLUSTER_DATA_DIR = os.path.expanduser(os.environ.get(
@@ -2124,16 +2122,6 @@ def save_devices(devices, path=None):
     _save_versioned_registry(path or DEVICES_FILE, "devices", devices, "model_devices")
 
 
-def load_deployments(path=None):
-    return _load_versioned_registry(path or DEPLOYMENTS_FILE, "deployments",
-                                    "model_deployments")
-
-
-def save_deployments(deployments, path=None):
-    _save_versioned_registry(path or DEPLOYMENTS_FILE, "deployments", deployments,
-                             "model_deployments")
-
-
 def _device_collision(name, existing):
     print(f"ERROR: device name '{name}' conflicts case-insensitively with "
           f"'{existing['name']}'. Device names must be globally unambiguous.", file=sys.stderr)
@@ -2167,6 +2155,10 @@ def device_inventory(kind=None):
             print(f"ERROR: device '{name}' has invalid kind '{merged.get('kind')}'.",
                   file=sys.stderr)
             sys.exit(1)
+        if merged["kind"] in ("card", "node"):
+            target = merged.get("target")
+            merged["target"] = (None if target in (None, "local", "localhost")
+                                else resolve_host(target))
         if merged["kind"] == "cluster":
             head_value, worker_value = merged.get("head"), merged.get("worker")
             merged["members"] = [head_value, worker_value]
@@ -5856,15 +5848,6 @@ def _compatible_profiles(device):
     return profile_inventory(device["kind"])
 
 
-def _host_for_url(target):
-    if not target:
-        return "127.0.0.1"
-    host = str(target).rsplit("@", 1)[-1]
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"
-    return host
-
-
 def _device_member_targets(device):
     targets = device.get("member_targets")
     if targets is not None:
@@ -5876,61 +5859,8 @@ def _device_member_targets(device):
             for value in members]
 
 
-def deployment_record(device, profile):
-    variant = profile["variants"][device["kind"]]
-    if device["kind"] == "cluster":
-        targets = _device_member_targets(device)
-        target = targets[0] if targets else None
-    elif device["kind"] == "node":
-        target = device.get("target")
-    else:
-        target = None
-    return {
-        "device": device["name"], "kind": device["kind"], "profile": profile["key"],
-        "served_model": variant["served_model"], "model_config": variant["model_config"],
-        "base_url": f"http://{_host_for_url(target)}:{variant['port']}/v1",
-    }
-
-
-def record_deployment(device, profile):
-    deployments = load_deployments()
-    for name in list(deployments):
-        record = deployments[name]
-        record_name = record.get("device", name) if isinstance(record, dict) else name
-        if str(record_name).casefold() == device["name"].casefold():
-            del deployments[name]
-    deployments[device["name"]] = deployment_record(device, profile)
-    save_deployments(deployments)
-
-
-def remove_deployment(device):
-    deployments = load_deployments()
-    changed = False
-    for name in list(deployments):
-        record = deployments[name]
-        record_name = record.get("device", name) if isinstance(record, dict) else name
-        if str(record_name).casefold() == device["name"].casefold():
-            del deployments[name]
-            changed = True
-    if changed:
-        save_deployments(deployments)
-
-
-def _registered_deployment(device):
-    for name, record in load_deployments().items():
-        if (isinstance(record, dict)
-                and str(record.get("device", name)).casefold() == device["name"].casefold()):
-            return record
-    return None
-
-
 def _current_deployment(device):
-    """Registry-first lookup with label inference for pre-facade deployments."""
-    recorded = _registered_deployment(device)
-    if recorded and recorded.get("profile"):
-        return recorded
-    if device["kind"] == "card":
-        return None
+    """Infer current state from the addressed runtime, never caller-local intent."""
     if device["kind"] == "cluster":
         target = (_device_member_targets(device) or [None])[0]
         cluster_name = device.get("target") or device["name"]
@@ -5938,13 +5868,23 @@ def _current_deployment(device):
         matches = [] if rows is None else [row for row in rows
                    if (_label(row.get("Labels", ""), LABEL_CLUSTER) or "").casefold()
                    == str(cluster_name).casefold()]
+    elif device["kind"] == "card":
+        target = device.get("target")
+        rows = list_managed(remote=target)
+        matches = [] if rows is None else [row for row in rows
+                   if (_label(row.get("Labels", ""), LABEL_DEVICE) or "").casefold() == "b70"]
     else:
-        rows = list_managed(remote=device.get("target"), include_stopped=True)
+        target = device.get("target")
+        rows = list_managed(remote=target, include_stopped=True)
         matches = [] if rows is None else rows
     for row in matches:
         profile = _label(row.get("Labels", ""), LABEL_MODEL)
         if profile:
             return {"device": device["name"], "kind": device["kind"], "profile": profile}
+    if device["kind"] == "node":
+        pulling = _pulling_keys(target)
+        if len(pulling) == 1:
+            return {"device": device["name"], "kind": device["kind"], "profile": pulling[0]}
     return None
 
 
@@ -5959,16 +5899,10 @@ def _require_current_deployment(device):
 
 
 def _ensure_device_available(device):
-    if device["kind"] == "card":
-        if _registered_deployment(device):
-            print(f"ERROR: device '{device['name']}' already has a deployment intent. "
-                  f"Stop it with `{_cli_name()} stop {device['name']}` first.", file=sys.stderr)
-            sys.exit(1)
-        return
-    targets = ([device.get("target")] if device["kind"] == "node"
+    targets = ([device.get("target")] if device["kind"] in ("card", "node")
                else _device_member_targets(device))
     for target in targets:
-        rows = list_managed(remote=target, include_stopped=True)
+        rows = list_managed(remote=target, include_stopped=device["kind"] != "card")
         if rows is None:
             print(f"ERROR: cannot verify that device '{device['name']}' is available.",
                   file=sys.stderr)
@@ -6012,12 +5946,53 @@ def _load_card_helper():
     return helper
 
 
+def _stage_remote_manager(target):
+    """Copy the manager bundle needed to run the qualified card lifecycle remotely."""
+    source_root = os.path.dirname(os.path.abspath(__file__))
+    remote_root = f"{remote_home(target)}/.local/share/otools/omodel-manager"
+    mkdir = run_remote(target, "mkdir -p " + shlex.quote(remote_root), batch=True)
+    if mkdir.returncode != 0:
+        print(f"ERROR: could not prepare manager runtime on {target}.", file=sys.stderr)
+        sys.exit(mkdir.returncode)
+    sources = [os.path.join(source_root, "omodel-manager"),
+               os.path.join(source_root, "configs"),
+               os.path.join(source_root, "utils")]
+    result = subprocess.run(["scp"] + ssh_opts() + ["-r", *sources,
+                            f"{target}:{remote_root}/"], text=True)
+    if result.returncode != 0:
+        print(f"ERROR: could not stage manager runtime on {target}.", file=sys.stderr)
+        sys.exit(result.returncode)
+    return f"{remote_root}/omodel-manager"
+
+
 def dispatch_card(action, device, profile=None, role=None, follow=False, yes=False,
                   dry_run=False):
     """Dispatch card lifecycle to the checked-in helper or an explicit override."""
     global REMOTE
+    target = device.get("target")
+    REMOTE = target
+    helper_device = "b70"
+    if target:
+        if os.path.abspath(CARD_HELPER) != os.path.abspath(DEFAULT_CARD_HELPER):
+            print("ERROR: remote card lifecycle requires the checked-in card helper.",
+                  file=sys.stderr)
+            sys.exit(1)
+        remote_script = _stage_remote_manager(target)
+        remote_argv = ["python3", remote_script, action, helper_device]
+        if action in ("launch", "plan") and profile:
+            remote_argv.append(profile["key"] if isinstance(profile, dict) else profile)
+        if role:
+            remote_argv.append(role)
+        if follow:
+            remote_argv.append("-f")
+        if yes:
+            remote_argv.append("-y")
+        result = run_remote(target, shlex.join(remote_argv), batch=True, tty=follow)
+        if result.returncode != 0:
+            sys.exit(result.returncode)
+        return True
     REMOTE = None
-    argv = _card_helper_command() + [action, device["name"]]
+    argv = _card_helper_command() + [action, helper_device]
     if profile:
         argv.append(profile["key"] if isinstance(profile, dict) else profile)
     if role:
@@ -6120,7 +6095,6 @@ def cmd_device_launch(args):
         return
     _ensure_device_available(device)
     _dispatch_facade_launch(device, profile, args, dry_run=False)
-    record_deployment(device, profile)
     _facade_suggestions(device, profile)
 
 
@@ -6185,7 +6159,6 @@ def cmd_device_stop(args):
             device, deployment, yes=args.yes))
     if stopped is False:
         return
-    remove_deployment(device)
     _facade_suggestions(device, stopped=True)
 
 
@@ -6804,15 +6777,20 @@ def cmd_install(args):
         sys.exit(1)
     hosts = [h.strip() for h in raw.split(",") if h.strip()]
     alias = (getattr(args, "alias", None) or "").strip() or None
+    card = getattr(args, "card", None)
     if alias and len(hosts) != 1:
         print("ERROR: an alias names a single host -- pass just one user@ip when you give an alias.",
+              file=sys.stderr)
+        sys.exit(1)
+    if card and (len(hosts) != 1 or not alias):
+        print("ERROR: --card requires one remote target and an explicit host alias.",
               file=sys.stderr)
         sys.exit(1)
     existing = load_hosts()                      # [(alias, target)] already registered
     prior_alias = {t: a for a, t in existing}
     connected, all_ready = [], True
     for target in hosts:
-        ready, ssh_ok = _setup_host(target, args.fix)
+        ready, ssh_ok = _setup_host(target, args.fix, card=card)
         all_ready = all_ready and ready
         if ssh_ok:
             connected.append((alias or prior_alias.get(target) or target, target))
@@ -6825,6 +6803,15 @@ def cmd_install(args):
         print(f"-> registered {len(connected)} host(s) for `ps` / `--host` in {HOSTS_FILE}:")
         for a, t in connected:
             print(f"     {a:<12} {t}" if a != t else f"     {t}")
+        if card:
+            devices = load_devices()
+            card_name = f"{alias}-{card}"
+            devices[card_name] = {
+                "kind": "card", "target": alias,
+                "hardware": "intel-arc-pro-b70",
+            }
+            save_devices(devices)
+            print(f"-> registered card device {card_name} on {alias} in {DEVICES_FILE}")
         auto_register_dgx_cluster(merged, preferred_aliases=[a for a, _ in connected])
     sys.exit(0 if all_ready else 1)
 
@@ -6865,13 +6852,19 @@ def cmd_uninstall(args):
 
     remaining = [(a, t) for a, t in existing if t != target and a != name]
     save_hosts(remaining)
+    devices = load_devices()
+    kept_devices = {device_name: record for device_name, record in devices.items()
+                    if not (isinstance(record, dict)
+                            and record.get("target") in (name, target))}
+    if kept_devices != devices:
+        save_devices(kept_devices)
     print(f"-> removed {name} from {HOSTS_FILE} ({len(remaining)} host(s) remain).")
     print(f"\nNote: the shared local key {OTOOLS_SSH_KEY} was left in place "
           f"(other hosts may still use it).")
     print(f"  To remove it everywhere: rm {OTOOLS_SSH_KEY} {OTOOLS_SSH_PUB}")
 
 
-def _setup_host(target, fix):
+def _setup_host(target, fix, card=None):
     """Check/install prerequisites locally or on one remote host."""
     label = target or "this machine"
     print(f"Setup for {label}  "
@@ -6970,23 +6963,30 @@ def _setup_host(target, fix):
     # 4.5) passwordless page-cache drop -- every launch runs it (UMA guard, vLLM #35313),
     #      so install a scoped helper + NOPASSWD rule now (one sudo prompt) and it's silent
     #      forever after. Checked with `sudo -n -l` so it doesn't actually drop caches here.
-    if fix:
+    if fix and not card:
         print("-> installing the scoped drop-caches helper + NOPASSWD sudoers rule "
               f"({DROP_CACHES_HELPER}; sudo, may prompt once) ...")
         _setup_run(target, _drop_caches_install_cmd(), tty=True, batch=False)
-    dc_ok, _ = _setup_ok(target, "sudo -n -l %s >/dev/null 2>&1" % DROP_CACHES_HELPER)
-    results.append(("drop-caches sudo", dc_ok,
-                    "NOPASSWD rule active (launch drops page cache automatically)" if dc_ok
-                    else "no NOPASSWD rule; --fix to add (launches warn + skip the drop otherwise)"))
+    if not card:
+        dc_ok, _ = _setup_ok(target, "sudo -n -l %s >/dev/null 2>&1" % DROP_CACHES_HELPER)
+        results.append(("drop-caches sudo", dc_ok,
+                        "NOPASSWD rule active (launch drops page cache automatically)" if dc_ok
+                        else "no NOPASSWD rule; --fix to add (launches warn + skip the drop otherwise)"))
 
     # 5) GPU: driver + container runtime (check + advise; we don't auto-install the toolkit)
-    drv = _setup_ok(target, "nvidia-smi -L 2>/dev/null | head -1")[1] if (nosudo or dok) else ""
-    results.append(("nvidia driver", bool(drv), drv or "nvidia-smi not found on host"))
+    if card == "b70":
+        render_ok, _ = _setup_ok(target, "test -e /dev/dri/renderD128")
+        results.append(("B70 render device", render_ok,
+                        "/dev/dri/renderD128 present" if render_ok
+                        else "/dev/dri/renderD128 missing"))
+    else:
+        drv = _setup_ok(target, "nvidia-smi -L 2>/dev/null | head -1")[1] if (nosudo or dok) else ""
+        results.append(("nvidia driver", bool(drv), drv or "nvidia-smi not found on host"))
     # --gpus all can be backed EITHER by a registered "nvidia" runtime (legacy) OR by
     # CDI (Docker 25+/29 default with the toolkit). Check several signals so a working
     # CDI setup isn't a false negative.
     gpu_ok, gpu_detail = False, ""
-    if nosudo:
+    if nosudo and not card:
         runtimes = _setup_ok(target, "docker info --format '{{json .Runtimes}}' 2>/dev/null")[1].lower()
         has_ctk = _setup_ok(target, "command -v nvidia-ctk")[0]
         has_cdi = _setup_ok(target, "ls /etc/cdi/nvidia.yaml /etc/cdi/nvidia.json 2>/dev/null")[0]
@@ -7000,7 +7000,8 @@ def _setup_host(target, fix):
         gpu_detail = ("no nvidia runtime / nvidia-ctk / CDI spec found -- install toolkit: "
                       "https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/"
                       "latest/install-guide.html")
-    results.append(("docker GPU runtime", gpu_ok, gpu_detail))
+    if not card:
+        results.append(("docker GPU runtime", gpu_ok, gpu_detail))
 
     _print_results(results)
     if target and os.path.exists(OTOOLS_SSH_KEY):
@@ -7011,6 +7012,9 @@ def _setup_host(target, fix):
               f"  and locally: rm {OTOOLS_SSH_KEY} {OTOOLS_SSH_PUB}")
     essentials = {"keyless SSH", "curl", "docker installed", "docker w/o sudo",
                   "nvidia driver", "docker GPU runtime", "drop-caches sudo"}
+    if card == "b70":
+        essentials -= {"nvidia driver", "docker GPU runtime", "drop-caches sudo"}
+        essentials.add("B70 render device")
     if not target:
         essentials -= {"keyless SSH", "curl"}
     ready = all(ok for name, ok, _ in results if name in essentials)
@@ -7240,6 +7244,8 @@ def main():
                           "Sync pair is registered automatically.")
     p.add_argument("alias", nargs="?",
                    help="short device name, e.g. dgx1 (then `launch dgx1 <model>`)")
+    p.add_argument("--card", choices=("b70",),
+                   help="also register the host's qualified card as ALIAS-b70")
     p.add_argument("--fix", action="store_true", help="remediate failures (installs docker, adds "
                                                       "docker group; remote setup also adds SSH keys)")
     p.set_defaults(func=cmd_install)

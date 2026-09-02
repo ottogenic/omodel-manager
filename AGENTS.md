@@ -14,8 +14,8 @@ task-specific lives in a **skill** (see the index at the bottom) that loads on d
 - **Stdlib only.** No third-party imports, ever. Runs on a bare `python3`.
 - **Single manager script + checked-in stdlib card helpers.** Tool is `omodel-manager`;
   `utils/card/*.py` contains the qualified B70 deployment modules; `model_manager.json`
-  holds launch profiles; versioned `~/.config/otools/devices.json` and `deployments.json`
-  expose the machine-local device/deployment contracts; `configs/**/*.toml` hold generic
+  holds launch profiles; versioned `~/.config/otools/devices.json` extends the machine-local
+  device inventory; `configs/**/*.toml` hold generic
   model configs — keep them **harness-agnostic** (no OpenCode/harness keys; see
   `configs/README.md`).
 - **No local shell.** All Docker goes through the `docker()` choke point as an **argv list**
@@ -34,6 +34,8 @@ task-specific lives in a **skill** (see the index at the bottom) that loads on d
   `logs`/`health`/`stop DEVICE`; adapt the existing node/cluster internals rather than duplicating them.
   Device names are globally unique case-insensitively, and one active deployment owns a device
   (a cluster also owns its member nodes).
+- **Runtime state is authoritative.** Lifecycle and downstream discovery inspect registered hosts;
+  never couple them to caller-local launch intent or a `deployments.json` file.
 
 ## Working agreement
 

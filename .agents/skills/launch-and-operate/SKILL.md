@@ -18,7 +18,8 @@ bypasses those contracts and can produce inconsistent state.
 
 Use `launch DEVICE MODEL` and `plan DEVICE MODEL`. Use the same device name for
 `logs DEVICE`, `health DEVICE`, and `stop DEVICE`; use `local` for the local node and
-`b70` for the qualified local card. Prefer installed aliases (`dgx1`) over raw targets.
+`b70` for the qualified local card, or `<host-alias>-b70` for a card registered with
+`install HOST ALIAS --card b70`. Prefer installed aliases (`dgx1`) over raw targets.
 
 ## Find a free host with `ps`, don't grep the config
 
@@ -32,8 +33,8 @@ One active deployment owns a device, and a cluster owns both member nodes. Use
 ## `launch` is non-blocking on a cold image
 
 If a node image is not cached, `launch` starts the pull+run in the background and returns
-immediately. Poll `health DEVICE` and inspect `logs DEVICE -f`; the deployment registry
-retains the device/profile association while startup continues.
+immediately. Poll `health DEVICE` and inspect `logs DEVICE -f`; lifecycle infers the profile
+from target-host pull state and Docker labels.
 
 Node launches retain their container so startup crash logs remain inspectable.
 
@@ -41,5 +42,6 @@ Node launches retain their container so startup crash logs remain inspectable.
 
 `devices` merges built-ins, installed hosts, clusters, and
 `~/.config/otools/devices.json`. `install user@ip [alias]` bootstraps and names a node;
+add `--card b70` to register its qualified card as `<alias>-b70`;
 `uninstall <alias|host>` removes it and revokes the dedicated key. These records are
 machine-specific and are not stored in `model_manager.json` or `DEFAULT_CONFIG`.

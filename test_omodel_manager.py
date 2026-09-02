@@ -117,12 +117,14 @@ class InstallTests(unittest.TestCase):
     """`install` targets this machine when no remote is named."""
 
     def setUp(self):
-        self._hosts, self._remote = mm.HOSTS_FILE, mm.REMOTE
-        mm.HOSTS_FILE = os.path.join(tempfile.mkdtemp(), "hosts")
+        self._hosts, self._devices, self._remote = mm.HOSTS_FILE, mm.DEVICES_FILE, mm.REMOTE
+        root = tempfile.mkdtemp()
+        mm.HOSTS_FILE = os.path.join(root, "hosts")
+        mm.DEVICES_FILE = os.path.join(root, "devices.json")
         mm.REMOTE = "user@configured-default"
 
     def tearDown(self):
-        mm.HOSTS_FILE, mm.REMOTE = self._hosts, self._remote
+        mm.HOSTS_FILE, mm.DEVICES_FILE, mm.REMOTE = self._hosts, self._devices, self._remote
 
     def test_no_target_installs_locally_without_ssh_or_registration(self):
         args = SimpleNamespace(target=None, alias=None, fix=True)
@@ -146,10 +148,23 @@ class InstallTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as raised:
                 mm.cmd_install(args)
         self.assertEqual(raised.exception.code, 0)
-        setup.assert_called_once_with("user@192.0.2.101", True)
+        setup.assert_called_once_with("user@192.0.2.101", True, card=None)
         save.assert_called_once_with([("dgx1", "user@192.0.2.101")])
         discover.assert_called_once_with([("dgx1", "user@192.0.2.101")],
                                          preferred_aliases=["dgx1"])
+
+    def test_explicit_card_is_registered_as_host_scoped_device(self):
+        args = SimpleNamespace(target="otto@home", alias="otto-home", fix=True, card="b70")
+        with mock.patch.object(mm, "_setup_host", return_value=(True, True)), \
+                mock.patch.object(mm.shutil, "which", return_value="/usr/bin/ssh"), \
+                mock.patch.object(mm, "auto_register_dgx_cluster"), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+            mm.cmd_install(args)
+        self.assertEqual(mm.load_devices()["otto-home-b70"], {
+            "kind": "card", "target": "otto-home",
+            "hardware": "intel-arc-pro-b70",
+        })
+        self.assertEqual(mm.resolve_device("otto-home-b70")["target"], "otto@home")
 
     def test_local_setup_skips_ssh_prerequisites(self):
         def setup_ok(target, cmd):
@@ -617,18 +632,15 @@ class LaunchClusterDispatchTests(unittest.TestCase):
 
 class UnifiedInventoryTests(unittest.TestCase):
     def setUp(self):
-        self.old = (mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.DEVICES_FILE,
-                    mm.DEPLOYMENTS_FILE, mm.REMOTE)
+        self.old = (mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.DEVICES_FILE, mm.REMOTE)
         root = tempfile.mkdtemp()
         mm.HOSTS_FILE = os.path.join(root, "hosts")
         mm.CLUSTERS_FILE = os.path.join(root, "clusters.json")
         mm.DEVICES_FILE = os.path.join(root, "devices.json")
-        mm.DEPLOYMENTS_FILE = os.path.join(root, "deployments.json")
         mm.REMOTE = None
 
     def tearDown(self):
-        (mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.DEVICES_FILE,
-         mm.DEPLOYMENTS_FILE, mm.REMOTE) = self.old
+        (mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.DEVICES_FILE, mm.REMOTE) = self.old
 
     def test_device_inventory_merges_builtins_hosts_clusters_and_explicit(self):
         mm.save_hosts([("DGX1", "otto@gpu.example")])
@@ -673,69 +685,13 @@ class UnifiedInventoryTests(unittest.TestCase):
                 self.assertTrue(os.path.isfile(path), path)
 
 
-class DeploymentContractTests(unittest.TestCase):
-    def setUp(self):
-        self.old = (mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.DEVICES_FILE,
-                    mm.DEPLOYMENTS_FILE)
-        root = tempfile.mkdtemp()
-        mm.HOSTS_FILE = os.path.join(root, "hosts")
-        mm.CLUSTERS_FILE = os.path.join(root, "clusters.json")
-        mm.DEVICES_FILE = os.path.join(root, "devices.json")
-        mm.DEPLOYMENTS_FILE = os.path.join(root, "deployments.json")
-
-    def tearDown(self):
-        (mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.DEVICES_FILE,
-         mm.DEPLOYMENTS_FILE) = self.old
-
-    def test_atomic_deployment_round_trip_is_versioned(self):
-        records = {"dgx1": {"device": "dgx1", "kind": "node", "profile": "model-a",
-                            "served_model": "served-a", "model_config": "model-a",
-                            "base_url": "http://gpu.example:8000/v1"}}
-        mm.save_deployments(records)
-        self.assertEqual(mm.load_deployments(), records)
-        with open(mm.DEPLOYMENTS_FILE) as f:
-            body = json.load(f)
-        self.assertEqual(body["version"], 1)
-        self.assertEqual(body["$otools"], "model_deployments")
-        self.assertEqual(os.stat(mm.DEPLOYMENTS_FILE).st_mode & 0o777, 0o600)
-        self.assertEqual([name for name in os.listdir(os.path.dirname(mm.DEPLOYMENTS_FILE))
-                          if name.startswith(".deployments-")], [])
-
-    def test_endpoint_values_strip_ssh_user_and_use_loopback(self):
-        node_key = next(iter(mm.profile_inventory("node")))
-        node_profile = mm.profile_inventory("node")[node_key]
-        self.assertTrue(os.path.isfile(os.path.join(
-            mm.CONFIGS_DIR, node_profile["variants"]["node"]["model_config"])))
-        remote = {"name": "dgx1", "kind": "node", "target": "otto@gpu.example"}
-        local = {"name": "local", "kind": "node", "target": None}
-        self.assertTrue(mm.deployment_record(remote, node_profile)["base_url"].startswith(
-            "http://gpu.example:"))
-        self.assertTrue(mm.deployment_record(local, node_profile)["base_url"].startswith(
-            "http://127.0.0.1:"))
-
-        cluster_key = next(iter(mm.CLUSTER_PROFILES))
-        cluster_profile = mm.profile_inventory("cluster")[cluster_key]
-        self.assertTrue(os.path.isfile(os.path.join(
-            mm.CONFIGS_DIR, cluster_profile["variants"]["cluster"]["model_config"])))
-        cluster = {"name": "pair", "kind": "cluster", "target": "pair",
-                   "head": "otto@head.example", "worker": "otto@worker.example"}
-        self.assertEqual(mm.deployment_record(cluster, cluster_profile)["base_url"],
-                         f"http://head.example:{mm.CLUSTER_PROFILES[cluster_key]['port']}/v1")
-        card = {"name": "b70", "kind": "card", "target": "local"}
-        card_profile = mm.profile_inventory("card")[mm.CARD_PROFILE_KEY]
-        self.assertEqual(mm.deployment_record(card, card_profile)["base_url"],
-                         "http://127.0.0.1:8000/v1")
-
-
 class DeviceFirstFacadeTests(unittest.TestCase):
     def setUp(self):
-        self.old = (mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.DEVICES_FILE,
-                    mm.DEPLOYMENTS_FILE, mm.REMOTE)
+        self.old = (mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.DEVICES_FILE, mm.REMOTE)
         root = tempfile.mkdtemp()
         mm.HOSTS_FILE = os.path.join(root, "hosts")
         mm.CLUSTERS_FILE = os.path.join(root, "clusters.json")
         mm.DEVICES_FILE = os.path.join(root, "devices.json")
-        mm.DEPLOYMENTS_FILE = os.path.join(root, "deployments.json")
         mm.REMOTE = None
         mm.save_hosts([("dgx1", "otto@gpu.example")])
         mm.save_clusters({"pair": {
@@ -748,8 +704,7 @@ class DeviceFirstFacadeTests(unittest.TestCase):
         self.cluster_key = next(iter(mm.profile_inventory("cluster")))
 
     def tearDown(self):
-        (mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.DEVICES_FILE,
-         mm.DEPLOYMENTS_FILE, mm.REMOTE) = self.old
+        (mm.HOSTS_FILE, mm.CLUSTERS_FILE, mm.DEVICES_FILE, mm.REMOTE) = self.old
 
     @staticmethod
     def args(device=None, model=None):
@@ -784,7 +739,6 @@ class DeviceFirstFacadeTests(unittest.TestCase):
 
     def test_node_and_cluster_dispatch_are_device_first(self):
         with mock.patch.object(mm, "_ensure_device_available"), \
-                mock.patch.object(mm, "record_deployment"), \
                 mock.patch.object(mm, "cmd_launch") as node_launch, \
                 contextlib.redirect_stdout(io.StringIO()):
             mm.cmd_device_launch(self.args("DGX1", self.node_key))
@@ -795,7 +749,6 @@ class DeviceFirstFacadeTests(unittest.TestCase):
         self.assertTrue(forwarded.keep)
 
         with mock.patch.object(mm, "_ensure_device_available"), \
-                mock.patch.object(mm, "record_deployment"), \
                 mock.patch.object(mm, "cmd_cluster_launch") as cluster_launch, \
                 contextlib.redirect_stdout(io.StringIO()):
             mm.cmd_device_launch(self.args("pair", self.cluster_key))
@@ -810,7 +763,6 @@ class DeviceFirstFacadeTests(unittest.TestCase):
         mm.save_devices({"pair": {"kind": "cluster", "head": "otto@new-head",
                                   "worker": "otto@new-worker"}})
         with mock.patch.object(mm, "_ensure_device_available"), \
-                mock.patch.object(mm, "record_deployment"), \
                 mock.patch.object(mm, "cmd_cluster_launch") as cluster_launch, \
                 contextlib.redirect_stdout(io.StringIO()):
             mm.cmd_device_launch(self.args("pair", self.cluster_key))
@@ -818,50 +770,40 @@ class DeviceFirstFacadeTests(unittest.TestCase):
         self.assertEqual(forwarded.cluster_config["head"], "otto@new-head")
         self.assertEqual(forwarded.cluster_config["worker"], "otto@new-worker")
 
-    def test_plan_uses_dry_run_without_registry_mutation(self):
+    def test_plan_uses_dry_run(self):
         with mock.patch.object(mm, "cmd_launch") as launch, \
-                mock.patch.object(mm, "save_deployments") as save, \
                 contextlib.redirect_stdout(io.StringIO()):
             mm.cmd_plan(self.args("dgx1", self.node_key))
         self.assertTrue(launch.call_args.args[0].dry_run)
-        save.assert_not_called()
 
     def test_card_plan_dispatches_checked_in_helper_with_python(self):
         helper = SimpleNamespace(DOCKER_RUNNER=None, main=mock.Mock(return_value=0))
         mm.REMOTE = "otto@wrong-host"
         with mock.patch.object(mm, "CARD_HELPER", mm.DEFAULT_CARD_HELPER), \
                 mock.patch.object(mm, "_load_card_helper", return_value=helper), \
-                mock.patch.object(mm, "save_deployments") as save, \
                 contextlib.redirect_stdout(io.StringIO()):
             mm.cmd_plan(self.args("b70", mm.CARD_PROFILE_KEY))
         helper.main.assert_called_once_with(["plan", "b70", mm.CARD_PROFILE_KEY])
         self.assertIs(helper.DOCKER_RUNNER, mm.docker)
         self.assertIsNone(mm.REMOTE)
-        save.assert_not_called()
 
-    def test_aborted_internal_stop_does_not_remove_deployment(self):
-        mm.save_deployments({
-            "dgx1": {"device": "dgx1", "kind": "node", "profile": self.node_key},
-        })
+    def test_aborted_internal_stop_returns_without_follow_up(self):
         args = SimpleNamespace(device="dgx1", yes=False)
-        with mock.patch.object(mm, "cmd_stop", return_value=False), \
-                mock.patch.object(mm, "remove_deployment") as remove:
+        with mock.patch.object(mm, "_current_deployment", return_value={"profile": self.node_key}), \
+                mock.patch.object(mm, "cmd_stop", return_value=False), \
+                mock.patch.object(mm, "_facade_suggestions") as suggest:
             mm.cmd_device_stop(args)
-        remove.assert_not_called()
+        suggest.assert_not_called()
 
-    def test_aborted_card_stop_does_not_call_helper_or_remove_deployment(self):
-        mm.save_deployments({
-            "b70": {"device": "b70", "kind": "card",
-                    "profile": mm.CARD_PROFILE_KEY},
-        })
+    def test_aborted_card_stop_does_not_call_helper(self):
         args = SimpleNamespace(device="b70", yes=False)
-        with mock.patch("builtins.input", return_value="n"), \
+        with mock.patch.object(mm, "_current_deployment",
+                               return_value={"profile": mm.CARD_PROFILE_KEY}), \
+                mock.patch("builtins.input", return_value="n"), \
                 mock.patch.object(mm, "dispatch_card") as dispatch, \
-                mock.patch.object(mm, "remove_deployment") as remove, \
                 contextlib.redirect_stdout(io.StringIO()):
             mm.cmd_device_stop(args)
         dispatch.assert_not_called()
-        remove.assert_not_called()
 
     def test_public_launch_parser_rejects_backend_tuning_flags(self):
         for flag in ("--foreground", "--keep", "--force", "--no-fetch",
@@ -878,6 +820,39 @@ class DeviceFirstFacadeTests(unittest.TestCase):
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
             mm.cmd_device_launch(self.args(self.node_key, "dgx1"))
         self.assertIn("unknown device", err.getvalue())
+
+    def test_runtime_state_identifies_current_deployment(self):
+        rows = [{"Labels": f"{mm.LABEL_MODEL}={self.node_key}"}]
+        with mock.patch.object(mm, "list_managed", return_value=rows):
+            current = mm._current_deployment(mm.resolve_device("dgx1"))
+        self.assertEqual(current["profile"], self.node_key)
+
+    def test_empty_runtime_has_no_current_deployment(self):
+        with mock.patch.object(mm, "list_managed", return_value=[]), \
+                mock.patch.object(mm, "_pulling_keys", return_value=[]):
+            self.assertIsNone(mm._current_deployment(mm.resolve_device("dgx1")))
+
+    def test_stopped_card_containers_do_not_reserve_the_card(self):
+        device = mm.resolve_device("b70")
+        with mock.patch.object(mm, "list_managed", return_value=[]) as managed, \
+                mock.patch.object(mm, "_pulling_keys", return_value=[]):
+            self.assertIsNone(mm._current_deployment(device))
+            mm._ensure_device_available(device)
+        self.assertTrue(all(not call.kwargs.get("include_stopped")
+                            for call in managed.call_args_list))
+
+    def test_remote_card_dispatch_runs_staged_manager_on_target(self):
+        device = {"name": "otto-home-b70", "kind": "card", "target": "otto@home"}
+        profile = {"key": mm.CARD_PROFILE_KEY}
+        result = SimpleNamespace(returncode=0)
+        with mock.patch.object(mm, "_stage_remote_manager",
+                               return_value="/home/otto/.local/omm/omodel-manager") as stage, \
+                mock.patch.object(mm, "run_remote", return_value=result) as remote:
+            self.assertTrue(mm.dispatch_card("launch", device, profile))
+        stage.assert_called_once_with("otto@home")
+        command = remote.call_args.args[1]
+        self.assertIn("python3 /home/otto/.local/omm/omodel-manager launch b70", command)
+        self.assertIn(mm.CARD_PROFILE_KEY, command)
 
 
 class ListManagedTests(unittest.TestCase):
