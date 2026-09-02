@@ -81,6 +81,10 @@ class HostsStoreTests(unittest.TestCase):
         mm.save_hosts([("dgx1", "user@a"), ("other", "user@a")])  # same target twice
         self.assertEqual(mm.load_hosts(), [("dgx1", "user@a")])
 
+    def test_dedup_by_alias_is_case_insensitive(self):
+        mm.save_hosts([("dgx1", "user@a"), ("DGX1", "user@b")])
+        self.assertEqual(mm.load_hosts(), [("dgx1", "user@a")])
+
     def test_resolve_host_alias_and_passthrough(self):
         mm.save_hosts([("dgx1", "user@a")])
         self.assertEqual(mm.resolve_host("dgx1"), "user@a")     # alias -> target
@@ -165,6 +169,16 @@ class InstallTests(unittest.TestCase):
             "hardware": "intel-arc-pro-b70",
         })
         self.assertEqual(mm.resolve_device("otto-home-b70")["target"], "otto@home")
+
+    def test_install_replaces_a_prior_alias_mapping(self):
+        mm.save_hosts([("otto-home", "otto@old-home")])
+        args = SimpleNamespace(target="otto@new-home", alias="otto-home", fix=True)
+        with mock.patch.object(mm, "_setup_host", return_value=(True, True)), \
+                mock.patch.object(mm.shutil, "which", return_value="/usr/bin/ssh"), \
+                mock.patch.object(mm, "auto_register_dgx_cluster"), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+            mm.cmd_install(args)
+        self.assertEqual(mm.load_hosts(), [("otto-home", "otto@new-home")])
 
     def test_uninstall_explicit_card_keeps_host_and_does_not_use_ssh(self):
         mm.save_hosts([("otto-home", "otto@home")])

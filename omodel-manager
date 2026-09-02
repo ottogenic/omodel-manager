@@ -2036,12 +2036,14 @@ def resolve_host(name):
 
 def save_hosts(pairs):
     """Overwrite the hosts file. `pairs` items are (alias, target) tuples or bare
-    `user@host` strings (alias defaults to the target). Dedup by target, order-kept."""
-    seen, uniq = set(), []
+    `user@host` strings (alias defaults to the target). Dedup by target and alias, order-kept."""
+    seen_targets, seen_aliases, uniq = set(), set(), []
     for p in pairs:
         alias, target = (p, p) if isinstance(p, str) else (p[0] or p[1], p[1])
-        if target and target not in seen:
-            seen.add(target)
+        alias_key = str(alias).casefold()
+        if target and target not in seen_targets and alias_key not in seen_aliases:
+            seen_targets.add(target)
+            seen_aliases.add(alias_key)
             uniq.append((alias, target))
     os.makedirs(os.path.dirname(HOSTS_FILE), exist_ok=True)
     with open(HOSTS_FILE, "w") as f:
@@ -6797,7 +6799,9 @@ def cmd_install(args):
     if connected:
         # Merge, don't overwrite: keep other registered hosts, add/replace these.
         new_targets = {t for _, t in connected}
-        merged = [(a, t) for a, t in existing if t not in new_targets] + connected
+        new_aliases = {a.casefold() for a, _ in connected}
+        merged = [(a, t) for a, t in existing
+                  if t not in new_targets and a.casefold() not in new_aliases] + connected
         save_hosts(merged)
         print()
         print(f"-> registered {len(connected)} host(s) for `ps` / `--host` in {HOSTS_FILE}:")
