@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **Explicit devices can be uninstalled without unregistering their host.**
+  `uninstall <device>` now removes the matching `devices.json` entry locally while preserving
+  SSH access, host discovery, and running containers; host-only `--purge` is rejected.
 - **Lifecycle is no longer tied to the controller that launched a model.** Device commands infer
   current and pending state from the addressed host instead of a caller-local deployment file.
   Remote B70 cards can be registered with `install HOST ALIAS --card b70` and managed through

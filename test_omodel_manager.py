@@ -166,6 +166,31 @@ class InstallTests(unittest.TestCase):
         })
         self.assertEqual(mm.resolve_device("otto-home-b70")["target"], "otto@home")
 
+    def test_uninstall_explicit_card_keeps_host_and_does_not_use_ssh(self):
+        mm.save_hosts([("otto-home", "otto@home")])
+        mm.save_devices({
+            "otto-home-b70": {
+                "kind": "card", "target": "otto-home",
+                "hardware": "intel-arc-pro-b70",
+            },
+        })
+        out = io.StringIO()
+        with mock.patch.object(mm.shutil, "which") as which, \
+                mock.patch.object(mm, "save_hosts") as save_hosts, \
+                contextlib.redirect_stdout(out):
+            mm.cmd_uninstall(SimpleNamespace(target="OTTO-HOME-B70", purge=False))
+        self.assertEqual(mm.load_devices(), {})
+        self.assertEqual(mm.load_hosts(), [("otto-home", "otto@home")])
+        which.assert_not_called()
+        save_hosts.assert_not_called()
+        self.assertIn("running containers were left unchanged", out.getvalue())
+
+    def test_uninstall_device_rejects_host_purge(self):
+        mm.save_devices({"otto-home-b70": {"kind": "card", "target": "otto-home"}})
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            mm.cmd_uninstall(SimpleNamespace(target="otto-home-b70", purge=True))
+        self.assertIn("otto-home-b70", mm.load_devices())
+
     def test_local_setup_skips_ssh_prerequisites(self):
         def setup_ok(target, cmd):
             self.assertIsNone(target)

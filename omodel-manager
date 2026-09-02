@@ -6817,13 +6817,24 @@ def cmd_install(args):
 
 
 def cmd_uninstall(args):
-    """Undo `install`: drop the host from the registry and revoke the otools key
-    from its authorized_keys. With --purge, also remove it from the docker group
-    and stop its otools containers (best-effort). Leaves the shared local key."""
+    """Remove an explicit device, or unregister a host and revoke its otools key."""
     name = args.target
     if not name:
-        print("ERROR: uninstall needs an alias or user@ip, e.g. `uninstall dgx1`.", file=sys.stderr)
+        print("ERROR: uninstall needs a device, host alias, or user@ip.", file=sys.stderr)
         sys.exit(1)
+    devices = load_devices()
+    device_keys = [key for key in devices
+                   if isinstance(key, str) and key.casefold() == name.casefold()]
+    if device_keys:
+        if args.purge:
+            print("ERROR: --purge applies to hosts, not device registrations.", file=sys.stderr)
+            sys.exit(1)
+        for key in device_keys:
+            del devices[key]
+        save_devices(devices)
+        print(f"-> removed device {device_keys[0]} from {DEVICES_FILE}")
+        print("   The host registration, SSH key, and any running containers were left unchanged.")
+        return
     target = resolve_host(name)
     existing = load_hosts()
     aliases = {a for a, _ in existing}

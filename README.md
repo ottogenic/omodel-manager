@@ -73,7 +73,7 @@ under `notes/card/`; those non-vLLM paths are evidence, not normal deployments.
 | `stop DEVICE` | Stop the device's current deployment (`-y` to skip confirmation) |
 | `fetch <profile>` | Pre-download a profile's declared assets |
 | `install [<user@ip> [alias]] [--fix] [--card b70]` (alias `setup`) | Bootstrap this machine; for remotes, register the host/card and discover unambiguous DGX cluster pairs |
-| `uninstall <alias\|host> [--purge]` | Unregister a host + revoke the otools key (`--purge` also drops docker-group/containers + drop-caches rule) |
+| `uninstall <device\|alias\|host> [--purge]` | Remove an explicit device registration, or unregister a host + revoke its otools key (`--purge` is host-only) |
 | `sync` | Reset `model_manager.json` from the committed `DEFAULT_CONFIG` — run after `git pull` to pick up newly merged profiles (backs up a differing old file to `.bak`; pairs with `omw sync`) |
 | `config [--path/--init/--edit]` | Show/init/edit the config file |
 | `shell-init` (alias `install-aliases`) | Add the `omm` shell alias |
@@ -265,6 +265,10 @@ still need the documented Tailgate route (or another deliberate route) for `otto
 otools key from the remote's `authorized_keys`. It leaves Docker, the docker group, and
 the shared local key alone by default; `--purge` additionally stops the box's otools
 containers and removes its docker-group membership.
+
+`uninstall <device>` removes only an explicit `devices.json` entry. For example,
+`omm uninstall otto-home-b70` forgets that remote card while preserving the `otto-home`
+host registration, SSH access, and running containers.
 
 ## HF token
 
