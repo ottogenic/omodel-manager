@@ -893,6 +893,22 @@ class DeviceFirstFacadeTests(unittest.TestCase):
         self.assertIn("python3 /home/otto/.local/omm/omodel-manager launch b70", command)
         self.assertIn(mm.CARD_PROFILE_KEY, command)
 
+    def test_remote_card_health_uses_its_mounted_manager_source(self):
+        device = {"name": "otto-home-b70", "kind": "card", "target": "otto@home"}
+        inspect = SimpleNamespace(
+            returncode=0,
+            stdout="/home/otto/projects/omodel-manager/utils/card/tcp_proxy.py\n",
+        )
+        result = SimpleNamespace(returncode=0)
+        with mock.patch.object(mm, "docker", return_value=inspect) as docker, \
+                mock.patch.object(mm, "_stage_remote_manager") as stage, \
+                mock.patch.object(mm, "run_remote", return_value=result) as remote:
+            self.assertTrue(mm.dispatch_card("health", device))
+        docker.assert_called_once()
+        stage.assert_not_called()
+        self.assertIn("python3 /home/otto/projects/omodel-manager/omodel-manager health b70",
+                      remote.call_args.args[1])
+
 
 class ListManagedTests(unittest.TestCase):
     """list_managed tells 'can't query the host' (None) from 'nothing running' ([])."""

@@ -5967,6 +5967,19 @@ def _stage_remote_manager(target):
     return f"{remote_root}/omodel-manager"
 
 
+def _remote_card_manager(target):
+    """Return the manager source mounted by a running remote card, if available."""
+    proxy_mount = "{{range .Mounts}}{{if eq .Destination \"/proxy.py\"}}{{.Source}}{{end}}{{end}}"
+    result = docker(["inspect", "--format", proxy_mount, "b70-vllm-loopback"], capture=True)
+    source = (result.stdout or "").strip() if result.returncode == 0 else ""
+    suffix = "/utils/card/tcp_proxy.py"
+    if not source.endswith(suffix):
+        return None
+    script = source[:-len(suffix)] + "/omodel-manager"
+    check = run_remote(target, "test -f " + shlex.quote(script), capture=True, batch=True)
+    return script if check.returncode == 0 else None
+
+
 def dispatch_card(action, device, profile=None, role=None, follow=False, yes=False,
                   dry_run=False):
     """Dispatch card lifecycle to the checked-in helper or an explicit override."""
@@ -5979,7 +5992,8 @@ def dispatch_card(action, device, profile=None, role=None, follow=False, yes=Fal
             print("ERROR: remote card lifecycle requires the checked-in card helper.",
                   file=sys.stderr)
             sys.exit(1)
-        remote_script = _stage_remote_manager(target)
+        remote_script = (_remote_card_manager(target) if action in ("health", "logs", "stop")
+                         else None) or _stage_remote_manager(target)
         remote_argv = ["python3", remote_script, action, helper_device]
         if action in ("launch", "plan") and profile:
             remote_argv.append(profile["key"] if isinstance(profile, dict) else profile)
