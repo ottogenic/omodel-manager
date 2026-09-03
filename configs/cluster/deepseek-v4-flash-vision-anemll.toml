@@ -3,7 +3,6 @@
 
 match = [
   "deepseek-v4-flash-vision-anemll",
-  "deepseek-v4-flash-vision-anemll-tune",
 ]
 source = "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"
 

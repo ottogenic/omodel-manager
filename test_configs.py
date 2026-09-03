@@ -127,7 +127,6 @@ class ConfigValidityTests(unittest.TestCase):
         self.assertNotIn("deepseek-v4-flash-vision-anemll", fallback["match"])
         self.assertEqual(set(anemll["match"]), {
             "deepseek-v4-flash-vision-anemll",
-            "deepseek-v4-flash-vision-anemll-tune",
         })
         self.assertEqual(fallback["capabilities"]["concurrency"], 1)
         self.assertEqual(anemll["capabilities"]["concurrency"], 1)

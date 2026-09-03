@@ -1720,7 +1720,7 @@ class ClusterProfileTests(unittest.TestCase):
         profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll"]
         fallback = mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-exp"]
         self.assertEqual(profile["status"], "validated")
-        self.assertEqual(profile["tok_s"], 36)
+        self.assertEqual(profile["tok_s"], 40)
         self.assertEqual(profile["image"],
                          "otools/vllm-deepseek-v4-flash-vision-anemll:mia-reviewed")
         self.assertEqual(profile["revision"], "86f746b36186f0e567729a5c06a8c918caba82a9")
@@ -1774,20 +1774,16 @@ class ClusterProfileTests(unittest.TestCase):
                     "redact-api-key", "gb10-hybrid")
         self.assertTrue(all(term not in name for term in excluded for name in names))
 
-    def test_deepseek_anemll_tuning_lane_is_isolated_at_k3(self):
-        promoted = mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll"]
-        tuning = mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll-tune"]
-        self.assertIsNot(promoted, tuning)
-        self.assertEqual(promoted["speculative_config"]["num_speculative_tokens"], 6)
-        self.assertEqual(tuning["speculative_config"], {
+    def test_deepseek_anemll_uses_qualified_k3_configuration(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll"]
+        self.assertEqual(profile["speculative_config"], {
             "method": "dspark",
             "num_speculative_tokens": 3,
             "draft_sample_method": "probabilistic",
         })
-        self.assertEqual(tuning["max_num_batched_tokens"], 8256)
-        self.assertEqual(tuning["status"], "experimental")
-        self.assertIsNone(tuning["tok_s"])
-        self.assertEqual(tuning["image"], promoted["image"])
+        self.assertEqual(profile["max_num_batched_tokens"], 8256)
+        self.assertEqual(profile["status"], "validated")
+        self.assertEqual(profile["tok_s"], 40)
 
     def test_cluster_inventory_exposes_benchmarked_tok_s(self):
         with mock.patch.object(mm, "load_config", return_value={"models": {}}):
@@ -2253,7 +2249,7 @@ class ClusterRegistryTests(unittest.TestCase):
         self.assertIn("TP_SOCKET_IFNAME=enP7s7", head)
         self.assertEqual(head[head.index("--max-model-len") + 1], "1048576")
         self.assertEqual(head[head.index("--max-num-seqs") + 1], "1")
-        self.assertEqual(head[head.index("--max-num-batched-tokens") + 1], "8192")
+        self.assertEqual(head[head.index("--max-num-batched-tokens") + 1], "8256")
         self.assertEqual(head[head.index("--long-prefill-token-threshold") + 1], "1024")
         self.assertEqual(head[head.index("--max-cudagraph-capture-size") + 1], "42")
         self.assertEqual(head[head.index("--gpu-memory-utilization") + 1], "0.835")
@@ -2268,7 +2264,7 @@ class ClusterRegistryTests(unittest.TestCase):
         self.assertEqual(json.loads(head[head.index("--limit-mm-per-prompt") + 1]),
                          {"image": 8})
         self.assertEqual(json.loads(head[head.index("--speculative-config") + 1]), {
-            "method": "dspark", "num_speculative_tokens": 6,
+            "method": "dspark", "num_speculative_tokens": 3,
             "draft_sample_method": "probabilistic",
         })
         self.assertEqual(json.loads(

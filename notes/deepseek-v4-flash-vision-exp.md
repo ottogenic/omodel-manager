@@ -168,3 +168,23 @@ Increasing the same lane to `k=9` reduced N=1 decode to 32.7 and 32.6 tok/s in t
 with 32.4-32.7 s TTFT. Together with the invalid `k=4` result and the slower `k=6`
 checkpoint, this selects `k=3` probabilistic with 8256 batch tokens as the best tested shape.
 After restoring that shape, a confirmation run measured 41.3 decode tok/s with 32.9 s TTFT.
+
+## 2026-09-03 selective-patch comparison and promotion
+
+A separately tagged image tested MiaAI-Lab source
+`d828ddd89708b0216a3af124a57e44dd5c09cb37` with only its SHM ring-buffer recovery and
+sequence-parallel prefill indexer patches added to the qualified patch train. The candidate
+kept the winning `k=3` probabilistic and 8256-token batch shape. It launched cleanly, produced
+error-free runtime logs, and passed two quality runs at 100% tools and 100% executable code.
+
+The candidate did not produce a repeatable performance gain. After its one-time indexer compile,
+two 50K runs measured 37.8 and 38.1 decode tok/s, 1,509-1,530 prefill tok/s, and 32.9-33.4 s
+TTFT. The unchanged runtime measured 39.3-41.7 decode tok/s, 1,549-1,568 prefill tok/s, and
+32.2-32.6 s TTFT in the same session. At about 101K, candidate runs measured 38.5-39.6 decode
+tok/s, 1,464-1,482 prefill tok/s, and 68.7-69.5 s TTFT; unchanged controls measured 37.4-38.6
+decode tok/s, 1,485-1,500 prefill tok/s, and 67.8-68.5 s TTFT. The mixed decode noise at 101K
+did not offset the candidate's consistent prefill and TTFT regression or its 49.5 s cold compile.
+
+The selective image was rejected. The existing reviewed image with `k=3` probabilistic and
+8256 batch tokens is promoted as `deepseek-v4-flash-vision-anemll`; its conservative inventory
+rating is 40 tok/s. Temporary tuning and selective profile names are not shipped.

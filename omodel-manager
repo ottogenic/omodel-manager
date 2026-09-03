@@ -417,7 +417,7 @@ CLUSTER_PROFILES = {
         "allow_long_max_model_len": True,
         "max_model_len": 1048576,
         "max_num_seqs": 1,
-        "max_num_batched_tokens": 8192,
+        "max_num_batched_tokens": 8256,
         "long_prefill_token_threshold": 1024,
         "max_cudagraph_capture_size": 42,
         "gpu_memory_utilization": 0.835,
@@ -428,7 +428,7 @@ CLUSTER_PROFILES = {
         "block_size": 256,
         "speculative_config": {
             "method": "dspark",
-            "num_speculative_tokens": 6,
+            "num_speculative_tokens": 3,
             "draft_sample_method": "probabilistic",
         },
         "pipeline_parallel_size": 1,
@@ -445,7 +445,7 @@ CLUSTER_PROFILES = {
         "default_chat_template_kwargs": {"thinking": True, "reasoning_effort": "max"},
         "tokenizer_mode": "deepseek_v4",
         "thinking_kwarg": "thinking",
-        "tok_s": 36,
+        "tok_s": 40,
         "env": {
             "VLLM_PREFIX_CACHE_RETENTION_INTERVAL": "4096",
             "DSPARK_MAX_INFLIGHT_PREFILLS": "1",
@@ -474,7 +474,8 @@ CLUSTER_PROFILES = {
             "TORCH_NCCL_DEBUG_INFO_PIPE_FILE": "/tmp/fr_dump_pipe_",
         },
         "status": "validated",
-        "notes": "Pinned Anemll/MiaAI Vision runtime; qualified on two GB10 nodes.",
+        "notes": ("Pinned Anemll/MiaAI Vision runtime; qualified at k=3 with 8256 "
+                  "batch tokens on two GB10 nodes."),
     },
     "qwen3.8-flash-next-fp8": {
         "backend": "vllm-mp",
@@ -503,23 +504,6 @@ CLUSTER_PROFILES = {
                   "concurrency. Video is excluded after a decoder crash."),
     },
 }
-
-# Scratch lane for performance experiments. Keep the promoted profile
-# immutable while varying one launch parameter at a time here.
-CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll-tune"] = dict(
-    CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll"])
-CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll-tune"].update({
-    "served_model_name": "deepseek-v4-flash-vision-anemll-tune",
-    "speculative_config": {
-        "method": "dspark",
-        "num_speculative_tokens": 3,
-        "draft_sample_method": "probabilistic",
-    },
-    "max_num_batched_tokens": 8256,
-    "tok_s": None,
-    "status": "experimental",
-    "notes": "Isolated tuning lane; k=3 probabilistic with 8256 batch tokens.",
-})
 
 DEEPSEEK_VLLM_PREIMAGES = {
     "vllm/config/cache.py": "ee2c0db3e4e6c9e9cab33d8be566c4b8101159d36c0d3787c30d47931ee2a9a4",
