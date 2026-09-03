@@ -97,7 +97,6 @@ VLLM_ARGS = [
     "--enable-prefix-caching",
     "--served-model-name",
     MODEL_ID,
-    "--language-model-only",
     "--speculative-config",
     '{"method":"mtp","num_speculative_tokens":4}',
     "--default-chat-template-kwargs",
@@ -108,10 +107,14 @@ VLLM_ARGS = [
     "--tool-call-parser",
     "qwen3_coder",
 ]
+TEXT_ONLY_VLLM_ARGS = VLLM_ARGS.copy()
+TEXT_ONLY_VLLM_ARGS.insert(
+    TEXT_ONLY_VLLM_ARGS.index("--speculative-config"), "--language-model-only",
+)
 LEGACY_VLLM_ARGS = [
     "/bench/utils/launch_vllm_xpu.py" if value == VLLM_ARGS[0]
     else "qwen3.8-27b" if value == MODEL_ID else value
-    for value in VLLM_ARGS
+    for value in TEXT_ONLY_VLLM_ARGS
 ]
 
 
@@ -371,6 +374,29 @@ def refuse_unowned_existing_containers():
             validate_stop_ownership(name, inspect)
 
 
+def replace_previous_text_only_container():
+    inspect = inspect_container(MODEL_CONTAINER)
+    if inspect is None or inspect["Config"].get("Cmd") != TEXT_ONLY_VLLM_ARGS:
+        return
+    validate_stop_ownership(MODEL_CONTAINER, inspect)
+    if inspect["State"]["Running"]:
+        run(["docker", "stop", MODEL_CONTAINER])
+    run(["docker", "rm", MODEL_CONTAINER])
+
+
+def replace_proxy_with_different_mount(repo_root):
+    inspect = inspect_container(PROXY_CONTAINER)
+    if inspect is None:
+        return
+    expected = f"{repo_root / 'utils' / 'card' / 'tcp_proxy.py'}:/proxy.py:ro"
+    if inspect["HostConfig"].get("Binds") == [expected]:
+        return
+    validate_stop_ownership(PROXY_CONTAINER, inspect)
+    if inspect["State"]["Running"]:
+        run(["docker", "stop", PROXY_CONTAINER])
+    run(["docker", "rm", PROXY_CONTAINER])
+
+
 def check_service_once():
     with urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=5) as response:
         if response.status != 200:
@@ -404,6 +430,7 @@ def launch(timeout=600):
     if not RENDER_DEVICE.exists():
         raise DeployError(f"render device is missing: {RENDER_DEVICE}")
     refuse_unowned_existing_containers()
+    replace_previous_text_only_container()
     verify_model_files(MODEL_PATH)
     ensure_image()
     ensure_network()
@@ -417,6 +444,7 @@ def launch(timeout=600):
             inspect, REPOSITORY_ROOT, MODEL_PATH, render_group, model_environment,
         ),
     )
+    replace_proxy_with_different_mount(REPOSITORY_ROOT)
     proxy = inspect_container(PROXY_CONTAINER)
     if proxy is None:
         run(proxy_create_command(REPOSITORY_ROOT))
@@ -433,7 +461,9 @@ def validate_stop_ownership(name, inspect):
     if name == MODEL_CONTAINER:
         labels = inspect["Config"].get("Labels") or {}
         standard_present = any(key in labels for key in ownership_labels("model-server"))
-        commands = [VLLM_ARGS] if standard_present else [VLLM_ARGS, LEGACY_VLLM_ARGS]
+        commands = [VLLM_ARGS, TEXT_ONLY_VLLM_ARGS]
+        if not standard_present:
+            commands.append(LEGACY_VLLM_ARGS)
         role = "model-server"
     else:
         commands = [["-I", "/proxy.py", MODEL_CONTAINER, "8000"]]

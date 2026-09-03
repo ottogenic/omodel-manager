@@ -12,7 +12,9 @@ This record documents the production B70 profile integrated into
   `9d189a60e4c0ad7f9f47cd94bfa393ca10b3924e`.
 - Served ID: `qwen3.8-27b-gptq-int4-b70`.
 - Context: 262,144; GPTQ INT4 weights, BF16 MTP4, FP8 KV, one sequence, 8,192
-  scheduler budget, 10 GiB explicit KV cache, prefix caching.
+  scheduler budget, 10 GiB explicit KV cache, prefix caching, and image/video input.
+- The pinned artifact set includes the upstream `processor_config.json` (1,191 bytes,
+  SHA-256 `d89ef49ce9cd37fbf510158e13c1ef063d9286411c1ec9049932dbe0487143b1`).
 
 The model publisher is a third party. Qualification verifies every required
 file size and SHA-256, contiguous Safetensors data, exact index membership, 2,399
@@ -60,6 +62,24 @@ The retained 262,144 profile passed an exact 262,016-token prompt plus 128-token
 output request after the boundary patch. Coding-quality runs retained under
 `results/card/` measured median B70 decode near 66 tok/s in the uncapped medium
 suite, with 14/15 all-check generations and 44/45 hidden checks.
+
+Multimodal qualification on 2026-09-02 removed the prior
+`--language-model-only` launch restriction and retained the same model, runtime,
+MTP, context, scheduler, and KV-cache settings. Startup resolved
+`Qwen3_5ForConditionalGeneration`, loaded 18.24 GiB of model memory, initialized a
+16,384-token encoder cache budget for one maximum-size image, reserved the full
+10 GiB KV cache, and reported 275,549 KV-cache tokens (1.05x the configured maximum
+request length). The deployment then passed:
+
+- Direct text generation: `ok`.
+- A 4x4 solid-blue PNG data URL: `blue`.
+- An MP4 data URL containing Big Buck Bunny: `bunny`.
+- Simultaneous text and image requests: both HTTP 200 with correct outputs.
+- Post-request `omm health b70`: READY at the full 262,144-token context.
+
+Transformers logs `min_frames` and `max_frames` processor docstring-validation
+messages at ERROR level during startup. These are non-fatal in the pinned image;
+image and video requests both completed successfully.
 
 ## Operation
 

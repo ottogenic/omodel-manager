@@ -184,7 +184,7 @@ class ConfigValidityTests(unittest.TestCase):
         self.assertEqual(cfg["source"],
                          "https://huggingface.co/SergiioB/Qwen3.8-27B-GPTQ-Int4-sym-G128-MTP-BF16")
         self.assertEqual(cfg["capabilities"], {
-            "vision": False,
+            "vision": {"input": ["text", "image", "video"], "output": ["text"]},
             "reasoning": True,
             "tool_call": True,
             "concurrency": 1,

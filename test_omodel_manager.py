@@ -716,6 +716,7 @@ class UnifiedInventoryTests(unittest.TestCase):
         card = mm.profile_inventory("card")[mm.CARD_PROFILE_KEY]
         self.assertEqual(card["hardware"], "intel-arc-pro-b70")
         self.assertEqual(card["backend"], "vllm-xpu-docker")
+        self.assertIn("Vision", card["usecase"])
         self.assertEqual(card["model_config"],
                          f"card/{mm.CARD_PROFILE_KEY}.toml")
 

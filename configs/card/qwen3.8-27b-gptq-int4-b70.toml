@@ -6,7 +6,7 @@ match  = ["qwen3.8-27b-gptq-int4-b70"]
 source = "https://huggingface.co/SergiioB/Qwen3.8-27B-GPTQ-Int4-sym-G128-MTP-BF16"
 
 [capabilities]
-vision           = false
+vision           = { input = ["text", "image", "video"], output = ["text"] }
 reasoning        = true
 tool_call        = true
 concurrency      = 1

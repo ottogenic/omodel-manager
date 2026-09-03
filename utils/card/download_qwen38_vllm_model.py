@@ -55,6 +55,10 @@ FILES = {
         229_820,
         "d511a969b32a16f1890326dadd4d04039779cebce7458b8e5d2ce7f3ce2550ed",
     ),
+    "processor_config.json": (
+        1_191,
+        "d89ef49ce9cd37fbf510158e13c1ef063d9286411c1ec9049932dbe0487143b1",
+    ),
     "quantize_config.json": (
         1_169,
         "ecbdecd64057569d9ab8e74c68eb329776e682d44746ff7b82bba6fcb0e157db",

@@ -17,6 +17,14 @@ class CardDeployCommandTests(unittest.TestCase):
         index = deploy.VLLM_ARGS.index("--served-model-name")
         self.assertEqual(deploy.VLLM_ARGS[index + 1], deploy.MODEL_ID)
         self.assertIn("/bench/utils/card/launch_vllm_xpu.py", deploy.VLLM_ARGS)
+        self.assertNotIn("--language-model-only", deploy.VLLM_ARGS)
+        self.assertIn("--language-model-only", deploy.TEXT_ONLY_VLLM_ARGS)
+
+    def test_processor_config_is_pinned(self):
+        self.assertEqual(deploy.FILES["processor_config.json"], (
+            1_191,
+            "d89ef49ce9cd37fbf510158e13c1ef063d9286411c1ec9049932dbe0487143b1",
+        ))
 
     def test_both_containers_have_standard_ownership_labels(self):
         for command, role in (
@@ -102,6 +110,38 @@ class CardDeployCommandTests(unittest.TestCase):
         inspect["Config"]["Cmd"] = ["unrelated"]
         with self.assertRaisesRegex(deploy.DeployError, "refusing unrelated"):
             deploy.validate_stop_ownership(deploy.MODEL_CONTAINER, inspect)
+
+    def test_previous_text_only_container_is_replaced(self):
+        inspect = {
+            "Config": {
+                "Image": deploy.IMAGE,
+                "Cmd": deploy.TEXT_ONLY_VLLM_ARGS,
+                "Labels": deploy.ownership_labels("model-server"),
+            },
+            "State": {"Running": True},
+        }
+        with mock.patch.object(deploy, "inspect_container", return_value=inspect), \
+                mock.patch.object(deploy, "run") as run:
+            deploy.replace_previous_text_only_container()
+        self.assertEqual(run.call_args_list, [
+            mock.call(["docker", "stop", deploy.MODEL_CONTAINER]),
+            mock.call(["docker", "rm", deploy.MODEL_CONTAINER]),
+        ])
+
+    def test_owned_proxy_with_different_checkout_mount_is_replaced(self):
+        inspect = {
+            "Config": {
+                "Image": deploy.IMAGE,
+                "Cmd": ["-I", "/proxy.py", deploy.MODEL_CONTAINER, "8000"],
+                "Labels": deploy.ownership_labels("loopback-proxy"),
+            },
+            "HostConfig": {"Binds": ["/old/checkout/tcp_proxy.py:/proxy.py:ro"]},
+            "State": {"Running": False},
+        }
+        with mock.patch.object(deploy, "inspect_container", return_value=inspect), \
+                mock.patch.object(deploy, "run") as run:
+            deploy.replace_proxy_with_different_mount(Path("/repo"))
+        run.assert_called_once_with(["docker", "rm", deploy.PROXY_CONTAINER])
 
     def test_docker_inspect_error_is_not_treated_as_absent(self):
         result = SimpleNamespace(returncode=1, stdout="", stderr="permission denied")

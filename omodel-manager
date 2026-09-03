@@ -2488,7 +2488,8 @@ def profile_inventory(kind=None):
         "served_model": CARD_PROFILE_KEY,
         "model_config": model_config("card", CARD_PROFILE_KEY), "port": 8000,
         "status": "validated", "hardware": "intel-arc-pro-b70",
-        "backend": "vllm-xpu-docker", "users": 1, "usecase": [],
+        "backend": "vllm-xpu-docker", "users": 1,
+        "usecase": ["Reasoning", "Vision", "Agentic"],
     })
     for row in profiles.values():
         row["kinds"].sort(key=("card", "node", "cluster").index)
