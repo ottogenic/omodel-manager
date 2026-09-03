@@ -59,6 +59,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import tomllib
@@ -297,6 +298,184 @@ CLUSTER_PROFILES = {
         "enable_prefix_caching": False,
         "status": "rollback",
     },
+    "deepseek-v4-flash-vision-exp": {
+        "backend": "vllm-mp",
+        "family": "deepseek-v4-vision",
+        "model": "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp",
+        "revision": "6821d6ad3681a4b137b066b76094fa82ebd0a380",
+        "model_size": 167819616863,
+        "model_shards": 48,
+        "base_image": ("vllm/vllm-openai@sha256:"
+                       "8568b4bbc821903d93a0a9c17dd80382fdc0ba78eaa128e3eb5cb71c3bf06b79"),
+        "image": "otools/vllm-deepseek-v4-flash-vision-exp:preview-reviewed",
+        # Docker's classic and containerd stores expose different inspect
+        # structures for the same config digest, so both role signatures are pinned.
+        "image_signatures": [
+            "899b8001539557f8095b4705863534ceb379e3ac93a7df6c22a079c909a4e13e",
+            "fa6bdaf6dd184f26086f7309be6b0152bb00e8cd701c3bd5d6f1f35d45c4886b",
+        ],
+        "vllm_version": "0.28.1rc1.dev137+g5ab628dd1",
+        "overlay_source": {
+            "url": ("https://raw.githubusercontent.com/flashinfer-ai/flashinfer/"
+                    "7a55473b9e3f81a1ce7c862c3b993f6ef23cab5f/"
+                    "csrc/sparse_mla_sm120_prefill.cu"),
+            "sha256": "7cc455ade8df4084174e2f837aa0f3c7d511c389d0bcc4020c8571f54cb36811",
+            "revision": "7a55473b9e3f81a1ce7c862c3b993f6ef23cab5f",
+        },
+        "vllm_patch_source": {
+            "revision": "23556d7a6e69e4837e74f2c00004d51b550c0eb8",
+            "cutlass": {
+                "url": ("https://raw.githubusercontent.com/waynehacking8/vllm/"
+                        "23556d7a6e69e4837e74f2c00004d51b550c0eb8/"
+                        "vllm/model_executor/kernels/linear/scaled_mm/cutlass.py"),
+                "sha256": "c6282c9290b13bde0bce7af8bcb1c05831c75c948648a064eb160b683c26dd0b",
+            },
+            "fp8_utils": {
+                "url": ("https://raw.githubusercontent.com/vllm-project/vllm/"
+                        "3e3c938ebb837efcf3535e8644d21a413ed08c0d/"
+                        "vllm/model_executor/layers/quantization/utils/fp8_utils.py"),
+                "sha256": "f64a5408cd6d0fced5cd3dcc19b83883e5e0485c29bf6b34ff28217e6b387cd3",
+                "patched_sha256":
+                    "7bbbbfb8061a575eb9db0d7657eef54e31829822a2b42bf801f6c1329822b097",
+            },
+            "o_proj": {
+                "url": ("https://raw.githubusercontent.com/vllm-project/vllm/"
+                        "3e3c938ebb837efcf3535e8644d21a413ed08c0d/"
+                        "vllm/models/deepseek_v4/nvidia/ops/o_proj.py"),
+                "sha256": "ffb28e7cc44124bb2878e596617b70ec2659c7b26a2048a06facc343fa4d24e1",
+                "patched_sha256":
+                    "c958daaec754d0933659d639317fc13065e7a1867aeef06878331e400e9fc581",
+            },
+        },
+        "served_model_name": "deepseek-v4-flash-vision-exp",
+        "port": 8000,
+        "master_port": 25000,
+        "max_model_len": 262144,
+        "max_num_seqs": 1,
+        "max_num_batched_tokens": 8192,
+        "gpu_memory_utilization": 0.83,
+        "kv_cache_dtype": "fp8",
+        "block_size": 256,
+        "tool_parser": "deepseek_v4",
+        "reasoning_parser": "deepseek_v4",
+        "reasoning_config": {
+            "reasoning_parser": "deepseek_v4",
+            "reasoning_start_str": "",
+            "reasoning_end_str": "",
+        },
+        "tokenizer_mode": "deepseek_v4",
+        "thinking_kwarg": "thinking",
+        "attention_backend": "FLASHINFER_MLA_SPARSE_DSV4",
+        "env": {
+            "VLLM_FLASHINFER_AUTOTUNE_SKIP_OPS":
+                "trtllm_fp4_block_scale_moe,flashinfer::trtllm_fp4_block_scale_moe",
+        },
+        "tok_s": 22,
+        "status": "validated",
+    },
+    "deepseek-v4-flash-vision-anemll": {
+        "backend": "vllm-mp",
+        "family": "deepseek-v4-vision",
+        "model": "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp",
+        "revision": "86f746b36186f0e567729a5c06a8c918caba82a9",
+        "model_size": 167819616863,
+        "model_shards": 48,
+        "base_image": ("ghcr.io/anemll/dspark-vllm-gx10:0.1.1@sha256:"
+                       "a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8"),
+        "anemll_revision": "47503f8e38dadd4dededca798150db2619594fce",
+        "image": "otools/vllm-deepseek-v4-flash-vision-anemll:mia-reviewed",
+        # Docker's classic and containerd stores expose different inspect
+        # structures for the same config digest, so both role signatures are pinned.
+        "image_signatures": [
+            "84ba1d3fc5b43188da20db113b054fb49b29275e2d8de64996a5c7b3bfe4548e",
+            "a64c68527254b9a4aadbd6bc39f829825e20a41ba8c3e3baf326bfac2243e662",
+            "bd1ff59fe48ffb07e14eb78af8a2db53160c9dd87c2a8718174005e0772895d4",
+            "d0c34dac3663a926125c03431bf562d0fef1d9d131fd4f759769c2e7335cd06b",
+        ],
+        "vllm_version": "0.25.2.dev0+g752a3a504.d20260714",
+        "build_context": "anemll-mia",
+        "mia_source": {
+            "revision": "8494a492ad02423620c5740cab2a803ef54d0fb7",
+            "url": ("https://github.com/MiaAI-Lab/"
+                    "DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/archive/"
+                    "8494a492ad02423620c5740cab2a803ef54d0fb7.tar.gz"),
+            "sha256": "9942c2ea60ae4c987e18a6df0abd1e82f8725288f08465d556e5a892d933eaf9",
+        },
+        "encoder_source": {
+            "url": ("https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-Vision-Exp/"
+                    "resolve/86f746b36186f0e567729a5c06a8c918caba82a9/"
+                    "encoding/encoding_dsv4.py"),
+            "sha256": "b4bbb74bbb11a9c8ada04daa30cc7de7dba3abba08e9ade06d38b51a3d0d1701",
+        },
+        "served_model_name": "deepseek-v4-flash-vision-anemll",
+        "port": 8000,
+        "master_port": 25000,
+        "entrypoint": "/usr/local/bin/vllm",
+        "serve_subcommand": True,
+        "tp_socket_ifname": True,
+        "disable_deep_gemm": False,
+        "allow_long_max_model_len": True,
+        "max_model_len": 1048576,
+        "max_num_seqs": 1,
+        "max_num_batched_tokens": 8192,
+        "long_prefill_token_threshold": 1024,
+        "max_cudagraph_capture_size": 42,
+        "gpu_memory_utilization": 0.835,
+        "enable_prefix_caching": True,
+        "async_scheduling": True,
+        "enable_flashinfer_autotune": True,
+        "kv_cache_dtype": "nvfp4_ds_mla",
+        "block_size": 256,
+        "speculative_config": {
+            "method": "dspark",
+            "num_speculative_tokens": 6,
+            "draft_sample_method": "probabilistic",
+        },
+        "pipeline_parallel_size": 1,
+        "enable_expert_parallel": False,
+        "moe_backend": "flashinfer_b12x",
+        "limit_mm_per_prompt": {"image": 8},
+        "tool_parser": "deepseek_v4",
+        "reasoning_parser": "deepseek_v4",
+        "reasoning_config": {
+            "reasoning_parser": "deepseek_v4",
+            "reasoning_start_str": "<think>",
+            "reasoning_end_str": "</think>",
+        },
+        "default_chat_template_kwargs": {"thinking": True, "reasoning_effort": "max"},
+        "tokenizer_mode": "deepseek_v4",
+        "thinking_kwarg": "thinking",
+        "tok_s": 36,
+        "env": {
+            "VLLM_PREFIX_CACHE_RETENTION_INTERVAL": "4096",
+            "DSPARK_MAX_INFLIGHT_PREFILLS": "1",
+            "VLLM_SPARSE_INDEXER_MAX_LOGITS_MB": "256",
+            "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS": "0",
+            "VLLM_USE_FLASHINFER_SAMPLER": "1",
+            "VLLM_USE_BREAKABLE_CUDAGRAPH": "0",
+            "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS": "1800",
+            "VLLM_USE_B12X_MOE": "1",
+            "VLLM_B12X_W4A16_FORCE_BLOCKS_PER_SM": "0",
+            "VLLM_B12X_W4A16_FORCE_BLOCKS_MAX_M": "16",
+            "TORCH_CUDA_ARCH_LIST": "12.1a",
+            "FLASHINFER_CUDA_ARCH_LIST": "12.1a",
+            "CUTE_DSL_ARCH": "sm_121a",
+            "FLASHINFER_DISABLE_VERSION_CHECK": "1",
+            "FLASHINFER_WORKSPACE_BASE": "/cache/runtime/flashinfer",
+            "TILELANG_CLEANUP_TEMP_FILES": "1",
+            "TILELANG_CACHE_DIR": "/cache/runtime/tilelang",
+            "B12X_CUTE_COMPILE_CACHE_DIR": "/cache/runtime/b12x-cute-cache",
+            "DG_JIT_USE_NVRTC": "0",
+            "DG_JIT_NVCC_COMPILER": "/usr/local/cuda/bin/nvcc",
+            "TORCH_FR_BUFFER_SIZE": "2000",
+            "TORCH_NCCL_DUMP_ON_TIMEOUT": "1",
+            "TORCH_NCCL_ENABLE_MONITORING": "1",
+            "TORCH_FR_DUMP_TEMP_FILE": "/cache/runtime/nccl-fr/comm_lib_trace_rank_",
+            "TORCH_NCCL_DEBUG_INFO_PIPE_FILE": "/tmp/fr_dump_pipe_",
+        },
+        "status": "validated",
+        "notes": "Pinned Anemll/MiaAI Vision runtime; qualified on two GB10 nodes.",
+    },
     "qwen3.8-flash-next-fp8": {
         "backend": "vllm-mp",
         "model": "Qwen/Qwen3.8-Flash-Next-FP8",
@@ -324,6 +503,23 @@ CLUSTER_PROFILES = {
                   "concurrency. Video is excluded after a decoder crash."),
     },
 }
+
+# Scratch lane for performance experiments. Keep the promoted profile
+# immutable while varying one launch parameter at a time here.
+CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll-tune"] = dict(
+    CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll"])
+CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll-tune"].update({
+    "served_model_name": "deepseek-v4-flash-vision-anemll-tune",
+    "speculative_config": {
+        "method": "dspark",
+        "num_speculative_tokens": 3,
+        "draft_sample_method": "probabilistic",
+    },
+    "max_num_batched_tokens": 8256,
+    "tok_s": None,
+    "status": "experimental",
+    "notes": "Isolated tuning lane; k=3 probabilistic with 8256 batch tokens.",
+})
 
 DEEPSEEK_VLLM_PREIMAGES = {
     "vllm/config/cache.py": "ee2c0db3e4e6c9e9cab33d8be566c4b8101159d36c0d3787c30d47931ee2a9a4",
@@ -2285,6 +2481,7 @@ def profile_inventory(kind=None):
             "status": entry["status"],
             "backend": entry["backend"], "context": entry.get("max_model_len"),
             "users": entry.get("max_num_seqs") or entry.get("max_batch_size", 1),
+            "tok_s": entry.get("tok_s"),
             "usecase": entry.get("usecase", []),
         })
     add(CARD_PROFILE_KEY, "card", {
@@ -3954,7 +4151,10 @@ def _vllm_runtime_cache(target, profile):
     return os.path.join(remote_home(target), ".cache", "otools", profile["served_model_name"])
 
 
-def _vllm_image_identity(target, profile):
+def _vllm_image_identity(target, profile, allow_unpinned=False):
+    if (not allow_unpinned
+            and not (profile.get("image_signature") or profile.get("image_signatures"))):
+        raise RuntimeError("vLLM image content identity is not pinned")
     inspected = _host_exec(target, ["docker", "image", "inspect", profile["image"]],
                            capture=True)
     if inspected.returncode != 0:
@@ -3965,7 +4165,7 @@ def _vllm_image_identity(target, profile):
         raise RuntimeError("cannot parse pinned vLLM image metadata") from e
     if metadata.get("Architecture") != "arm64" or metadata.get("Os") != "linux":
         raise RuntimeError("pinned vLLM image is not Linux ARM64")
-    if profile["image"] not in metadata.get("RepoDigests", []):
+    if profile.get("base_image") is None and profile["image"] not in metadata.get("RepoDigests", []):
         raise RuntimeError("local vLLM image is not bound to the pinned registry digest")
     content = {
         "architecture": metadata.get("Architecture"),
@@ -3975,28 +4175,424 @@ def _vllm_image_identity(target, profile):
     }
     content_sha256 = hashlib.sha256(
         json.dumps(content, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    if content_sha256 != profile["image_signature"]:
+    expected_signatures = profile.get("image_signatures")
+    if (not allow_unpinned
+            and (profile.get("image_signature")
+                 and content_sha256 != profile["image_signature"]
+                 or expected_signatures and content_sha256 not in expected_signatures)):
         raise RuntimeError("pinned vLLM image content mismatch")
     version = _host_exec(target, [
         "docker", "run", "--rm", "--network", "none", "--entrypoint", "python3",
         profile["image"], "-c", "import vllm; print(vllm.__version__)",
     ], capture=True)
-    if version.returncode != 0 or version.stdout.strip() != profile["vllm_version"]:
+    if version.returncode != 0:
         detail = (version.stdout or version.stderr or "unavailable").strip()
         raise RuntimeError(f"unexpected vLLM runtime version: {detail}")
-    return {"id": metadata.get("Id"), "content_sha256": content_sha256}
+    actual_version = version.stdout.strip()
+    if profile.get("vllm_version") and actual_version != profile["vllm_version"]:
+        raise RuntimeError(f"unexpected vLLM runtime version: {actual_version}")
+    identity = {"id": metadata.get("Id"), "content_sha256": content_sha256}
+    if profile.get("base_image"):
+        identity["vllm_version"] = actual_version
+    return identity
+
+
+ANEMLL_MIA_PATCH_ORDER = (
+    ("python3", "hotfix-encoding-dsv4-issue21.py"),
+    ("python3", "hotfix-dsv4-issue55-tool-truncation.py"),
+    ("bash", "hotfix-nvfp4-ds-mla-issue22.sh"),
+    ("bash", "hotfix-gb10-spin-wait.sh"),
+    ("bash", "hotfix-dsv4-mtp-buffer-50312.sh"),
+    ("bash", "hotfix-dsv4-skip-topk-49486.sh"),
+    ("bash", "hotfix-dsv4-dense-prefill-indexer-48407.sh"),
+    ("bash", "hotfix-dsv4-skip-empty-c128-48957.sh"),
+    ("bash", "hotfix-dsv4-flashmla-workspace-50298.sh"),
+    ("bash", "hotfix-dsv4-grammar-advance.sh"),
+    ("python3", "hotfix-dsv4-vision-exp.py"),
+    ("python3", "hotfix-vllm-empty-encoder-output.py"),
+    ("python3", "hotfix-dsv4-issue27-partial-prefill-concurrency.py"),
+    ("python3", "hotfix-dsv4-issue43-decode-fairness-and-diag.py"),
+    ("python3", "hotfix-dsv4-issue26-hybrid-swa-min.py"),
+    ("python3", "hotfix-dsv4-issue133-triton-specialization.py"),
+    ("python3", "hotfix-dsv4-suppress-stops-in-reasoning.py"),
+)
+
+
+def _extract_mia_patches(archive_path, destination):
+    """Extract regular files from the archive's checked-in patches/ tree only."""
+    if os.path.isdir(destination):
+        shutil.rmtree(destination)
+    os.makedirs(destination)
+    extracted = set()
+    found = False
+    with tarfile.open(archive_path, "r:gz") as archive:
+        for member in archive.getmembers():
+            name = member.name
+            parts = name.split("/")
+            if (name.startswith("/") or "\\" in name or any(
+                    part in ("", ".", "..") for part in parts)):
+                raise RuntimeError(f"unsafe MiaAI archive path: {name}")
+            if member.issym() or member.islnk():
+                raise RuntimeError(f"links are not allowed in the MiaAI archive: {name}")
+            if not (member.isdir() or member.isfile()):
+                raise RuntimeError(f"special files are not allowed in the MiaAI archive: {name}")
+            if len(parts) < 2 or parts[1] != "patches":
+                continue
+            found = True
+            relative_parts = parts[2:]
+            if not relative_parts:
+                continue
+            relative = os.path.join(*relative_parts)
+            if relative in extracted:
+                raise RuntimeError(f"duplicate MiaAI patch archive path: {relative}")
+            extracted.add(relative)
+            target = os.path.join(destination, relative)
+            if member.isdir():
+                os.makedirs(target, exist_ok=True)
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            source = archive.extractfile(member)
+            if source is None:
+                raise RuntimeError(f"cannot read MiaAI patch archive member: {name}")
+            with source, open(target, "wb") as output:
+                shutil.copyfileobj(source, output)
+            os.chmod(target, 0o755 if member.mode & 0o111 else 0o644)
+    if not found or not extracted:
+        raise RuntimeError("pinned MiaAI archive contains no patches/ tree")
+
+
+def _vllm_anemll_installer():
+    commands = repr([[executable, f"/opt/dspark-patches/{name}"]
+                     for executable, name in ANEMLL_MIA_PATCH_ORDER])
+    return f"""#!/usr/bin/env python3
+import shutil
+import subprocess
+from pathlib import Path
+
+vllm = Path("/usr/local/lib/python3.12/dist-packages/vllm")
+encoder = vllm / "tokenizers/deepseek_v4_encoding.py"
+shutil.copyfile("/opt/dspark-sources/encoding_dsv4.py", encoder)
+
+# Keep this source-exact mapping correction in the same position as Compose:
+# encoder install, mapping edit, Issue #21, then the remaining patch train.
+wrapper = vllm / "tokenizers/deepseek_v4.py"
+source = wrapper.read_text()
+old = '''elif reasoning_effort in ("max", "xhigh"):
+                reasoning_effort = "max"
+            else:
+                reasoning_effort = "high"'''
+new = '''elif reasoning_effort in ("max", "xhigh"):
+                reasoning_effort = "max"
+            elif reasoning_effort == "high":
+                reasoning_effort = "high"
+            else:
+                reasoning_effort = "low"'''
+if source.count(old) != 1:
+    raise SystemExit("pinned Anemll reasoning-effort mapping changed")
+wrapper.write_text(source.replace(old, new, 1))
+
+for command in {commands}:
+    subprocess.run(command, check=True)
+"""
+
+
+def _vllm_anemll_context(profile):
+    root = os.path.join(CLUSTER_DATA_DIR, "builds", profile["served_model_name"])
+    if os.path.isdir(root):
+        shutil.rmtree(root)
+    os.makedirs(root)
+    archive_path = os.path.join(root, ".mia-source.tar.gz")
+    mia = profile["mia_source"]
+    _download_verified_source(mia["url"], archive_path, mia["sha256"])
+    patches = os.path.join(root, "patches")
+    _extract_mia_patches(archive_path, patches)
+    os.remove(archive_path)
+    required = [os.path.join(patches, name) for _, name in ANEMLL_MIA_PATCH_ORDER]
+    required += [os.path.join(patches, "vision_exp", name) for name in (
+        "__init__.py", "apply.py", "image_processor.py", "processor.py", "vision.py")]
+    missing = [path for path in required if not os.path.isfile(path)]
+    if missing:
+        raise RuntimeError("pinned MiaAI archive is missing required patch files: "
+                           + ", ".join(os.path.relpath(path, patches) for path in missing))
+
+    sources = os.path.join(root, "sources")
+    os.makedirs(sources)
+    encoder = profile["encoder_source"]
+    encoder_path = os.path.join(sources, "encoding_dsv4.py")
+    _download_verified_source(encoder["url"], encoder_path, encoder["sha256"])
+    installer_path = os.path.join(root, "install.py")
+    with open(installer_path, "w") as stream:
+        stream.write(_vllm_anemll_installer())
+
+    dockerfile = f'''FROM {profile["base_image"]}
+LABEL org.opencontainers.image.source="{mia["url"]}"
+LABEL org.opencontainers.image.revision="{mia["revision"]}"
+LABEL org.opencontainers.image.base.revision="{profile["anemll_revision"]}"
+LABEL org.opencontainers.image.description="Pinned MiaAI DeepSeek V4 Vision Anemll candidate"
+COPY patches/ /opt/dspark-patches/
+COPY sources/encoding_dsv4.py /opt/dspark-sources/encoding_dsv4.py
+COPY install.py /opt/dspark-install/install.py
+RUN test "$(sha256sum /opt/dspark-sources/encoding_dsv4.py | cut -d' ' -f1)" = "{encoder["sha256"]}" && \\
+    python3 /opt/dspark-install/install.py && \\
+    python3 -c "import vllm; assert vllm.__version__ == '{profile["vllm_version"]}'"
+'''
+    with open(os.path.join(root, "Dockerfile"), "w") as stream:
+        stream.write(dockerfile)
+    manifest = {
+        "schema": 1,
+        "base_image": profile["base_image"],
+        "anemll_revision": profile["anemll_revision"],
+        "image": profile["image"],
+        "mia_source": mia,
+        "encoder_source": encoder,
+        "patch_order": ANEMLL_MIA_PATCH_ORDER,
+        "files": _tree_manifest(root, excluded=("manifest.json",)),
+    }
+    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    manifest["context_sha256"] = hashlib.sha256(canonical).hexdigest()
+    with open(os.path.join(root, "manifest.json"), "w") as stream:
+        json.dump(manifest, stream, indent=2); stream.write("\n")
+    return root
+
+
+def _vllm_overlay_context(profile):
+    root = os.path.join(CLUSTER_DATA_DIR, "builds", profile["served_model_name"])
+    if os.path.isdir(root):
+        shutil.rmtree(root)
+    sources = os.path.join(root, "sources")
+    os.makedirs(sources)
+    source = profile["overlay_source"]
+    dispatcher = os.path.join(sources, "sparse_mla_sm120_prefill.cu")
+    _download_verified_source(source["url"], dispatcher, source["sha256"])
+    vllm_patch = profile["vllm_patch_source"]
+    cutlass_source = vllm_patch["cutlass"]
+    cutlass = os.path.join(sources, "cutlass.py")
+    _download_verified_source(cutlass_source["url"], cutlass, cutlass_source["sha256"])
+    fp8_source = vllm_patch["fp8_utils"]
+    fp8_utils = os.path.join(sources, "fp8_utils.py")
+    _download_verified_source(fp8_source["url"], fp8_utils, fp8_source["sha256"])
+    with open(fp8_utils) as stream:
+        fp8_content = stream.read()
+    old = '''    # Triton cannot currently bind E8M0 scale tensors directly. On ROCm,
+    # DeepSeek-V4 checkpoints store block scales in exponent-only E8M0 format,
+    # so decode them to fp32 before launching the kernel.
+    if current_platform.is_rocm() or current_platform.is_xpu():
+        if As.dtype == torch.float8_e8m0fnu:
+            As = _upcast_e8m0_to_fp32(As).contiguous()
+        if Bs.dtype == torch.float8_e8m0fnu:
+            Bs = _upcast_e8m0_to_fp32(Bs).contiguous()
+'''
+    new = '''    # Triton cannot currently bind E8M0 scale tensors directly.
+    # DeepSeek-V4 checkpoints store block scales in exponent-only E8M0 format,
+    # so decode them to fp32 before launching the kernel.
+    if As.dtype == torch.float8_e8m0fnu:
+        As = _upcast_e8m0_to_fp32(As).contiguous()
+    if Bs.dtype == torch.float8_e8m0fnu:
+        Bs = _upcast_e8m0_to_fp32(Bs).contiguous()
+'''
+    if fp8_content.count(old) != 1:
+        raise RuntimeError("pinned vLLM FP8 source does not match the reviewed patch base")
+    fp8_content = fp8_content.replace(old, new)
+    if hashlib.sha256(fp8_content.encode()).hexdigest() != fp8_source["patched_sha256"]:
+        raise RuntimeError("patched vLLM FP8 source content mismatch")
+    with open(fp8_utils, "w") as stream:
+        stream.write(fp8_content)
+    o_proj_source = vllm_patch["o_proj"]
+    o_proj = os.path.join(sources, "o_proj.py")
+    _download_verified_source(o_proj_source["url"], o_proj, o_proj_source["sha256"])
+    with open(o_proj) as stream:
+        o_proj_content = stream.read()
+
+    def replace_once(content, old_text, new_text, label):
+        if content.count(old_text) != 1:
+            raise RuntimeError(f"pinned vLLM source does not match reviewed {label} base")
+        return content.replace(old_text, new_text)
+
+    helper_anchor = "from vllm.utils.deep_gemm import fp8_einsum\n\n\n"
+    helper = '''from vllm.utils.deep_gemm import fp8_einsum
+
+
+def _expand_block_scales(scale: torch.Tensor, shape: torch.Size) -> torch.Tensor:
+    if scale.dtype == torch.float8_e8m0fnu:
+        scale = (scale.view(torch.uint8).to(torch.int32) << 23).view(torch.float32)
+    else:
+        scale = scale.to(torch.float32)
+    assert scale.dim() == len(shape)
+    for dim, size in enumerate(shape):
+        assert size % scale.shape[dim] == 0
+        scale = scale.repeat_interleave(size // scale.shape[dim], dim=dim)
+    return scale
+
+
+def _sm12x_fp8_o_proj(
+    o_fp8: torch.Tensor,
+    o_scale: torch.Tensor,
+    wo_a: nn.Module,
+    out: torch.Tensor,
+) -> None:
+    weight = wo_a.weight
+    weight_scale = (
+        wo_a.weight_scale if hasattr(wo_a, "weight_scale") else wo_a.weight_scale_inv
+    )
+    weight_bmm = getattr(wo_a, "_sm12x_weight_bmm", None)
+    if weight_bmm is None:
+        assert not torch.cuda.is_current_stream_capturing()
+        groups = o_fp8.shape[1]
+        rank = out.shape[2]
+        assert weight.shape[0] == groups * rank
+        weight_fp = weight.to(torch.bfloat16) * _expand_block_scales(
+            weight_scale, weight.shape
+        ).to(torch.bfloat16)
+        weight_bmm = weight_fp.view(groups, rank, weight.shape[1]).transpose(1, 2)
+        weight_bmm = weight_bmm.contiguous()
+        wo_a._sm12x_weight_bmm = weight_bmm
+    o_fp = o_fp8.to(torch.bfloat16) * _expand_block_scales(o_scale, o_fp8.shape).to(
+        torch.bfloat16
+    )
+    result = torch.bmm(o_fp.permute(1, 0, 2), weight_bmm).permute(1, 0, 2)
+    out.copy_(result)
+
+
+'''
+    o_proj_content = replace_once(
+        o_proj_content, helper_anchor, helper, "SM12x o_proj helper")
+    recipe_old = '''    cap = current_platform.get_device_capability()
+    assert cap is not None, "DeepseekV4 attention requires a CUDA device"
+    einsum_recipe = (1, 128, 128) if cap.major <= 9 else (1, 1, 128)
+'''
+    recipe_new = '''    cap = current_platform.get_device_capability()
+    assert cap is not None, "DeepseekV4 attention requires a CUDA device"
+    if cap.major == 12:
+        return (1, 128, 128), False
+    einsum_recipe = (1, 128, 128) if cap.major <= 9 else (1, 1, 128)
+'''
+    o_proj_content = replace_once(
+        o_proj_content, recipe_old, recipe_new, "SM12x o_proj scale recipe")
+    call_old = '''    fp8_einsum(
+        "bhr,hdr->bhd",
+        (o_fp8, o_scale),
+        (wo_a.weight, weight_scale),
+        z,
+        recipe=einsum_recipe,
+    )
+'''
+    call_new = '''    if current_platform.is_device_capability_family(120) and wo_a.weight.dim() == 2:
+        _sm12x_fp8_o_proj(o_fp8, o_scale, wo_a, z)
+    else:
+        fp8_einsum(
+            "bhr,hdr->bhd",
+            (o_fp8, o_scale),
+            (wo_a.weight, weight_scale),
+            z,
+            recipe=einsum_recipe,
+        )
+'''
+    o_proj_content = replace_once(
+        o_proj_content, call_old, call_new, "SM12x o_proj dispatch")
+    if hashlib.sha256(o_proj_content.encode()).hexdigest() != o_proj_source["patched_sha256"]:
+        raise RuntimeError("patched vLLM o_proj source content mismatch")
+    with open(o_proj, "w") as stream:
+        stream.write(o_proj_content)
+    dockerfile = f'''FROM {profile["base_image"]}
+LABEL org.opencontainers.image.source="https://github.com/vllm-project/vllm"
+LABEL org.opencontainers.image.revision="{vllm_patch["revision"]}"
+LABEL org.opencontainers.image.description="Reviewed DeepSeek V4 Vision GB10 compatibility overlay"
+COPY sources/sparse_mla_sm120_prefill.cu /opt/otools/sources/sparse_mla_sm120_prefill.cu
+COPY sources/cutlass.py /opt/otools/sources/cutlass.py
+COPY sources/fp8_utils.py /opt/otools/sources/fp8_utils.py
+COPY sources/o_proj.py /opt/otools/sources/o_proj.py
+RUN test "$(sha256sum /opt/otools/sources/sparse_mla_sm120_prefill.cu | cut -d' ' -f1)" = "{source["sha256"]}" && \\
+    test "$(sha256sum /opt/otools/sources/cutlass.py | cut -d' ' -f1)" = "{cutlass_source["sha256"]}" && \\
+    test "$(sha256sum /opt/otools/sources/fp8_utils.py | cut -d' ' -f1)" = "{fp8_source["patched_sha256"]}" && \\
+    test "$(sha256sum /opt/otools/sources/o_proj.py | cut -d' ' -f1)" = "{o_proj_source["patched_sha256"]}" && \\
+    cp /opt/otools/sources/sparse_mla_sm120_prefill.cu \\
+      /usr/local/lib/python3.12/dist-packages/flashinfer/data/csrc/sparse_mla_sm120_prefill.cu && \\
+    cp /opt/otools/sources/cutlass.py \\
+      /usr/local/lib/python3.12/dist-packages/vllm/model_executor/kernels/linear/scaled_mm/cutlass.py && \\
+    cp /opt/otools/sources/fp8_utils.py \\
+      /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/utils/fp8_utils.py && \\
+    cp /opt/otools/sources/o_proj.py \\
+      /usr/local/lib/python3.12/dist-packages/vllm/models/deepseek_v4/nvidia/ops/o_proj.py && \\
+    rm -f /usr/local/lib/python3.12/dist-packages/flashinfer_jit_cache/jit_cache/sparse_mla_sm120/sparse_mla_sm120.so && \\
+    test -x /usr/local/cuda/bin/nvcc && \\
+    grep -q '_upcast_e8m0_to_fp32(weight_scale)' /opt/otools/sources/cutlass.py && \\
+    grep -q 'current_platform.is_device_capability_family(120)' /opt/otools/sources/cutlass.py && \\
+    grep -q 'if As.dtype == torch.float8_e8m0fnu:' /opt/otools/sources/fp8_utils.py && \\
+    grep -q '_sm12x_fp8_o_proj(o_fp8, o_scale, wo_a, z)' /opt/otools/sources/o_proj.py && \\
+    grep -q 'DISPATCH_DUAL_MG_CM(BF16, 32, 512, 64, 2)' /opt/otools/sources/sparse_mla_sm120_prefill.cu && \\
+    grep -q 'DISPATCH_DUAL_MG_CM(BF16, 64, 512, 64, 2)' /opt/otools/sources/sparse_mla_sm120_prefill.cu && \\
+    grep -q 'DISPATCH_DUAL_MG_CM(BF16, 32, 512, 2, 2)' /opt/otools/sources/sparse_mla_sm120_prefill.cu && \\
+    grep -q 'DISPATCH_DUAL_MG_CM(BF16, 64, 512, 2, 2)' /opt/otools/sources/sparse_mla_sm120_prefill.cu
+'''
+    with open(os.path.join(root, "Dockerfile"), "w") as stream:
+        stream.write(dockerfile)
+    manifest = {
+        "schema": 1,
+        "base_image": profile["base_image"],
+        "image": profile["image"],
+        "source": source,
+        "vllm_patch_source": vllm_patch,
+        "files": _tree_manifest(root, excluded=("manifest.json",)),
+    }
+    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    manifest["context_sha256"] = hashlib.sha256(canonical).hexdigest()
+    with open(os.path.join(root, "manifest.json"), "w") as stream:
+        json.dump(manifest, stream, indent=2); stream.write("\n")
+    return root
 
 
 def _prepare_vllm(cfg, profile, build=False, weights=False, dry=False):
     if dry:
         if build:
-            print(f"  would pull and verify {profile['image']} on both nodes")
+            action = ("build the reviewed overlay"
+                      if profile.get("overlay_source") or profile.get("build_context")
+                      else "pull and verify")
+            print(f"  would {action} {profile['image']} on both nodes")
         if weights:
             _download_cluster_snapshot(cfg, profile, profile["image"], "Qwen", dry=True)
         return
     head, worker = _cluster_targets(cfg)
     roles = (("head", head), ("worker", worker))
-    if build:
+    if build and (profile.get("overlay_source") or profile.get("build_context")):
+        anemll = profile.get("build_context") == "anemll-mia"
+        context = _vllm_anemll_context(profile) if anemll else _vllm_overlay_context(profile)
+        remote_leaf = "vllm-anemll" if anemll else "vllm-overlay"
+        _sync_cluster_files(cfg, context, remote_leaf)
+
+        def build_overlay(role, target):
+            print(f"Pulling pinned vLLM base on {role} ({target or 'local'}) ...")
+            if _host_exec(target, ["docker", "pull", profile["base_image"]]).returncode != 0:
+                raise RuntimeError(f"pinned vLLM base pull failed on {role}")
+            remote_context = os.path.join(_cluster_state_dir(cfg["name"], target), remote_leaf)
+            print(f"Building reviewed Vision overlay on {role} ({target or 'local'}) ...")
+            command = ["docker", "build", "--network", "none", "--pull=false",
+                       "--provenance=false",
+                       "-t", profile["image"], remote_context]
+            if _host_exec(target, command).returncode != 0:
+                raise RuntimeError(f"reviewed Vision overlay build failed on {role}")
+            return role, _vllm_image_identity(target, profile, allow_unpinned=True)
+
+        identities = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(build_overlay, role, target) for role, target in roles]
+            for future in concurrent.futures.as_completed(futures):
+                role, identity = future.result()
+                identities[role] = identity
+        signatures = {identity["content_sha256"] for identity in identities.values()}
+        versions = {identity["vllm_version"] for identity in identities.values()}
+        expected = set(profile.get("image_signatures", []))
+        if (expected and not signatures.issubset(expected)) or len(versions) != 1:
+            for role in sorted(identities):
+                print(f"  {role}: {identities[role]}")
+            raise RuntimeError("reviewed Vision overlay differs between nodes")
+        if expected:
+            print(f"  candidate image_signatures={','.join(sorted(signatures))}")
+        else:
+            for role in sorted(identities):
+                print(f"  candidate image_signature[{role}]="
+                      f"{identities[role]['content_sha256']}")
+        print(f"  candidate vllm_version={versions.pop()}")
+    elif build:
         def pull(role, target):
             print(f"Pulling pinned vLLM preview image on {role} ({target or 'local'}) ...")
             if _host_exec(target, ["docker", "pull", profile["image"]]).returncode != 0:
@@ -4101,8 +4697,12 @@ def build_vllm_cluster_argv(profile_key, profile, cfg, role, target, keep=False)
              "-e", "HF_HOME=/cache/huggingface", "-e", "HF_HUB_OFFLINE=1",
              "-e", "TRANSFORMERS_OFFLINE=1", "-e", "HF_HUB_DISABLE_XET=1",
              "-e", "VLLM_CACHE_ROOT=/cache/runtime/vllm",
-             "-e", "TRITON_CACHE_DIR=/cache/runtime/triton",
-             "-e", "VLLM_USE_DEEP_GEMM=0", "-e", "VLLM_ALLOW_LONG_MAX_MODEL_LEN=0",
+             "-e", "TRITON_CACHE_DIR=/cache/runtime/triton"]
+    if profile.get("disable_deep_gemm", True):
+        argv += ["-e", "VLLM_USE_DEEP_GEMM=0"]
+    argv += ["-e", ("VLLM_ALLOW_LONG_MAX_MODEL_LEN=1"
+                    if profile.get("allow_long_max_model_len")
+                    else "VLLM_ALLOW_LONG_MAX_MODEL_LEN=0"),
              "-e", "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True", "-e", "DO_NOT_TRACK=1",
              "-e", "NCCL_NET=IB", "-e", "NCCL_IB_DISABLE=0", "-e", f"NCCL_IB_HCA=={hcas}",
              "-e", f"NCCL_SOCKET_IFNAME=={interfaces}",
@@ -4110,26 +4710,75 @@ def build_vllm_cluster_argv(profile_key, profile, cfg, role, target, keep=False)
              "-e", "NCCL_IB_ADDR_FAMILY=AF_INET", "-e", "NCCL_IB_ROCE_VERSION_NUM=2",
              "-e", "NCCL_CROSS_NIC=1", "-e", "NCCL_IB_MERGE_NICS=1",
              "-e", "NCCL_CUMEM_ENABLE=0", "-e", "NCCL_NVLS_ENABLE=0",
-             "-e", "NCCL_DEBUG=INFO", "-e", f"VLLM_HOST_IP={role_ips[0]}",
-             profile["image"], _vllm_snapshot_path(profile),
-             "--served-model-name", profile["served_model_name"],
+              "-e", "NCCL_DEBUG=INFO", "-e", f"VLLM_HOST_IP={role_ips[0]}"]
+    if profile.get("tp_socket_ifname"):
+        argv += ["-e", f"TP_SOCKET_IFNAME={fabric['interfaces'][0]}"]
+    for key, value in profile.get("env", {}).items():
+        argv += ["-e", f"{key}={value}"]
+    if profile.get("entrypoint"):
+        argv += ["--entrypoint", profile["entrypoint"]]
+    argv.append(profile["image"])
+    if profile.get("serve_subcommand"):
+        argv.append("serve")
+    argv += [_vllm_snapshot_path(profile),
+              "--served-model-name", profile["served_model_name"],
              "--host", "127.0.0.1", "--port", str(profile["port"]),
-             "--distributed-executor-backend", "mp", "--tensor-parallel-size", "2",
-             "--enable-expert-parallel", "--all2all-backend", "allgather_reducescatter",
-             "--load-format", "safetensors", "--safetensors-load-strategy", "lazy",
-             "--dtype", "bfloat16", "--max-model-len", str(profile["max_model_len"]),
+             "--distributed-executor-backend", "mp", "--tensor-parallel-size", "2"]
+    if profile.get("enable_expert_parallel", True):
+        argv += ["--enable-expert-parallel", "--all2all-backend",
+                 "allgather_reducescatter"]
+    if profile.get("pipeline_parallel_size") is not None:
+        argv += ["--pipeline-parallel-size", str(profile["pipeline_parallel_size"])]
+    argv += [
+              "--load-format", "safetensors", "--safetensors-load-strategy", "lazy",
+              "--dtype", "bfloat16", "--max-model-len", str(profile["max_model_len"]),
              "--max-num-seqs", str(profile["max_num_seqs"]), "--max-num-batched-tokens",
-             str(profile["max_num_batched_tokens"]), "--gpu-memory-utilization",
-             str(profile["gpu_memory_utilization"]), "--enable-chunked-prefill",
-             "--no-enable-prefix-caching", "--no-async-scheduling",
-             "--no-enable-flashinfer-autotune", "--enforce-eager",
-             "--enable-auto-tool-choice", "--tool-call-parser", profile["tool_parser"],
+             str(profile["max_num_batched_tokens"])]
+    if profile.get("long_prefill_token_threshold") is not None:
+        argv += ["--long-prefill-token-threshold",
+                 str(profile["long_prefill_token_threshold"])]
+    if profile.get("max_cudagraph_capture_size") is not None:
+        argv += ["--max-cudagraph-capture-size",
+                 str(profile["max_cudagraph_capture_size"])]
+    argv += ["--gpu-memory-utilization", str(profile["gpu_memory_utilization"]),
+             "--enable-chunked-prefill",
+             ("--enable-prefix-caching" if profile.get("enable_prefix_caching")
+              else "--no-enable-prefix-caching"),
+             ("--async-scheduling" if profile.get("async_scheduling")
+              else "--no-async-scheduling"),
+             ("--enable-flashinfer-autotune"
+              if profile.get("enable_flashinfer_autotune")
+              else "--no-enable-flashinfer-autotune"),
+              "--enable-auto-tool-choice", "--tool-call-parser", profile["tool_parser"],
              "--reasoning-parser", profile["reasoning_parser"], "--generation-config", "vllm",
              "--enable-prompt-tokens-details", "--enable-log-requests",
              "--distributed-timeout-seconds", "900",
              "--cpu-distributed-timeout-seconds", "900", "--nnodes", "2", "--node-rank",
-             "0" if role == "head" else "1", "--master-addr", fabric["head_ips"][0],
-             "--master-port", str(profile["master_port"])]
+              "0" if role == "head" else "1", "--master-addr", fabric["head_ips"][0],
+              "--master-port", str(profile["master_port"])]
+    if profile.get("family") != "deepseek-v4-vision":
+        argv.append("--enforce-eager")
+    if profile.get("kv_cache_dtype"):
+        argv += ["--kv-cache-dtype", profile["kv_cache_dtype"]]
+    if profile.get("block_size"):
+        argv += ["--block-size", str(profile["block_size"])]
+    if profile.get("tokenizer_mode"):
+        argv += ["--tokenizer-mode", profile["tokenizer_mode"]]
+    if profile.get("attention_backend"):
+        argv += ["--attention-backend", profile["attention_backend"]]
+    if profile.get("reasoning_config"):
+        argv += ["--reasoning-config", json.dumps(profile["reasoning_config"], separators=(",", ":"))]
+    if profile.get("default_chat_template_kwargs"):
+        argv += ["--default-chat-template-kwargs",
+                 json.dumps(profile["default_chat_template_kwargs"], separators=(",", ":"))]
+    if profile.get("limit_mm_per_prompt"):
+        argv += ["--limit-mm-per-prompt",
+                 json.dumps(profile["limit_mm_per_prompt"], separators=(",", ":"))]
+    if profile.get("moe_backend"):
+        argv += ["--moe-backend", profile["moe_backend"]]
+    if profile.get("speculative_config"):
+        argv += ["--speculative-config",
+                 json.dumps(profile["speculative_config"], separators=(",", ":"))]
     if role == "worker":
         argv.append("--headless")
     return name, argv
@@ -4922,7 +5571,8 @@ def _launch_qwen_cluster(profile_key, profile, cfg, dry=False, startup_timeout=1
 
 def _vllm_warmup_requests(profile):
     model = profile["served_model_name"]
-    no_think = {"enable_thinking": False}
+    thinking_kwarg = profile.get("thinking_kwarg", "enable_thinking")
+    no_think = {thinking_kwarg: False}
     tool = {
         "type": "function",
         "function": {
@@ -4957,7 +5607,7 @@ def _vllm_warmup_requests(profile):
             "top_p": 0.95,
             "top_k": 20,
             "reasoning_effort": "low",
-            "chat_template_kwargs": {"enable_thinking": True},
+            "chat_template_kwargs": {thinking_kwarg: True, "reasoning_effort": "low"},
         }),
         ("tool parser", 600, {
             "model": model,
@@ -5003,7 +5653,7 @@ def _warm_vllm_cluster(head, profile, deadline):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise RuntimeError(f"Qwen3.8 warmup deadline exhausted before {label}")
-        print(f"Warming Qwen3.8 Flash Next {label} path ...")
+        print(f"Warming {profile['served_model_name']} {label} path ...")
         ok, body = _host_text(head, [
             "curl", "--fail-with-body", "-sS", "--max-time", str(min(timeout, remaining)),
             "-H", "Content-Type: application/json", "--data-binary",
@@ -5097,6 +5747,11 @@ def _warm_vllm_cluster(head, profile, deadline):
 def _launch_vllm_cluster(profile_key, profile, cfg, dry=False, startup_timeout=1800, keep=False):
     head, worker = _cluster_targets(cfg)
     if not dry:
+        if (not (profile.get("image_signature") or profile.get("image_signatures"))
+                or not profile.get("vllm_version")):
+            print("ERROR: experimental vLLM image identity is not pinned; prepare the image, "
+                  "record its reported signature/version, then retry.", file=sys.stderr)
+            sys.exit(1)
         if not cluster_preflight(cfg, require_fabric=True)[0]:
             sys.exit(1)
         _ensure_cluster_idle(cfg)
@@ -5138,8 +5793,11 @@ def _launch_vllm_cluster(profile_key, profile, cfg, dry=False, startup_timeout=1
                   "with --weights.", file=sys.stderr)
             sys.exit(1)
         _host_exec(target, ["mkdir", "-p", _vllm_runtime_cache(target, profile)], check=True)
-    if len({identity["content_sha256"] for identity in identities.values()}) != 1:
-        print("ERROR: pinned vLLM image contents differ between nodes.", file=sys.stderr)
+    signatures = {identity["content_sha256"] for identity in identities.values()}
+    expected = set(profile.get("image_signatures", []))
+    if ((expected and not signatures.issubset(expected))
+            or (not expected and len(signatures) != 1)):
+        print("ERROR: pinned vLLM image contents do not match the qualified pair.", file=sys.stderr)
         sys.exit(1)
 
     for _, target, _, _ in commands:
@@ -6119,7 +6777,15 @@ def cmd_plan(args):
     if not profile:
         return
     _dispatch_facade_launch(device, profile, args, dry_run=True)
-    _suggest([("Launch this plan", f"{_cli_name()} launch {device['name']} {profile['key']}")])
+    selected = (CLUSTER_PROFILES.get(profile["key"])
+                if device["kind"] == "cluster" else None)
+    if (selected is not None
+            and not (selected.get("image_signature") or selected.get("image_signatures"))):
+        _suggest([("Build and inspect the candidate image",
+                   f"{_cli_name()} cluster prepare {device['name']} {profile['key']} --build")])
+    else:
+        _suggest([("Launch this plan",
+                   f"{_cli_name()} launch {device['name']} {profile['key']}")])
 
 
 def _node_lifecycle_args(device, deployment, **values):

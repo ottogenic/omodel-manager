@@ -15,8 +15,10 @@ import io
 import json
 import os
 import pathlib
+import shutil
 import socket
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
@@ -158,33 +160,33 @@ class InstallTests(unittest.TestCase):
                                          preferred_aliases=["dgx1"])
 
     def test_explicit_card_is_registered_as_host_scoped_device(self):
-        args = SimpleNamespace(target="otto@home", alias="otto-home", fix=True, card="b70")
+        args = SimpleNamespace(target="user@workstation", alias="workstation", fix=True, card="b70")
         with mock.patch.object(mm, "_setup_host", return_value=(True, True)), \
                 mock.patch.object(mm.shutil, "which", return_value="/usr/bin/ssh"), \
                 mock.patch.object(mm, "auto_register_dgx_cluster"), \
                 contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
             mm.cmd_install(args)
-        self.assertEqual(mm.load_devices()["otto-home-b70"], {
-            "kind": "card", "target": "otto-home",
+        self.assertEqual(mm.load_devices()["workstation-b70"], {
+            "kind": "card", "target": "workstation",
             "hardware": "intel-arc-pro-b70",
         })
-        self.assertEqual(mm.resolve_device("otto-home-b70")["target"], "otto@home")
+        self.assertEqual(mm.resolve_device("workstation-b70")["target"], "user@workstation")
 
     def test_install_replaces_a_prior_alias_mapping(self):
-        mm.save_hosts([("otto-home", "otto@old-home")])
-        args = SimpleNamespace(target="otto@new-home", alias="otto-home", fix=True)
+        mm.save_hosts([("workstation", "user@old-workstation")])
+        args = SimpleNamespace(target="user@new-workstation", alias="workstation", fix=True)
         with mock.patch.object(mm, "_setup_host", return_value=(True, True)), \
                 mock.patch.object(mm.shutil, "which", return_value="/usr/bin/ssh"), \
                 mock.patch.object(mm, "auto_register_dgx_cluster"), \
                 contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
             mm.cmd_install(args)
-        self.assertEqual(mm.load_hosts(), [("otto-home", "otto@new-home")])
+        self.assertEqual(mm.load_hosts(), [("workstation", "user@new-workstation")])
 
     def test_uninstall_explicit_card_keeps_host_and_does_not_use_ssh(self):
-        mm.save_hosts([("otto-home", "otto@home")])
+        mm.save_hosts([("workstation", "user@workstation")])
         mm.save_devices({
-            "otto-home-b70": {
-                "kind": "card", "target": "otto-home",
+            "workstation-b70": {
+                "kind": "card", "target": "workstation",
                 "hardware": "intel-arc-pro-b70",
             },
         })
@@ -192,18 +194,18 @@ class InstallTests(unittest.TestCase):
         with mock.patch.object(mm.shutil, "which") as which, \
                 mock.patch.object(mm, "save_hosts") as save_hosts, \
                 contextlib.redirect_stdout(out):
-            mm.cmd_uninstall(SimpleNamespace(target="OTTO-HOME-B70", purge=False))
+            mm.cmd_uninstall(SimpleNamespace(target="WORKSTATION-B70", purge=False))
         self.assertEqual(mm.load_devices(), {})
-        self.assertEqual(mm.load_hosts(), [("otto-home", "otto@home")])
+        self.assertEqual(mm.load_hosts(), [("workstation", "user@workstation")])
         which.assert_not_called()
         save_hosts.assert_not_called()
         self.assertIn("running containers were left unchanged", out.getvalue())
 
     def test_uninstall_device_rejects_host_purge(self):
-        mm.save_devices({"otto-home-b70": {"kind": "card", "target": "otto-home"}})
+        mm.save_devices({"workstation-b70": {"kind": "card", "target": "workstation"}})
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            mm.cmd_uninstall(SimpleNamespace(target="otto-home-b70", purge=True))
-        self.assertIn("otto-home-b70", mm.load_devices())
+            mm.cmd_uninstall(SimpleNamespace(target="workstation-b70", purge=True))
+        self.assertIn("workstation-b70", mm.load_devices())
 
     def test_local_setup_skips_ssh_prerequisites(self):
         def setup_ok(target, cmd):
@@ -306,7 +308,7 @@ class DgxClusterDiscoveryTests(unittest.TestCase):
                 ("uname", "-m"): (True, "aarch64"),
                 ("nvidia-smi", "--query-gpu=name", "--format=csv,noheader"):
                     (True, "NVIDIA GB10"),
-                ("hostnamectl", "--static"): (True, "otto-dgx-3"),
+                ("hostnamectl", "--static"): (True, "gpu-node-3"),
                 ("cat", "/etc/machine-id"): (True, "machine-three"),
                 ("ibdev2netdev",):
                     (True, "rocep1s0f1 port 1 ==> enp1s0f1np1 (Up)"),
@@ -318,7 +320,7 @@ class DgxClusterDiscoveryTests(unittest.TestCase):
 
         with mock.patch.object(mm, "_host_text", side_effect=host_text):
             host = mm._dgx_cluster_host("dgx3", "otto@dgx3")
-        self.assertEqual(host["hostname"], "otto-dgx-3")
+        self.assertEqual(host["hostname"], "gpu-node-3")
         self.assertEqual(host["machine_id"], "machine-three")
         self.assertEqual(host["fabric"]["enp1s0f1np1"]["ucx_device"],
                          "rocep1s0f1:1")
@@ -373,7 +375,7 @@ class DgxClusterDiscoveryTests(unittest.TestCase):
         self.assertEqual(saved["worker_machine_id"], "four")
 
     def test_existing_pair_is_not_prompted_or_overwritten(self):
-        existing = {"Beebo": {"head": "dgx3", "worker": "dgx4", "fabric": {}}}
+        existing = {"test-cluster": {"head": "dgx3", "worker": "dgx4", "fabric": {}}}
         mm.save_clusters(existing)
         found = {
             "otto@dgx3": self.host("dgx3", "otto@dgx3", "three", 2),
@@ -389,7 +391,7 @@ class DgxClusterDiscoveryTests(unittest.TestCase):
     def test_existing_pair_matches_alternate_aliases_by_machine_id(self):
         hosts = [("dgx3", "otto@dgx3-mgmt"), ("dgx3-fabric", "otto@dgx3-fabric"),
                  ("dgx4", "otto@dgx4-mgmt"), ("dgx4-fabric", "otto@dgx4-fabric")]
-        mm.save_clusters({"Beebo": {"head": "dgx3-fabric", "worker": "dgx4-fabric",
+        mm.save_clusters({"test-cluster": {"head": "dgx3-fabric", "worker": "dgx4-fabric",
                                      "fabric": {}}})
         found = {
             target: self.host(alias, target, "three" if "dgx3" in target else "four",
@@ -610,13 +612,13 @@ class LaunchClusterDispatchTests(unittest.TestCase):
     def setUp(self):
         self._clusters = mm.CLUSTERS_FILE
         mm.CLUSTERS_FILE = os.path.join(tempfile.mkdtemp(), "clusters.json")
-        mm.save_clusters({"Beebo": {"head": "dgx3", "worker": "dgx4"}})
+        mm.save_clusters({"test-cluster": {"head": "dgx3", "worker": "dgx4"}})
 
     def tearDown(self):
         mm.CLUSTERS_FILE = self._clusters
 
     def args(self, **kw):
-        base = dict(key="deepseek-v4-flash-0731", host="beebo", remote=None,
+        base = dict(key="deepseek-v4-flash-0731", host="test-cluster", remote=None,
                     local=False, dry_run=True, foreground=False, keep=False,
                     force=False, no_fetch=False, refresh=False, wait=False)
         base.update(kw)
@@ -627,14 +629,14 @@ class LaunchClusterDispatchTests(unittest.TestCase):
             mm.cmd_launch(self.args())
         forwarded = launch.call_args.args[0]
         self.assertEqual(forwarded.profile, "deepseek-v4-flash-0731")
-        self.assertEqual(mm.cluster_config(forwarded.name)["name"], "Beebo")
+        self.assertEqual(mm.cluster_config(forwarded.name)["name"], "test-cluster")
         self.assertTrue(forwarded.dry_run)
         self.assertEqual(forwarded.startup_timeout, 1800)
 
     def test_cluster_profile_accepts_shared_host_option(self):
         with mock.patch.object(mm, "cmd_cluster_launch") as launch:
-            mm.cmd_launch(self.args(host=None, remote="beebo"))
-        self.assertEqual(launch.call_args.args[0].name, "beebo")
+            mm.cmd_launch(self.args(host=None, remote="test-cluster"))
+        self.assertEqual(launch.call_args.args[0].name, "test-cluster")
 
     def test_vllm_cluster_profile_forwards_keep(self):
         with mock.patch.object(mm, "cmd_cluster_launch") as launch:
@@ -642,9 +644,9 @@ class LaunchClusterDispatchTests(unittest.TestCase):
         self.assertTrue(launch.call_args.args[0].keep)
 
     def test_cluster_status_uses_canonical_name_for_labels(self):
-        cfg = {"name": "Beebo", "head": "dgx3", "worker": "dgx4"}
-        row = {"Names": "rank", "Labels": f"{mm.LABEL_CLUSTER}=Beebo", "Status": "Up"}
-        args = SimpleNamespace(name="beebo")
+        cfg = {"name": "test-cluster", "head": "dgx3", "worker": "dgx4"}
+        row = {"Names": "rank", "Labels": f"{mm.LABEL_CLUSTER}=test-cluster", "Status": "Up"}
+        args = SimpleNamespace(name="test-cluster")
         out = io.StringIO()
         with mock.patch.object(mm, "cluster_config", return_value=cfg), \
                 mock.patch.object(mm, "_cluster_targets", return_value=("head", "worker")), \
@@ -881,20 +883,20 @@ class DeviceFirstFacadeTests(unittest.TestCase):
                             for call in managed.call_args_list))
 
     def test_remote_card_dispatch_runs_staged_manager_on_target(self):
-        device = {"name": "otto-home-b70", "kind": "card", "target": "otto@home"}
+        device = {"name": "workstation-b70", "kind": "card", "target": "user@workstation"}
         profile = {"key": mm.CARD_PROFILE_KEY}
         result = SimpleNamespace(returncode=0)
         with mock.patch.object(mm, "_stage_remote_manager",
                                return_value="/home/otto/.local/omm/omodel-manager") as stage, \
                 mock.patch.object(mm, "run_remote", return_value=result) as remote:
             self.assertTrue(mm.dispatch_card("launch", device, profile))
-        stage.assert_called_once_with("otto@home")
+        stage.assert_called_once_with("user@workstation")
         command = remote.call_args.args[1]
         self.assertIn("python3 /home/otto/.local/omm/omodel-manager launch b70", command)
         self.assertIn(mm.CARD_PROFILE_KEY, command)
 
     def test_remote_card_health_uses_its_mounted_manager_source(self):
-        device = {"name": "otto-home-b70", "kind": "card", "target": "otto@home"}
+        device = {"name": "workstation-b70", "kind": "card", "target": "user@workstation"}
         inspect = SimpleNamespace(
             returncode=0,
             stdout="/home/otto/projects/omodel-manager/utils/card/tcp_proxy.py\n",
@@ -991,9 +993,9 @@ class PsUnreachableTests(unittest.TestCase):
 
     def test_cluster_rows_show_name_and_cluster_commands(self):
         mm.list_managed = lambda **k: [{
-            "Names": "otools-vllm-deepseek-Beebo-head",
+            "Names": "otools-vllm-deepseek-test-cluster-head",
             "Labels": (f"{mm.LABEL_MODEL}=deepseek-v4-flash-0731,"
-                       f"{mm.LABEL_CLUSTER}=Beebo,{mm.LABEL_PORT}=8000"),
+                       f"{mm.LABEL_CLUSTER}=test-cluster,{mm.LABEL_PORT}=8000"),
             "Status": "Up 1 hour",
         }]
         out = io.StringIO()
@@ -1003,13 +1005,13 @@ class PsUnreachableTests(unittest.TestCase):
             mm.cmd_ps(SimpleNamespace(all=False, hosts=None))
         body = out.getvalue()
         self.assertLess(body.index("HOST"), body.index("CLUSTER"))
-        self.assertIn("Beebo", body)
-        self.assertIn("omm health Beebo", body)
-        self.assertIn("omm logs Beebo -f", body)
-        self.assertIn("omm stop Beebo", body)
+        self.assertIn("test-cluster", body)
+        self.assertIn("omm health test-cluster", body)
+        self.assertIn("omm logs test-cluster -f", body)
+        self.assertIn("omm stop test-cluster", body)
 
     def test_single_host_model_shows_registered_cluster_membership(self):
-        mm.save_clusters({"Beebo": {"head": "dgx1", "worker": "user@b", "fabric": {}}})
+        mm.save_clusters({"test-cluster": {"head": "dgx1", "worker": "user@b", "fabric": {}}})
         mm.list_managed = lambda **k: [{
             "Names": "otools-vllm-model-a",
             "Labels": f"{mm.LABEL_MODEL}=model-a,{mm.LABEL_PORT}=8000",
@@ -1022,12 +1024,12 @@ class PsUnreachableTests(unittest.TestCase):
             mm.cmd_ps(SimpleNamespace(all=False, hosts=None))
         row = out.getvalue().splitlines()[1]
         self.assertIn("dgx1", row)
-        self.assertIn("Beebo", row)
+        self.assertIn("test-cluster", row)
         self.assertIn("omm logs dgx1 -f", out.getvalue())
 
     def test_membership_survives_alternate_alias_deduplication(self):
         mm.save_hosts([("dgx-mgmt", "user@mgmt"), ("dgx-fabric", "user@fabric")])
-        mm.save_clusters({"Beebo": {"head": "dgx-fabric", "worker": "user@worker",
+        mm.save_clusters({"test-cluster": {"head": "dgx-fabric", "worker": "user@worker",
                                      "fabric": {}}})
         mm.list_managed = lambda **k: [{
             "Names": "otools-vllm-model-a",
@@ -1043,7 +1045,7 @@ class PsUnreachableTests(unittest.TestCase):
             mm.cmd_ps(SimpleNamespace(all=False, hosts=None))
         row = out.getvalue().splitlines()[1]
         self.assertIn("dgx-mgmt", row)
-        self.assertIn("Beebo", row)
+        self.assertIn("test-cluster", row)
 
 
 class SyncTests(unittest.TestCase):
@@ -1705,6 +1707,92 @@ class ClusterProfileTests(unittest.TestCase):
         self.assertEqual(profile["tok_s"], 20)
         self.assertEqual(profile["status"], "validated")
 
+    def test_deepseek_vision_profile_records_qualified_shape(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-exp"]
+        self.assertEqual(profile["status"], "validated")
+        self.assertEqual(profile["max_model_len"], 262144)
+        self.assertEqual(profile["max_num_seqs"], 1)
+        self.assertEqual(profile["tok_s"], 22)
+        self.assertEqual(len(profile["image_signatures"]), 2)
+
+    def test_deepseek_anemll_candidate_pins_sources_and_built_identity(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll"]
+        fallback = mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-exp"]
+        self.assertEqual(profile["status"], "validated")
+        self.assertEqual(profile["tok_s"], 36)
+        self.assertEqual(profile["image"],
+                         "otools/vllm-deepseek-v4-flash-vision-anemll:mia-reviewed")
+        self.assertEqual(profile["revision"], "86f746b36186f0e567729a5c06a8c918caba82a9")
+        self.assertEqual(profile["model_size"], fallback["model_size"])
+        self.assertEqual(profile["model_shards"], fallback["model_shards"])
+        self.assertEqual(
+            profile["base_image"],
+            "ghcr.io/anemll/dspark-vllm-gx10:0.1.1@sha256:"
+            "a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8")
+        self.assertEqual(profile["anemll_revision"],
+                         "47503f8e38dadd4dededca798150db2619594fce")
+        self.assertEqual(profile["vllm_version"],
+                         "0.25.2.dev0+g752a3a504.d20260714")
+        self.assertEqual(profile["mia_source"]["revision"],
+                         "8494a492ad02423620c5740cab2a803ef54d0fb7")
+        self.assertEqual(profile["mia_source"]["sha256"],
+                         "9942c2ea60ae4c987e18a6df0abd1e82f8725288f08465d556e5a892d933eaf9")
+        self.assertEqual(profile["encoder_source"]["sha256"],
+                          "b4bbb74bbb11a9c8ada04daa30cc7de7dba3abba08e9ade06d38b51a3d0d1701")
+        self.assertFalse(profile["enable_expert_parallel"])
+        self.assertNotIn("image_signature", profile)
+        self.assertEqual(set(profile["image_signatures"]), {
+            "84ba1d3fc5b43188da20db113b054fb49b29275e2d8de64996a5c7b3bfe4548e",
+            "a64c68527254b9a4aadbd6bc39f829825e20a41ba8c3e3baf326bfac2243e662",
+            "bd1ff59fe48ffb07e14eb78af8a2db53160c9dd87c2a8718174005e0772895d4",
+            "d0c34dac3663a926125c03431bf562d0fef1d9d131fd4f759769c2e7335cd06b",
+        })
+
+    def test_anemll_patch_order_matches_default_on_compose_train(self):
+        names = [name for _, name in mm.ANEMLL_MIA_PATCH_ORDER]
+        self.assertEqual(names, [
+            "hotfix-encoding-dsv4-issue21.py",
+            "hotfix-dsv4-issue55-tool-truncation.py",
+            "hotfix-nvfp4-ds-mla-issue22.sh",
+            "hotfix-gb10-spin-wait.sh",
+            "hotfix-dsv4-mtp-buffer-50312.sh",
+            "hotfix-dsv4-skip-topk-49486.sh",
+            "hotfix-dsv4-dense-prefill-indexer-48407.sh",
+            "hotfix-dsv4-skip-empty-c128-48957.sh",
+            "hotfix-dsv4-flashmla-workspace-50298.sh",
+            "hotfix-dsv4-grammar-advance.sh",
+            "hotfix-dsv4-vision-exp.py",
+            "hotfix-vllm-empty-encoder-output.py",
+            "hotfix-dsv4-issue27-partial-prefill-concurrency.py",
+            "hotfix-dsv4-issue43-decode-fairness-and-diag.py",
+            "hotfix-dsv4-issue26-hybrid-swa-min.py",
+            "hotfix-dsv4-issue133-triton-specialization.py",
+            "hotfix-dsv4-suppress-stops-in-reasoning.py",
+        ])
+        excluded = ("issue31", "issue136", "issue138", "issue141", "assistant-final",
+                    "redact-api-key", "gb10-hybrid")
+        self.assertTrue(all(term not in name for term in excluded for name in names))
+
+    def test_deepseek_anemll_tuning_lane_is_isolated_at_k3(self):
+        promoted = mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll"]
+        tuning = mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll-tune"]
+        self.assertIsNot(promoted, tuning)
+        self.assertEqual(promoted["speculative_config"]["num_speculative_tokens"], 6)
+        self.assertEqual(tuning["speculative_config"], {
+            "method": "dspark",
+            "num_speculative_tokens": 3,
+            "draft_sample_method": "probabilistic",
+        })
+        self.assertEqual(tuning["max_num_batched_tokens"], 8256)
+        self.assertEqual(tuning["status"], "experimental")
+        self.assertIsNone(tuning["tok_s"])
+        self.assertEqual(tuning["image"], promoted["image"])
+
+    def test_cluster_inventory_exposes_benchmarked_tok_s(self):
+        with mock.patch.object(mm, "load_config", return_value={"models": {}}):
+            inventory = mm.profile_inventory()
+        self.assertEqual(inventory["deepseek-v4-flash-vision-exp"]["tok_s"], 22)
+
     def test_deepseek_build_uses_only_verified_local_archives(self):
         profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-0731-cand7"]
         dockerfile = mm._deepseek_dockerfile(
@@ -1801,6 +1889,86 @@ class ClusterRegistryTests(unittest.TestCase):
             json.dumps(content, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         return profile, metadata
 
+    def write_mia_archive(self, path, extra_members=()):
+        files = [name for _, name in mm.ANEMLL_MIA_PATCH_ORDER]
+        files += [f"vision_exp/{name}" for name in (
+            "__init__.py", "apply.py", "image_processor.py", "processor.py", "vision.py")]
+        with tarfile.open(path, "w:gz") as archive:
+            for relative in files:
+                payload = f"# {relative}\n".encode()
+                member = tarfile.TarInfo(f"source-root/patches/{relative}")
+                member.size = len(payload)
+                archive.addfile(member, io.BytesIO(payload))
+            payload = b"ignored\n"
+            member = tarfile.TarInfo("source-root/README.md")
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
+            for member in extra_members:
+                archive.addfile(member)
+
+    def test_mia_archive_extraction_selects_only_patches_and_rejects_unsafe_members(self):
+        archive_path = os.path.join(self.root, "source.tar.gz")
+        self.write_mia_archive(archive_path)
+        destination = os.path.join(self.root, "patches")
+        mm._extract_mia_patches(archive_path, destination)
+        self.assertTrue(os.path.isfile(os.path.join(
+            destination, "hotfix-dsv4-vision-exp.py")))
+        self.assertTrue(os.path.isfile(os.path.join(destination, "vision_exp", "apply.py")))
+        self.assertFalse(os.path.exists(os.path.join(self.root, "README.md")))
+
+        unsafe = []
+        traversal = tarfile.TarInfo("source-root/patches/../escape")
+        traversal.size = 0
+        unsafe.append(traversal)
+        link = tarfile.TarInfo("source-root/patches/link")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "/etc/passwd"
+        unsafe.append(link)
+        for index, member in enumerate(unsafe):
+            bad_archive = os.path.join(self.root, f"unsafe-{index}.tar.gz")
+            self.write_mia_archive(bad_archive, [member])
+            with self.subTest(member=member.name), self.assertRaisesRegex(
+                    RuntimeError, "unsafe|links are not allowed"):
+                mm._extract_mia_patches(bad_archive, os.path.join(self.root, f"bad-{index}"))
+
+    def test_anemll_context_is_offline_and_bakes_patches_at_build_time(self):
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll"]
+        archive_path = os.path.join(self.root, "source.tar.gz")
+        self.write_mia_archive(archive_path)
+
+        def download(url, destination, expected):
+            if url == profile["mia_source"]["url"]:
+                shutil.copyfile(archive_path, destination)
+            else:
+                with open(destination, "w") as stream:
+                    stream.write("# pinned encoder\n")
+
+        with mock.patch.object(mm, "_download_verified_source", side_effect=download) as fetch:
+            context = mm._vllm_anemll_context(profile)
+        self.assertEqual(fetch.call_count, 2)
+        dockerfile = pathlib.Path(context, "Dockerfile").read_text()
+        installer = pathlib.Path(context, "install.py").read_text()
+        compile(installer, "install.py", "exec")
+        self.assertIn(f"FROM {profile['base_image']}", dockerfile)
+        self.assertIn("python3 /opt/dspark-install/install.py", dockerfile)
+        self.assertIn("/opt/dspark-patches/", dockerfile)
+        self.assertNotIn("curl ", dockerfile)
+        self.assertNotIn("pip install", dockerfile)
+        self.assertNotIn("apt-get", dockerfile)
+        self.assertNotIn("git clone", dockerfile)
+        self.assertNotIn(profile["mia_source"]["url"] + " ", dockerfile)
+        self.assertIn('reasoning_effort = "low"', installer)
+        positions = [installer.index(name) for _, name in mm.ANEMLL_MIA_PATCH_ORDER]
+        self.assertEqual(positions, sorted(positions))
+        self.assertNotIn("issue31", installer)
+        self.assertNotIn("issue136", installer)
+        self.assertNotIn("issue138", installer)
+        self.assertNotIn("issue141", installer)
+        self.assertNotIn("assistant-final", installer)
+        self.assertNotIn("redact-api-key", installer)
+        self.assertTrue(os.path.isfile(os.path.join(
+            context, "patches", "vision_exp", "apply.py")))
+
     def test_vllm_image_identity_accepts_pinned_canonical_content(self):
         profile, metadata = self.vllm_identity_fixture()
         responses = [
@@ -1829,6 +1997,66 @@ class ClusterRegistryTests(unittest.TestCase):
         with mock.patch.object(mm, "_host_exec", return_value=inspected), \
                 self.assertRaisesRegex(RuntimeError, "image content mismatch"):
             mm._vllm_image_identity("user@host", profile)
+
+    def test_vllm_image_identity_reports_trusted_build_output_before_pinning(self):
+        profile, metadata = self.vllm_identity_fixture()
+        profile["base_image"] = "registry.example/base@sha256:pinned"
+        metadata["Config"]["Env"].append("DIFFERENT_STORE=1")
+        content = {
+            "architecture": metadata["Architecture"],
+            "os": metadata["Os"],
+            "config": metadata["Config"],
+            "rootfs": metadata["RootFS"],
+        }
+        discovered = mm.hashlib.sha256(
+            json.dumps(content, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        responses = [
+            SimpleNamespace(returncode=0, stdout=json.dumps([metadata]), stderr=""),
+            SimpleNamespace(returncode=0, stdout=profile["vllm_version"] + "\n", stderr=""),
+        ]
+        with mock.patch.object(mm, "_host_exec", side_effect=responses):
+            identity = mm._vllm_image_identity(
+                "user@host", profile, allow_unpinned=True)
+        self.assertEqual(identity["content_sha256"], discovered)
+
+    def test_vllm_image_identity_rejects_unpinned_image_before_inspect(self):
+        profile = dict(mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll"])
+        profile.pop("image_signatures")
+        with mock.patch.object(mm, "_host_exec") as execute, \
+                self.assertRaisesRegex(RuntimeError, "content identity is not pinned"):
+            mm._vllm_image_identity("user@host", profile)
+        execute.assert_not_called()
+
+    def test_vllm_image_identity_accepts_reviewed_overlay_signature(self):
+        profile = dict(mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-exp"])
+        metadata = {
+            "Architecture": "arm64",
+            "Os": "linux",
+            "RepoDigests": [],
+            "Id": "sha256:reviewed-overlay",
+            "Config": {"Entrypoint": ["vllm", "serve"], "Env": ["A=B"]},
+            "RootFS": {"Type": "layers", "Layers": ["sha256:overlay"]},
+        }
+        content = {
+            "architecture": metadata["Architecture"],
+            "os": metadata["Os"],
+            "config": metadata["Config"],
+            "rootfs": metadata["RootFS"],
+        }
+        signature = mm.hashlib.sha256(
+            json.dumps(content, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        profile["image_signatures"] = [signature]
+        responses = [
+            SimpleNamespace(returncode=0, stdout=json.dumps([metadata]), stderr=""),
+            SimpleNamespace(returncode=0, stdout=profile["vllm_version"] + "\n", stderr=""),
+        ]
+        with mock.patch.object(mm, "_host_exec", side_effect=responses):
+            identity = mm._vllm_image_identity("user@host", profile)
+        self.assertEqual(identity, {
+            "id": "sha256:reviewed-overlay",
+            "content_sha256": signature,
+            "vllm_version": profile["vllm_version"],
+        })
 
     def test_roundtrip_and_local_head_resolution(self):
         cfg = self.config()
@@ -1982,6 +2210,144 @@ class ClusterRegistryTests(unittest.TestCase):
             _, kept = mm.build_vllm_cluster_argv(
                 "qwen3.8-flash-next-fp8", profile, cfg, "head", None, keep=True)
         self.assertNotIn("--rm", kept)
+
+        self.assertNotIn("--entrypoint", head)
+        self.assertNotIn("serve", head[head.index(profile["image"]) + 1:
+                                            head.index(mm._vllm_snapshot_path(profile))])
+        self.assertNotIn("--long-prefill-token-threshold", head)
+        self.assertNotIn("--max-cudagraph-capture-size", head)
+        self.assertNotIn("--moe-backend", head)
+        self.assertNotIn("--limit-mm-per-prompt", head)
+
+    def test_deepseek_vision_argv_uses_qualified_sm12x_shape(self):
+        cfg = self.config()
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-exp"]
+        with mock.patch.object(mm, "remote_home", return_value="/home/user"):
+            _, argv = mm.build_vllm_cluster_argv(
+                "deepseek-v4-flash-vision-exp", profile, cfg, "head", None)
+        self.assertNotIn("--enforce-eager", argv)
+        self.assertEqual(argv[argv.index("--max-num-seqs") + 1], "1")
+        self.assertEqual(argv[argv.index("--kv-cache-dtype") + 1], "fp8")
+        self.assertEqual(argv[argv.index("--block-size") + 1], "256")
+        self.assertEqual(
+            argv[argv.index("--attention-backend") + 1], "FLASHINFER_MLA_SPARSE_DSV4")
+        self.assertIn("VLLM_FLASHINFER_AUTOTUNE_SKIP_OPS="
+                      "trtllm_fp4_block_scale_moe,flashinfer::trtllm_fp4_block_scale_moe", argv)
+
+    def test_deepseek_anemll_argv_uses_candidate_recipe_and_headless_worker(self):
+        cfg = self.config()
+        profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll"]
+        with mock.patch.object(mm, "remote_home", return_value="/home/user"):
+            _, head = mm.build_vllm_cluster_argv(
+                "deepseek-v4-flash-vision-anemll", profile, cfg, "head", None)
+            _, worker = mm.build_vllm_cluster_argv(
+                "deepseek-v4-flash-vision-anemll", profile, cfg, "worker", "user@worker")
+        image_index = head.index(profile["image"])
+        self.assertEqual(head[image_index - 2:image_index],
+                         ["--entrypoint", "/usr/local/bin/vllm"])
+        self.assertEqual(head[image_index + 1], "serve")
+        self.assertEqual(head[head.index("--host") + 1], "127.0.0.1")
+        self.assertNotIn("VLLM_USE_DEEP_GEMM=0", head)
+        self.assertIn("VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", head)
+        self.assertIn("TP_SOCKET_IFNAME=enP7s7", head)
+        self.assertEqual(head[head.index("--max-model-len") + 1], "1048576")
+        self.assertEqual(head[head.index("--max-num-seqs") + 1], "1")
+        self.assertEqual(head[head.index("--max-num-batched-tokens") + 1], "8192")
+        self.assertEqual(head[head.index("--long-prefill-token-threshold") + 1], "1024")
+        self.assertEqual(head[head.index("--max-cudagraph-capture-size") + 1], "42")
+        self.assertEqual(head[head.index("--gpu-memory-utilization") + 1], "0.835")
+        self.assertEqual(head[head.index("--kv-cache-dtype") + 1], "nvfp4_ds_mla")
+        self.assertEqual(head[head.index("--block-size") + 1], "256")
+        self.assertIn("--enable-prefix-caching", head)
+        self.assertIn("--async-scheduling", head)
+        self.assertIn("--enable-flashinfer-autotune", head)
+        self.assertEqual(head[head.index("--moe-backend") + 1], "flashinfer_b12x")
+        self.assertNotIn("--enable-expert-parallel", head)
+        self.assertNotIn("--all2all-backend", head)
+        self.assertEqual(json.loads(head[head.index("--limit-mm-per-prompt") + 1]),
+                         {"image": 8})
+        self.assertEqual(json.loads(head[head.index("--speculative-config") + 1]), {
+            "method": "dspark", "num_speculative_tokens": 6,
+            "draft_sample_method": "probabilistic",
+        })
+        self.assertEqual(json.loads(
+            head[head.index("--default-chat-template-kwargs") + 1]),
+            {"thinking": True, "reasoning_effort": "max"})
+        self.assertNotIn("--trust-remote-code", head)
+        self.assertNotIn("--headless", head)
+        self.assertIn("--headless", worker)
+
+    def test_anemll_prepare_reports_each_unpinned_store_signature(self):
+        cfg = self.config()
+        profile = dict(mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll"])
+        profile.pop("image_signatures")
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        def identity(target, selected, allow_unpinned=False):
+            self.assertTrue(allow_unpinned)
+            role = "head" if target is None else "worker"
+            return {"id": f"sha256:{role}", "content_sha256": role * 8,
+                    "vllm_version": selected["vllm_version"]}
+
+        output = io.StringIO()
+        with mock.patch.object(mm, "_vllm_anemll_context", return_value="/tmp/context"), \
+                mock.patch.object(mm, "_sync_cluster_files"), \
+                mock.patch.object(mm, "_host_exec", return_value=completed), \
+                mock.patch.object(mm, "_vllm_image_identity", side_effect=identity), \
+                contextlib.redirect_stdout(output):
+            mm._prepare_vllm(cfg, profile, build=True)
+        text = output.getvalue()
+        self.assertIn("candidate image_signature[head]=", text)
+        self.assertIn("candidate image_signature[worker]=", text)
+
+    def test_vllm_prepare_accepts_duplicate_members_of_signature_allowlist(self):
+        cfg = self.config()
+        profile = dict(mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll"])
+        profile["image_signatures"] = ["allowed", "alternate"]
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        identity = {"id": "sha256:image", "content_sha256": "allowed",
+                    "vllm_version": profile["vllm_version"]}
+        with mock.patch.object(mm, "_vllm_anemll_context", return_value="/tmp/context"), \
+                mock.patch.object(mm, "_sync_cluster_files"), \
+                mock.patch.object(mm, "_host_exec", return_value=completed), \
+                mock.patch.object(mm, "_vllm_image_identity", return_value=identity), \
+                contextlib.redirect_stdout(io.StringIO()):
+            mm._prepare_vllm(cfg, profile, build=True)
+
+    def test_anemll_weights_only_refuses_unpinned_image_before_download(self):
+        profile = dict(mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll"])
+        profile.pop("image_signatures")
+        with mock.patch.object(mm, "_download_cluster_snapshot") as download, \
+                mock.patch.object(mm, "_host_exec") as execute, \
+                self.assertRaisesRegex(RuntimeError, "content identity is not pinned"):
+            mm._prepare_vllm(self.config(), profile, weights=True)
+        download.assert_not_called()
+        execute.assert_not_called()
+
+    def test_anemll_launch_refuses_unpinned_image_before_preflight(self):
+        profile = dict(mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll"])
+        profile.pop("image_signatures")
+        with mock.patch.object(mm, "cluster_preflight") as preflight, \
+                contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            mm._launch_vllm_cluster(
+                "deepseek-v4-flash-vision-anemll", profile, self.config())
+        preflight.assert_not_called()
+
+    def test_plan_suggests_candidate_build_before_launch(self):
+        device = {"name": "spark", "kind": "cluster"}
+        profile = {"key": "deepseek-v4-flash-vision-anemll"}
+        selected = dict(mm.CLUSTER_PROFILES[profile["key"]])
+        selected.pop("image_signatures")
+        with mock.patch.dict(mm.CLUSTER_PROFILES, {profile["key"]: selected}), \
+                mock.patch.object(mm, "_resolve_facade_operands",
+                               return_value=(device, profile)), \
+                mock.patch.object(mm, "_dispatch_facade_launch"), \
+                mock.patch.object(mm, "_suggest") as suggest:
+            mm.cmd_plan(SimpleNamespace())
+        suggestions = suggest.call_args.args[0]
+        self.assertIn("cluster prepare spark deepseek-v4-flash-vision-anemll --build",
+                      suggestions[0][1])
+        self.assertNotIn(" launch ", suggestions[0][1])
 
     def test_vllm_mp_warmups_cover_reasoning_tools_vision_and_streaming(self):
         profile = mm.CLUSTER_PROFILES["qwen3.8-flash-next-fp8"]

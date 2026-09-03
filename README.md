@@ -251,15 +251,15 @@ For a host with the qualified Intel Arc Pro B70, register both the host and its 
 controller that should manage it:
 
 ```bash
-omm install otto@otto-home otto-home --card b70 --fix
-omm launch otto-home-b70 qwen3.8-27b-gptq-int4-b70
-omm health otto-home-b70
-omm stop otto-home-b70 -y
+omm install user@workstation workstation --card b70 --fix
+omm launch workstation-b70 qwen3.8-27b-gptq-int4-b70
+omm health workstation-b70
+omm stop workstation-b70 -y
 ```
 
 Remote card actions stage the checked-in manager bundle and run the normal qualified `b70`
 lifecycle on that host. The serving proxy remains loopback-only; clients on another machine
-still need the documented Tailgate route (or another deliberate route) for `otto-home:8000`.
+still need the documented Tailgate route (or another deliberate route) for `workstation:8000`.
 
 `uninstall <alias|host>` reverses it: drops the host from the registry and revokes the
 otools key from the remote's `authorized_keys`. It leaves Docker, the docker group, and
@@ -267,7 +267,7 @@ the shared local key alone by default; `--purge` additionally stops the box's ot
 containers and removes its docker-group membership.
 
 `uninstall <device>` removes only an explicit `devices.json` entry. For example,
-`omm uninstall otto-home-b70` forgets that remote card while preserving the `otto-home`
+`omm uninstall workstation-b70` forgets that remote card while preserving the `workstation`
 host registration, SSH access, and running containers.
 
 ## HF token

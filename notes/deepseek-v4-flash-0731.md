@@ -4,7 +4,7 @@
 
 ### Scope
 
-- Hardware: two DGX Spark GB10 nodes, Beebo (`thing-1` head, `thing-2` worker).
+- Hardware: two DGX Spark GB10 nodes (one head and one worker).
 - Weights: `deepseek-ai/DeepSeek-V4-Flash-0731` at
   `9e165c30e2704aec5d9d593cce3eebd58bbef1cb`.
 - Base runtime: existing reviewed c8r image, vLLM `48bada6e`, DeepGEMM `a6b593d`,
@@ -50,7 +50,7 @@ postimage SHA-256 values.
 
 ### Status
 
-The candidate was built and qualified on Beebo on 2026-08-31. Both ranks had identical image,
+The candidate was built and qualified on the two-node cluster on 2026-08-31. Both ranks had identical image,
 runtime, and model signatures; each model snapshot was exactly 166,898,660,330 bytes. Launch
 completed every tokenizer and request-path gate, captured CUDA graphs, enabled prefix caching,
 allocated 3,027,217 KV-cache tokens, and established NCCL NET/IB between the nodes.
@@ -97,7 +97,7 @@ The lanes are effectively tied at concurrency 1. The candidate retains comparabl
 slightly higher decode throughput at concurrency 2, with no observed performance regression.
 
 After all qualification traffic, both rank logs were clean of Xid, CUDA, NCCL failure, MMU,
-invalid-token, swap, traceback, engine-death, and OOM events, and `omm health Beebo` remained
+invalid-token, swap, traceback, engine-death, and OOM events, and the device health check remained
 `READY`. Startup produced expected first-shape Triton/TileLang JIT latency warnings only.
 
 All technical qualification gates are complete. On promotion, smpcache became the validated

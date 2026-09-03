@@ -120,6 +120,18 @@ class ConfigValidityTests(unittest.TestCase):
         self.assertEqual(cfg["variants"]["no-think"]["options"]["chat_template_kwargs"],
                          {"thinking": False})
 
+    def test_deepseek_vision_configs_match_each_runtime_shape(self):
+        fallback = _load(CONFIGS / "cluster" / "deepseek-v4-flash-vision-exp.toml")
+        anemll = _load(CONFIGS / "cluster" / "deepseek-v4-flash-vision-anemll.toml")
+        self.assertIn("deepseek-v4-flash-vision-exp", fallback["match"])
+        self.assertNotIn("deepseek-v4-flash-vision-anemll", fallback["match"])
+        self.assertEqual(set(anemll["match"]), {
+            "deepseek-v4-flash-vision-anemll",
+            "deepseek-v4-flash-vision-anemll-tune",
+        })
+        self.assertEqual(fallback["capabilities"]["concurrency"], 1)
+        self.assertEqual(anemll["capabilities"]["concurrency"], 1)
+
     def test_qwen38_bf16_config_matches_multimodal_profiles(self):
         cfg = _load(CONFIGS / "node" / "qwen3.8-27b-bf16.toml")
         self.assertEqual(set(cfg["match"]), {

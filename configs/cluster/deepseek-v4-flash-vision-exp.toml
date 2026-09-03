@@ -1,0 +1,44 @@
+# DeepSeek's first V4 multimodal release. Controls and sampling follow the
+# official model card and the capabilities validated on a two-node DGX Spark cluster.
+
+match = [
+  "deepseek-v4-flash-vision-exp",
+  "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp",
+]
+source = "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"
+
+[capabilities]
+vision = { input = ["text", "image"], output = ["text"] }
+reasoning        = true
+tool_call        = true
+concurrency      = 1
+thinking_control = "none" # Native `thinking` and `reasoning_effort` kwargs below.
+
+[context]
+native       = 1048576 # Upstream limit; the qualified profile serves 262144.
+min_thinking = 32768
+
+[presets.plan]
+thinking   = true
+max_output = 32768
+options.chat_template_kwargs = { thinking = true, reasoning_effort = "max" }
+[presets.plan.sampling]
+temperature = 1.0
+top_p       = 0.95
+
+[presets.build]
+thinking   = true
+max_output = 32768
+options.chat_template_kwargs = { thinking = true, reasoning_effort = "high" }
+[presets.build.sampling]
+temperature = 1.0
+top_p       = 0.95
+
+[variants.low]
+options.chat_template_kwargs = { thinking = true, reasoning_effort = "low" }
+[variants.high]
+options.chat_template_kwargs = { thinking = true, reasoning_effort = "high" }
+[variants.max]
+options.chat_template_kwargs = { thinking = true, reasoning_effort = "max" }
+[variants.no-think]
+options.chat_template_kwargs = { thinking = false }

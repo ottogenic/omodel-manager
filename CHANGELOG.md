@@ -19,7 +19,7 @@ All notable changes to this project are documented here. The format follows
 - **DeepSeek smpcache runtime.** Promoted a qualified derivative over the reviewed c8r
   image that pins Reederey's promoted indexer-capture, C128A-stride, and cached sampler-state
   postimages. Its build manifest binds every source tree and file digest, and launch now rejects
-  conflated low/high/max tokenizer mappings before declaring the cluster ready. It passed Beebo
+  conflated low/high/max tokenizer mappings before declaring the cluster ready. It passed two-node
   quality, 12-way concurrency, 15K-token generation, and cached retrieval at 200K
   and 943K tokens. A controlled c8r performance A/B found parity at concurrency 1 and no
   regression at concurrency 2. Smpcache is now the preferred profile; c8r and cand7 remain
@@ -126,7 +126,7 @@ All notable changes to this project are documented here. The format follows
   tool-calling, and reasoning presets.
 - **Physical qualification for all four two-Spark profiles.** DeepSeek V4 Flash 0731, Qwen3
   235B Base, Instruct-2507, and Thinking-2507 now carry validated status from dual-GB10 testing on
-  Beebo, including structured tools, tool-result continuation, long streaming, health, and
+  a two-node DGX Spark cluster, including structured tools, tool-result continuation, long streaming, health, and
   `NCCL NET/IB` checks.
 - **Two-DGX-Spark cluster lifecycle (v0.3.0 prework).** Added a separate `cluster` registry and
   `profiles` / `add` / `list` / `show` / `remove` / `preflight` / `prepare` / `launch` / `status` /
