@@ -384,6 +384,24 @@ def replace_previous_text_only_container():
     run(["docker", "rm", MODEL_CONTAINER])
 
 
+def replace_model_with_different_repo_mount(repo_root, model_path):
+    inspect = inspect_container(MODEL_CONTAINER)
+    if inspect is None or inspect["Config"].get("Cmd") != VLLM_ARGS:
+        return
+    binds = inspect["HostConfig"].get("Binds") or []
+    expected_model = f"{model_path}:/model:ro"
+    expected_repo = f"{repo_root}:/bench:ro"
+    if set(binds) == {expected_model, expected_repo}:
+        return
+    if len(binds) != 2 or expected_model not in binds or not any(
+            value.endswith(":/bench:ro") for value in binds):
+        return
+    validate_stop_ownership(MODEL_CONTAINER, inspect)
+    if inspect["State"]["Running"]:
+        run(["docker", "stop", MODEL_CONTAINER])
+    run(["docker", "rm", MODEL_CONTAINER])
+
+
 def replace_proxy_with_different_mount(repo_root):
     inspect = inspect_container(PROXY_CONTAINER)
     if inspect is None:
@@ -431,6 +449,7 @@ def launch(timeout=600):
         raise DeployError(f"render device is missing: {RENDER_DEVICE}")
     refuse_unowned_existing_containers()
     replace_previous_text_only_container()
+    replace_model_with_different_repo_mount(REPOSITORY_ROOT, MODEL_PATH)
     verify_model_files(MODEL_PATH)
     ensure_image()
     ensure_network()

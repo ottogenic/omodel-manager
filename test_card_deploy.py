@@ -143,6 +143,25 @@ class CardDeployCommandTests(unittest.TestCase):
             deploy.replace_proxy_with_different_mount(Path("/repo"))
         run.assert_called_once_with(["docker", "rm", deploy.PROXY_CONTAINER])
 
+    def test_owned_model_with_different_checkout_mount_is_replaced(self):
+        inspect = {
+            "Config": {
+                "Image": deploy.IMAGE,
+                "Cmd": deploy.VLLM_ARGS,
+                "Labels": deploy.ownership_labels("model-server"),
+            },
+            "HostConfig": {"Binds": [
+                "/model:/model:ro", "/old/checkout:/bench:ro",
+            ]},
+            "State": {"Running": False},
+        }
+        with mock.patch.object(deploy, "inspect_container", return_value=inspect), \
+                mock.patch.object(deploy, "run") as run:
+            deploy.replace_model_with_different_repo_mount(
+                Path("/repo"), Path("/model"),
+            )
+        run.assert_called_once_with(["docker", "rm", deploy.MODEL_CONTAINER])
+
     def test_docker_inspect_error_is_not_treated_as_absent(self):
         result = SimpleNamespace(returncode=1, stdout="", stderr="permission denied")
         with mock.patch.object(deploy, "run", return_value=result):
