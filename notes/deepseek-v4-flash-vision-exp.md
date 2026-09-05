@@ -188,3 +188,18 @@ did not offset the candidate's consistent prefill and TTFT regression or its 49.
 The selective image was rejected. The existing reviewed image with `k=3` probabilistic and
 8256 batch tokens is promoted as `deepseek-v4-flash-vision-anemll`; its conservative inventory
 rating is 40 tok/s. Temporary tuning and selective profile names are not shipped.
+
+## 2026-09-04 breakable-graph reliability fix
+
+The regular CUDA-graph path (`VLLM_USE_BREAKABLE_CUDAGRAPH=0`) crashed on an uncached 354-token
+partial prefill after a 12,288-token prefix-cache hit. `mhc_pre_tilelang` lazily compiled
+DeepGEMM's `tf32_hc_prenorm_gemm` while the piecewise graph machinery was active, and CUDA rejected
+the module load with `CUDA_ERROR_NOT_PERMITTED`. The image's generic DeepGEMM warmup does not cover
+this mHC kernel, and arbitrary partial-prefill sizes cannot be exhaustively warmed.
+
+The profile now uses the image's supported breakable CUDA graphs, which disable the incompatible
+torch.compile pipeline while retaining CUDA-graph execution. On a clean Beebo relaunch, all launch
+warmups passed. Two identical 12,643-token requests then exercised the cold irregular prefill and
+the cached-prefix remainder in 6.73 s and 0.44 s without errors. The standard 50K-context N=1
+benchmark measured 32.1 s TTFT, 1,571 prefill tok/s, and 41.4 decode tok/s, retaining the profile's
+conservative 40 tok/s rating.

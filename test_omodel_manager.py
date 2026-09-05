@@ -2246,6 +2246,7 @@ class ClusterRegistryTests(unittest.TestCase):
         self.assertEqual(head[head.index("--host") + 1], "127.0.0.1")
         self.assertNotIn("VLLM_USE_DEEP_GEMM=0", head)
         self.assertIn("VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", head)
+        self.assertIn("VLLM_USE_BREAKABLE_CUDAGRAPH=1", head)
         self.assertIn("TP_SOCKET_IFNAME=enP7s7", head)
         self.assertEqual(head[head.index("--max-model-len") + 1], "1048576")
         self.assertEqual(head[head.index("--max-num-seqs") + 1], "1")
