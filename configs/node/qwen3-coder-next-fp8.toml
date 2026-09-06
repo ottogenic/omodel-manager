@@ -11,6 +11,7 @@
 match  = ["qwen3-coder-next-fp8", "Qwen/Qwen3-Coder-Next-FP8", "unsloth/qwen3-coder-next-fp8", "unsloth/Qwen3-Coder-Next-FP8"]
 source = "https://huggingface.co/Qwen/Qwen3-Coder-Next-FP8"
 
+name = "Qwen3 Coder Next"
 [capabilities]
 vision           = false                  # pure text, no image support
 reasoning        = false                  # standard causal LM, no reasoning mode

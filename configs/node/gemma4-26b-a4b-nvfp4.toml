@@ -15,6 +15,7 @@
 match  = ["gemma4-26b-a4b-nvfp4", "nvidia/Gemma-4-26B-A4B-NVFP4"]
 source = "https://huggingface.co/nvidia/Gemma-4-26B-A4B-NVFP4"
 
+name = "Gemma 4 26B"
 [capabilities]
 vision           = { input = ["text", "image"], output = ["text"] }  # supports images; video via frame extraction
 reasoning        = true

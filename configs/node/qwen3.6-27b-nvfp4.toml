@@ -9,6 +9,7 @@
 match  = ["qwen3.6-27b-nvfp4", "unsloth/qwen3.6-27b", "Qwen3.6-27B-NVFP4"]
 source = "https://huggingface.co/unsloth/Qwen3.6-27B-NVFP4"
 
+name = "Qwen 3.6 27B"
 [capabilities]
 vision           = { input = ["text", "image"], output = ["text"] }  # Qwen3.6-27B is multimodal (VL)
 reasoning        = true

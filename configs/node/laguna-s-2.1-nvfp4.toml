@@ -40,6 +40,7 @@
 match  = ["laguna-s-2.1-nvfp4", "poolside/Laguna-S-2.1-NVFP4"]
 source = "https://huggingface.co/poolside/Laguna-S-2.1-NVFP4"
 
+name = "Laguna S 2.1"
 [capabilities]
 vision           = false                  # text-only
 reasoning        = true                   # interleaved thinking (poolside_v1 reasoning parser)

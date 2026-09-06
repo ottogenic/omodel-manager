@@ -20,6 +20,7 @@
 match  = ["muse-glimmer-30b-nvfp4", "meta-models/Muse-Glimmer-30B", "Inferact/Muse-Glimmer-30B-NVFP4-W4A4"]
 source = "https://huggingface.co/Inferact/Muse-Glimmer-30B-NVFP4-W4A4"
 
+name = "Muse Glimmer 30B"
 [capabilities]
 vision           = { input = ["text", "image"], output = ["text"] }
 reasoning        = true

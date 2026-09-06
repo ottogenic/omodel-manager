@@ -7,6 +7,7 @@ match = [
 ]
 source = "https://huggingface.co/nvidia/Qwen3-235B-A22B-Thinking-2507-NVFP4"
 
+name = "Qwen3 235B Thinking"
 [capabilities]
 vision           = false
 reasoning        = true

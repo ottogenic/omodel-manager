@@ -11,6 +11,7 @@ match  = ["glm-4.7-flash", "GLM-4.7-Flash", "zai-org/GLM-4.7-Flash"]
 source = "https://huggingface.co/zai-org/GLM-4.7-Flash"
 thinking_control = "none"
 
+name = "GLM 4.7 Flash"
 [capabilities]
 vision           = false
 reasoning        = true

@@ -14,6 +14,7 @@
 match  = ["qwen3-coder-next-nvfp4", "RedHatAI/Qwen3-Coder-Next-NVFP4", "Qwen3-Coder-Next-NVFP4"]
 source = "https://huggingface.co/RedHatAI/Qwen3-Coder-Next-NVFP4"
 
+name = "Qwen3 Coder Next"
 [capabilities]
 vision           = false  # verified: pure text model, architectures = ["Qwen3NextForCausalLM"], no vision_config
 reasoning        = false  # no special CoT/reasoning mode (standard causal LM)

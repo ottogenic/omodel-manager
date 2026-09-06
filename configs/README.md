@@ -41,6 +41,7 @@ do not belong in these files.
 |-----|---------|
 | `match` | Array of substrings matched (case-insensitive) against the served-model-id from `/v1/models`. Include the manager key **and** the HF/served id(s). The filename stem must be one of them. |
 | `source` | Model-card URL the tuning came from (docs only). |
+| `name` | Human-readable model label shown in harness pickers (OpenCode/Chamber). Display only — matching still uses `match`; an adapter falls back to the served-model-id when a config omits it. Keep it **bare** (family/size, plus a genuine model variant like Instruct/Thinking/Vision) — quant/build/serial details stay in the launch profile, not here. |
 | `[capabilities]` `vision` | `false`, or a table `{ input = ["text","image"], output = ["text"] }`. **Replaces live vision probing.** |
 | `[capabilities]` `reasoning` | `true`/`false` — does the model emit chain-of-thought. **Replaces reasoning probing.** |
 | `[capabilities]` `tool_call` | `true`/`false`. |
@@ -60,6 +61,9 @@ do not belong in these files.
 
 - **Match on `match`.** Filename stem == manager profile key so the two line up;
   directory kind does not participate in matching.
+- **Display via `name`.** Adapters label a model with its `name` (the bare model
+  label in the schema above), never the raw served-model-id. A config without a
+  `name` falls back to the served-model-id; every shipped config sets one.
 - Two launch profiles serving the **same** model (e.g. 256k vs 512k context) share
   **one** config here — sampling is per-model, not per-launch.
 - A model with no matching config falls back to the adapter's default.

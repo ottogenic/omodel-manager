@@ -17,6 +17,7 @@
 match  = ["gemma4-26b-fp8", "gemma4-26b-fp8-mtp", "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"]
 source = "https://huggingface.co/RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
 
+name = "Gemma 4 26B"
 [capabilities]
 vision           = { input = ["text", "image"], output = ["text"] }  # supports images; video via frame extraction
 reasoning        = true

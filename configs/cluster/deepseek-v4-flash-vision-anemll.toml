@@ -6,6 +6,7 @@ match = [
 ]
 source = "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"
 
+name = "DeepSeek V4 Flash Vision"
 [capabilities]
 vision = { input = ["text", "image"], output = ["text"] }
 reasoning        = true

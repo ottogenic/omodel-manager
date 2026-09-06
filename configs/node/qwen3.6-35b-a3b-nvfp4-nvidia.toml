@@ -12,6 +12,7 @@
 match  = ["qwen3.6-35b-a3b-nvfp4-nvidia", "nvidia/Qwen3.6-35B-A3B-NVFP4"]
 source = "https://huggingface.co/nvidia/Qwen3.6-35B-A3B-NVFP4"
 
+name = "Qwen 3.6 35B"
 [capabilities]
 vision           = { input = ["text", "image"], output = ["text"] }  # verified 2026-07-01: 4x4 blue PNG -> "Blue" on n2
 reasoning        = true

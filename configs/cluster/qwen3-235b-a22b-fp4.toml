@@ -3,6 +3,7 @@
 match = ["qwen3-235b-a22b-fp4", "nvidia/Qwen3-235B-A22B-FP4"]
 source = "https://huggingface.co/nvidia/Qwen3-235B-A22B-FP4"
 
+name = "Qwen3 235B"
 [capabilities]
 vision           = false
 reasoning        = true

@@ -6,6 +6,7 @@
 match  = ["qwen3.8-flash-next-fp8", "Qwen/Qwen3.8-Flash-Next-FP8"]
 source = "https://huggingface.co/Qwen/Qwen3.8-Flash-Next-FP8"
 
+name = "Qwen 3.8 Flash Next"
 [capabilities]
 vision           = { input = ["text", "image"], output = ["text"] }
 reasoning        = true

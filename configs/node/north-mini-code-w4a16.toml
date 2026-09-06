@@ -8,6 +8,7 @@ match = [
 ]
 source = "https://huggingface.co/CohereLabs/North-Mini-Code-1.0-w4a16"
 
+name = "Cohere North Mini Code"
 [capabilities]
 vision           = false
 reasoning        = true

@@ -12,6 +12,7 @@ match  = ["nemotron-3-super", "nemotron-3-super-120b-a12b-nvfp4-256k", "nemotron
 source = "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4"
 thinking_control = "none"     # recipe-level: don't auto-inject; presets set options explicitly
 
+name = "Nemotron 3 Super"
 [capabilities]
 vision           = false
 reasoning        = true

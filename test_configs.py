@@ -55,6 +55,13 @@ class ConfigValidityTests(unittest.TestCase):
                 self.assertIn(p.stem, match,
                               f"filename '{p.stem}' should appear in match {match}")
 
+                # Every shipped config carries a bare display name so harnesses
+                # (omw -> OpenCode/Chamber) show the model, not a raw served-id.
+                self.assertIsInstance(r.get("name"), str,
+                                      f"{p.name}: top-level `name` is required")
+                self.assertTrue(r["name"].strip(),
+                                f"{p.name}: `name` must be non-empty")
+
                 caps = r.get("capabilities", {})
                 self.assertIn("reasoning", caps)
                 self.assertIn("tool_call", caps)

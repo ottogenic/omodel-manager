@@ -10,6 +10,7 @@
 match  = ["gpt-oss-120b", "openai/gpt-oss-120b"]
 source = "https://huggingface.co/openai/gpt-oss-120b"
 
+name = "GPT-OSS 120B"
 [capabilities]
 vision           = false                  # pure text (gpt-oss-120b has no vision)
 reasoning        = true                   # harmony analysis channel; verified on-box

@@ -8,6 +8,7 @@
 match = ["laguna-dflash-s-2.1-nvfp4", "poolside/Laguna-S-2.1-DFlash-NVFP4"]
 source = "https://huggingface.co/poolside/Laguna-S-2.1-DFlash-NVFP4"
 
+name = "Laguna S 2.1"
 [capabilities]
 vision           = false
 reasoning        = true
