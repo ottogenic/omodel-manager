@@ -1,0 +1,12 @@
+match = ["cosyvoice3-0.5b-rtx4070"]
+source = "https://huggingface.co/FunAudioLLM/Fun-CosyVoice3-0.5B-2512"
+name = "CosyVoice 3 0.5B (native experimental UI)"
+task = "tts"
+
+[capabilities]
+audio = { input = ["text", "audio"], output = ["audio"] }
+voice_clone = true
+
+[serving]
+interface = "gradio"
+reference_transcript = "required-for-clone"

@@ -1,0 +1,4 @@
+FROM otools-cosyvoice3:0.1.1
+# Experimental TensorRT candidate; keep the native image and Qwen rollback intact.
+RUN pip install --no-cache-dir 'tensorrt-cu12==10.13.3.9' \
+    'tensorrt-cu12-bindings==10.13.3.9' 'tensorrt-cu12-libs==10.13.3.9'

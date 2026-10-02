@@ -1,0 +1,13 @@
+FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
+ARG COSYVOICE_REV=074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends git sox libsox-dev libsndfile1 ffmpeg build-essential && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/CosyVoice
+RUN git clone https://github.com/FunAudioLLM/CosyVoice.git . && git checkout "$COSYVOICE_REV" && git submodule update --init --recursive
+# Native inference does not use DeepSpeed or TensorRT; avoid optional builds.
+RUN pip install --no-cache-dir 'setuptools<81' && pip install --no-build-isolation --no-cache-dir openai-whisper==20231117 && \
+    grep -Ev '^(deepspeed|tensorrt-cu12|openai-whisper|wetext)' requirements.txt > /tmp/cosyvoice-requirements.txt && \
+    pip install --no-cache-dir -r /tmp/cosyvoice-requirements.txt && pip install --no-cache-dir 'huggingface_hub[cli]'
+ENV PYTHONPATH=/opt/CosyVoice:/opt/CosyVoice/third_party/Matcha-TTS
+COPY utils/card/cosyvoice_ui.py /opt/CosyVoice/cosyvoice_ui.py
+CMD ["python", "/opt/CosyVoice/cosyvoice_ui.py"]

@@ -266,6 +266,54 @@ class InstallTests(unittest.TestCase):
                                     capture_output=True)
         remote.assert_not_called()
 
+    def test_toolkit_binary_alone_does_not_mark_docker_gpu_ready(self):
+        def setup_ok(target, cmd):
+            if "Runtimes" in cmd:
+                return True, '{"runc": {}}'
+            if "nvidia-ctk" in cmd:
+                return True, "/usr/bin/nvidia-ctk"
+            return False, ""
+
+        with mock.patch.object(mm, "_setup_ok", side_effect=setup_ok):
+            ready, detail = mm._nvidia_runtime_status(None)
+        self.assertFalse(ready)
+        self.assertIn("not configured", detail)
+
+    def test_nvidia_probe_requires_actual_gpu_inside_container(self):
+        with mock.patch.object(mm, "docker", return_value=SimpleNamespace(
+                returncode=0, stdout="GPU 0: NVIDIA GeForce RTX 4070", stderr="")) as docker:
+            ready, detail = mm._nvidia_gpu_probe(None, allow_pull=True)
+        self.assertTrue(ready)
+        self.assertIn("RTX 4070", detail)
+        docker.assert_called_once_with(
+            ["run", "--rm", "--pull=missing", "--gpus", "all", "ubuntu:24.04", "nvidia-smi", "-L"],
+            capture=True, remote=None)
+
+    def test_check_only_does_not_pull_probe_image(self):
+        with mock.patch.object(mm, "docker", return_value=SimpleNamespace(returncode=1)) as docker:
+            ready, detail = mm._nvidia_gpu_probe(None)
+        self.assertIsNone(ready)
+        self.assertIn("not cached", detail)
+        docker.assert_called_once_with(["image", "inspect", "ubuntu:24.04"],
+                                       capture=True, remote=None)
+
+    def test_toolkit_install_configures_existing_package_without_reinstall(self):
+        completed = SimpleNamespace(returncode=0)
+        with mock.patch.object(mm, "_setup_ok", return_value=(True, "/usr/bin/nvidia-ctk")), \
+                mock.patch.object(mm, "_setup_run", return_value=completed) as run:
+            self.assertTrue(mm._install_nvidia_toolkit(None))
+        run.assert_called_once_with(
+            None, "sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker",
+            tty=True, batch=False,
+        )
+
+    def test_toolkit_install_rejects_unsupported_distribution_without_changes(self):
+        with mock.patch.object(mm, "_setup_ok", side_effect=[(False, ""), (True, "arch")]), \
+                mock.patch.object(mm, "_setup_run") as run, \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertFalse(mm._install_nvidia_toolkit(None))
+        run.assert_not_called()
+
 
 class DgxClusterDiscoveryTests(unittest.TestCase):
     def setUp(self):
@@ -694,6 +742,8 @@ class UnifiedInventoryTests(unittest.TestCase):
         devices = mm.device_inventory()
         self.assertEqual(devices["local"]["kind"], "node")
         self.assertEqual(devices["b70"]["kind"], "card")
+        self.assertEqual(devices["rtx4070"]["hardware"], "nvidia-rtx-4070")
+        self.assertEqual(devices["rtx4070-asr"]["workload"], "asr")
         self.assertEqual(devices["DGX1"]["target"], "otto@gpu.example")
         self.assertEqual(devices["DGX1"]["hardware"], "gb10")
         self.assertEqual(devices["Pair"]["kind"], "cluster")
@@ -881,7 +931,23 @@ class DeviceFirstFacadeTests(unittest.TestCase):
             self.assertIsNone(mm._current_deployment(device))
             mm._ensure_device_available(device)
         self.assertTrue(all(not call.kwargs.get("include_stopped")
-                            for call in managed.call_args_list))
+                             for call in managed.call_args_list))
+
+    def test_two_local_cards_can_run_independently(self):
+        rows = [{"Labels": f"{mm.LABEL_DEVICE}=b70,{mm.LABEL_MODEL}={mm.CARD_PROFILE_KEY}"}]
+        with mock.patch.object(mm, "list_managed", return_value=rows), \
+                mock.patch.object(mm, "_pulling_keys", return_value=[]):
+            rtx = mm.resolve_device("rtx4070")
+            self.assertIsNone(mm._current_deployment(rtx))
+            mm._ensure_device_available(rtx)
+
+    def test_asr_slot_is_available_while_tts_owns_its_slot(self):
+        rows = [{"Labels": f"{mm.LABEL_DEVICE}=rtx4070,{mm.LABEL_MODEL}=cosyvoice3-0.5b-rtx4070"}]
+        with mock.patch.object(mm, "list_managed", return_value=rows), \
+                mock.patch.object(mm, "_pulling_keys", return_value=[]):
+            asr = mm.resolve_device("rtx4070-asr")
+            self.assertIsNone(mm._current_deployment(asr))
+            mm._ensure_device_available(asr)
 
     def test_remote_card_dispatch_runs_staged_manager_on_target(self):
         device = {"name": "workstation-b70", "kind": "card", "target": "user@workstation"}

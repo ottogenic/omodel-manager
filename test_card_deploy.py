@@ -57,6 +57,14 @@ class CardDeployCommandTests(unittest.TestCase):
         self.assertIn("24g", command)
         self.assertIn("25g", command)
 
+    def test_launch_fails_before_container_changes_if_render_device_is_not_intel(self):
+        with mock.patch.object(Path, "exists", return_value=True), \
+                mock.patch.object(Path, "read_text", return_value="0x1002\n"), \
+                mock.patch.object(deploy, "refuse_unowned_existing_containers",
+                                  side_effect=AssertionError("must not touch containers")):
+            with self.assertRaisesRegex(deploy.DeployError, "not an Intel GPU"):
+                deploy.launch()
+
     def test_proxy_publishes_only_to_loopback(self):
         command = deploy.proxy_create_command(Path("/repo"))
         publish = command.index("--publish")

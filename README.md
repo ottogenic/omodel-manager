@@ -23,6 +23,7 @@ deployment for the Intel Arc Pro B70.
 - Local nodes: Docker with the NVIDIA container runtime/CDI
 - B70 card: Docker, `/dev/dri/renderD128`, and the pinned model snapshot described
   in `notes/card/b70-qwen3.8-vllm.md`
+- RTX 4070 speech card: NVIDIA driver and Docker GPU runtime (provision with `install --fix`)
 - Remote: an `ssh` client locally; Docker and `curl` on the remote (see `install`)
 
 ## Quick start
@@ -56,12 +57,43 @@ is managed through the same device-first lifecycle as node and cluster models.
 Historical native-runtime, driver, and OCuLink qualification records are retained
 under `notes/card/`; those non-vLLM paths are evidence, not normal deployments.
 
+For voice cloning on the local RTX 4070, use experimental native CosyVoice 3
+(FP16 by default; saved voices remain on the host):
+
+```bash
+python3 omodel-manager plan rtx4070 cosyvoice3-0.5b-rtx4070
+python3 omodel-manager launch rtx4070 cosyvoice3-0.5b-rtx4070
+python3 omodel-manager health rtx4070
+```
+
+Open <http://127.0.0.1:8001/> to test cloned voices with their exact reference
+transcripts. The saved Hughgo voice also works through the loopback speech API and
+the tailnet-only otalk-app. The service is not a chat-completions endpoint. Build
+and trial results, including the FP32 rollback, are in `notes/cosyvoice3-0.5b-rtx4070.md`.
+
+For speech-to-text on the **same** RTX 4070, use the independent `rtx4070-asr` slot:
+
+```bash
+python3 omodel-manager plan rtx4070-asr qwen3-asr-0.6b-rtx4070
+python3 omodel-manager launch rtx4070-asr qwen3-asr-0.6b-rtx4070
+python3 omodel-manager health rtx4070-asr
+curl -sS http://127.0.0.1:8003/v1/audio/transcriptions \
+  -F model=qwen3-asr-0.6b-rtx4070 -F file=@speech.wav
+```
+
+The OpenAI-shaped transcription API is loopback-only and works with WAV and FLAC.
+Its response currently includes a Qwen language marker (`language English<asr_text>`),
+and WebM uploads return HTTP 500. OpenChamber's browser may upload WebM, so it needs
+audio conversion and transcript cleanup before this endpoint can be used directly as
+its speech-to-text server. This is an audio model, not a chat model. See
+`notes/qwen3-asr-0.6b-rtx4070.md` for the tested runtime and co-hosting details.
+
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `models [card\|node\|cluster]` (alias `list`) | Unified profile table, optionally filtered by compatible device kind |
-| `devices [card\|node\|cluster]` | Built-in `local` and `b70`, registered hosts, configured clusters, and explicit device overrides |
+| `devices [card\|node\|cluster]` | Built-in `local`, `b70`, `rtx4070`, and `rtx4070-asr`, registered hosts, configured clusters, and explicit device overrides |
 | `launch [DEVICE] [MODEL]` | Device-first deterministic launch. Missing operands show concrete choices instead of an argparse error |
 | `plan DEVICE MODEL` | Print the existing node/cluster dry-run or exact card deployment plan without changing deployment state |
 | `pull <profile>` | Pre-pull a profile's image so `launch` starts instantly |
@@ -92,6 +124,10 @@ Card lifecycle uses the checked-in stdlib helper `utils/card/deploy_b70_vllm.py`
 `omm plan b70 qwen3.8-27b-gptq-int4-b70` works offline without Docker or a B70;
 launch verifies the pinned image, model files, isolation, and container identities.
 `$OMODEL_MANAGER_CARD_HELPER` may override the helper with an executable.
+The local RTX 4070 uses `utils/card/deploy_rtx4070_cosyvoice.py` and
+`utils/card/Dockerfile.cosyvoice`; its UI is bound to host loopback.
+The ASR slot uses `utils/card/deploy_rtx4070_qwen_asr.py` and
+`utils/card/Dockerfile.qwen_asr` on the same GPU, with a separate container and port.
 
 **Every `launch` drops the host's OS page cache right before `docker run`** — the DGX
 Spark / UMA false-OOM-&-freeze guard (vLLM #35313). There's no flag: `install` sets up a
@@ -231,8 +267,11 @@ to `.bak` first; `config --init --force` is the older spelling of the same reset
 ## Install, remote & uninstall
 
 `install --fix` bootstraps the machine where the command runs: it installs Docker if
-missing, adds the current user to the `docker` group, checks the NVIDIA driver + container
-runtime, configures the drop-caches sudo rule, and prompts for an HF token if none is set.
+missing, adds the current user to the `docker` group, installs NVIDIA Container Toolkit
+from NVIDIA's stable apt repository on Ubuntu/Debian when needed, configures the Docker
+runtime, and verifies GPU visibility inside a container. It also configures the scoped
+drop-caches sudo rule and prompts for an HF token if none is set. Other distributions
+receive a link to NVIDIA's toolkit installation guide.
 It skips SSH setup and does not add the local machine to the remote hosts registry. Run
 without `--fix` for a read-only local status report.
 

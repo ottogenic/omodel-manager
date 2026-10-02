@@ -1,0 +1,4 @@
+FROM otools-cosyvoice3:0.1.1
+# Experimental native CosyVoice LLM engine (not the vLLM-Omni TTS adapter).
+# Match the upstream vllm_example.py guidance for vLLM >= 0.11.
+RUN pip install --no-cache-dir 'vllm==0.11.0' 'transformers==4.57.1' 'numpy==1.26.4'

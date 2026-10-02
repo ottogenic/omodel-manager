@@ -1677,6 +1677,16 @@ DEFAULT_CONFIG = {
             },
         },
     },
+    "card_models": {
+        "cosyvoice3-0.5b-rtx4070": {
+            "hardware": "nvidia-rtx-4070", "backend": "cosyvoice-native",
+            "port": 8001, "status": "experimental",
+        },
+        "qwen3-asr-0.6b-rtx4070": {
+            "hardware": "nvidia-rtx-4070", "backend": "qwen-asr-vllm",
+            "workload": "asr", "port": 8003, "status": "validated",
+        },
+    },
 }
 
 
@@ -1940,11 +1950,12 @@ def need_docker():
         sys.exit(1)
 
 
-def docker(args, capture=False, check=False, tty=False):
+def docker(args, capture=False, check=False, tty=False, remote=_UNSET):
     """Run a docker command (argv list after 'docker'), locally or over SSH."""
-    if REMOTE:
+    target = REMOTE if remote is _UNSET else remote
+    if target:
         remote_cmd = "docker " + " ".join(shlex.quote(a) for a in args)
-        argv = ssh_argv(REMOTE, batch=True, tty=tty) + [remote_cmd]
+        argv = ssh_argv(target, batch=True, tty=tty) + [remote_cmd]
     else:
         argv = ["docker"] + args
     return subprocess.run(argv, text=True, check=check, capture_output=capture)
@@ -2353,6 +2364,10 @@ def device_inventory(kind=None):
     add("local", {"kind": "node", "target": None, "builtin": True})
     add("b70", {"kind": "card", "target": "local", "hardware": "intel-arc-pro-b70",
                 "builtin": True})
+    add("rtx4070", {"kind": "card", "target": "local", "hardware": "nvidia-rtx-4070",
+                    "workload": "tts", "builtin": True})
+    add("rtx4070-asr", {"kind": "card", "target": "local", "hardware": "nvidia-rtx-4070",
+                        "workload": "asr", "builtin": True})
     for alias, target in load_hosts():
         add(alias, {"kind": "node", "target": target, "source": "hosts"})
     for name, cfg in load_clusters().items():
@@ -2475,6 +2490,15 @@ def profile_inventory(kind=None):
         "backend": "vllm-xpu-docker", "users": 1,
         "usecase": ["Reasoning", "Vision", "Agentic"],
     })
+    for key, entry in cfg.get("card_models", {}).items():
+        add(key, "card", {
+            "served_model": key, "model_config": model_config("card", key),
+            "port": entry.get("port", 8001), "status": entry.get("status", "candidate"),
+            "hardware": entry.get("hardware"), "backend": entry.get("backend", "cosyvoice-native"),
+            "workload": entry.get("workload", "tts"), "users": 1,
+            "usecase": (["Speech recognition"] if entry.get("workload") == "asr"
+                        else ["Voice cloning", "Speech generation"]),
+        })
     for row in profiles.values():
         row["kinds"].sort(key=("card", "node", "cluster").index)
         row["kind"] = row["kinds"][0] if len(row["kinds"]) == 1 else None
@@ -6456,10 +6480,10 @@ def cmd_models(args):
     for r in rows:
         print("  " + "  ".join(str(r[i]).ljust(w[i]) for i in range(len(headers))))
     compatible = [device for device in device_inventory(kind).values()
-                  if any(device["kind"] in row["kinds"] for row in models.values())]
+                  if any(key in _compatible_profiles(device) for key in models)]
     if compatible:
         device = compatible[0]
-        sample = next(key for key, row in models.items() if device["kind"] in row["kinds"])
+        sample = next(key for key in models if key in _compatible_profiles(device))
         _suggest([("Plan a deployment", f"{_cli_name()} plan {device['name']} {sample}"),
                   ("Launch it", f"{_cli_name()} launch {device['name']} {sample}")])
 
@@ -6490,7 +6514,12 @@ def cmd_devices(args):
 
 
 def _compatible_profiles(device):
-    return profile_inventory(device["kind"])
+    profiles = profile_inventory(device["kind"])
+    if device["kind"] == "card":
+        return {key: row for key, row in profiles.items()
+                if row["variants"]["card"].get("hardware") == device.get("hardware")
+                and row["variants"]["card"].get("workload") == device.get("workload")}
+    return profiles
 
 
 def _device_member_targets(device):
@@ -6517,7 +6546,8 @@ def _current_deployment(device):
         target = device.get("target")
         rows = list_managed(remote=target)
         matches = [] if rows is None else [row for row in rows
-                   if (_label(row.get("Labels", ""), LABEL_DEVICE) or "").casefold() == "b70"]
+                   if (_label(row.get("Labels", ""), LABEL_DEVICE) or "").casefold()
+                   == device["name"].casefold()]
     else:
         target = device.get("target")
         rows = list_managed(remote=target, include_stopped=True)
@@ -6553,9 +6583,12 @@ def _ensure_device_available(device):
                   file=sys.stderr)
             sys.exit(1)
         pulling = _pulling_keys(target)
-        if rows or pulling:
+        conflicts = ([row for row in rows if
+                      (_label(row.get("Labels", ""), LABEL_DEVICE) or "").casefold()
+                      == device["name"].casefold()] if device["kind"] == "card" else rows)
+        if conflicts or (pulling and device["kind"] != "card"):
             occupied = [_label(row.get("Labels", ""), LABEL_MODEL) or row.get("Names", "?")
-                        for row in rows] + pulling
+                        for row in conflicts] + (pulling if device["kind"] != "card" else [])
             print(f"ERROR: device '{device['name']}' is already reserved by "
                   f"{', '.join(occupied)}. Stop it with "
                   f"`{_cli_name()} stop {device['name']}` first.", file=sys.stderr)
@@ -6624,11 +6657,31 @@ def _remote_card_manager(target):
 
 
 def dispatch_card(action, device, profile=None, role=None, follow=False, yes=False,
-                  dry_run=False):
+                   dry_run=False):
     """Dispatch card lifecycle to the checked-in helper or an explicit override."""
     global REMOTE
     target = device.get("target")
     REMOTE = target
+    if device["name"].casefold() in ("rtx4070", "rtx4070-asr"):
+        if target:
+            print("ERROR: RTX 4070 deployments are currently local-only.", file=sys.stderr)
+            sys.exit(1)
+        if device["name"].casefold() == "rtx4070-asr":
+            from utils.card import deploy_rtx4070_qwen_asr as helper
+        else:
+            from utils.card import deploy_rtx4070_cosyvoice as helper
+        helper.DOCKER_RUNNER = docker
+        argv = [action, device["name"].casefold()]
+        if profile:
+            argv.append(profile["key"] if isinstance(profile, dict) else profile)
+        if follow:
+            argv.append("-f")
+        if yes:
+            argv.append("-y")
+        result = helper.main(argv)
+        if result:
+            sys.exit(result)
+        return True
     helper_device = "b70"
     if target:
         if os.path.abspath(CARD_HELPER) != os.path.abspath(DEFAULT_CARD_HELPER):
@@ -7432,6 +7485,73 @@ def _setup_ok(target, cmd):
     return res.returncode == 0, (res.stdout or "").strip()
 
 
+def _nvidia_runtime_status(target):
+    ok, output = _setup_ok(target, "docker info --format '{{json .Runtimes}}' 2>/dev/null")
+    if ok:
+        try:
+            if "nvidia" in json.loads(output):
+                return True, "nvidia runtime registered with Docker"
+        except (TypeError, ValueError):
+            pass
+    if _setup_ok(target, "test -f /etc/cdi/nvidia.yaml -o -f /etc/cdi/nvidia.json")[0]:
+        return True, "NVIDIA CDI spec present (Docker GPU access should be probed)"
+    if _setup_ok(target, "command -v nvidia-ctk")[0]:
+        return False, "nvidia-ctk installed but Docker GPU runtime is not configured; --fix to configure"
+    return False, ""
+
+
+def _nvidia_gpu_probe(target, allow_pull=False):
+    """Prove that a container can see the NVIDIA GPU, without changing check-only state."""
+    image = "ubuntu:24.04"
+    if not allow_pull and docker(["image", "inspect", image], capture=True,
+                                 remote=target).returncode:
+        return None, "probe image not cached; run install --fix to verify Docker GPU access"
+    pull = "missing" if allow_pull else "never"
+    result = docker(["run", "--rm", f"--pull={pull}", "--gpus", "all", image,
+                     "nvidia-smi", "-L"], capture=True, remote=target)
+    output = result.stdout or ""
+    ok = result.returncode == 0
+    return ok and "GPU " in output, (output.splitlines()[0] if ok and output else
+                                     "Docker GPU probe failed; check NVIDIA runtime and driver")
+
+
+def _install_nvidia_toolkit(target):
+    """Install the vendor's stable apt packages, then configure the Docker runtime."""
+    ctk = _setup_ok(target, "command -v nvidia-ctk")[0]
+    if not ctk:
+        distro = _setup_ok(target, ". /etc/os-release; printf '%s %s' \"$ID\" \"${ID_LIKE:-}\"")[1]
+        if not {"ubuntu", "debian"}.intersection(distro.split()):
+            print("   unsupported package manager: install NVIDIA Container Toolkit from "
+                  "https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/"
+                  "latest/install-guide.html, then re-run install --fix")
+            return False
+        # All URLs and file names are fixed; the key is obtained from NVIDIA, not
+        # from a model repository. The temporary download is removed on every exit.
+        setup = (
+            "set -e; "
+            "sudo apt-get update; "
+            "sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg; "
+            "tmp=$(mktemp -d); trap 'rm -rf \"$tmp\"' EXIT; "
+            "curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey -o \"$tmp/gpgkey\"; "
+            "sudo gpg --batch --yes --dearmor "
+            "-o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg \"$tmp/gpgkey\"; "
+            "curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/"
+            "nvidia-container-toolkit.list -o \"$tmp/toolkit.list\"; "
+            "sed 's#deb https://#deb [signed-by=/usr/share/keyrings/"
+            "nvidia-container-toolkit-keyring.gpg] https://#g' \"$tmp/toolkit.list\" "
+            "| sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list >/dev/null; "
+            "sudo apt-get update; sudo apt-get install -y nvidia-container-toolkit"
+        )
+        if _setup_run(target, setup, tty=True, batch=False).returncode != 0:
+            print("   NVIDIA Container Toolkit package installation failed")
+            return False
+    configure = "sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker"
+    if _setup_run(target, configure, tty=True, batch=False).returncode != 0:
+        print("   NVIDIA runtime configuration or Docker restart failed")
+        return False
+    return True
+
+
 def cmd_install(args):
     """Bootstrap local prereqs when no target is given, or bootstrap and register
     explicit remote targets so `ps` and `--host` can find them."""
@@ -7653,7 +7773,8 @@ def _setup_host(target, fix, card=None):
                         "NOPASSWD rule active (launch drops page cache automatically)" if dc_ok
                         else "no NOPASSWD rule; --fix to add (launches warn + skip the drop otherwise)"))
 
-    # 5) GPU: driver + container runtime (check + advise; we don't auto-install the toolkit)
+    # 5) GPU: driver + container runtime. A toolkit binary alone does not mean Docker
+    #    has been configured to use it; inspect the active daemon's runtimes.
     if card == "b70":
         render_ok, _ = _setup_ok(target, "test -e /dev/dri/renderD128")
         results.append(("B70 render device", render_ok,
@@ -7662,24 +7783,22 @@ def _setup_host(target, fix, card=None):
     else:
         drv = _setup_ok(target, "nvidia-smi -L 2>/dev/null | head -1")[1] if (nosudo or dok) else ""
         results.append(("nvidia driver", bool(drv), drv or "nvidia-smi not found on host"))
-    # --gpus all can be backed EITHER by a registered "nvidia" runtime (legacy) OR by
-    # CDI (Docker 25+/29 default with the toolkit). Check several signals so a working
-    # CDI setup isn't a false negative.
-    gpu_ok, gpu_detail = False, ""
-    if nosudo and not card:
-        runtimes = _setup_ok(target, "docker info --format '{{json .Runtimes}}' 2>/dev/null")[1].lower()
-        has_ctk = _setup_ok(target, "command -v nvidia-ctk")[0]
-        has_cdi = _setup_ok(target, "ls /etc/cdi/nvidia.yaml /etc/cdi/nvidia.json 2>/dev/null")[0]
-        if "nvidia" in runtimes:
-            gpu_ok, gpu_detail = True, "nvidia runtime registered"
-        elif has_ctk:
-            gpu_ok, gpu_detail = True, "nvidia-container-toolkit present (nvidia-ctk); --gpus via CDI"
-        elif has_cdi:
-            gpu_ok, gpu_detail = True, "CDI nvidia spec present (/etc/cdi)"
+    gpu_ok, gpu_detail = _nvidia_runtime_status(target) if nosudo and not card else (False, "")
+    if gpu_ok and drv:
+        probe_ok, probe_detail = _nvidia_gpu_probe(target, allow_pull=fix)
+        if probe_ok is not None:
+            gpu_ok, gpu_detail = probe_ok, probe_detail
+        else:
+            gpu_detail += f"; {probe_detail}"
+    if fix and not card and nosudo and drv and not gpu_ok:
+        print("-> installing/configuring NVIDIA Container Toolkit for Docker "
+              "(sudo; may prompt, Docker will restart) ...")
+        if _install_nvidia_toolkit(target):
+            gpu_ok, gpu_detail = _nvidia_gpu_probe(target, allow_pull=True)
     if not gpu_ok and not gpu_detail:
-        gpu_detail = ("no nvidia runtime / nvidia-ctk / CDI spec found -- install toolkit: "
-                      "https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/"
-                      "latest/install-guide.html")
+        gpu_detail = ("NVIDIA Docker runtime unavailable; --fix installs it on Ubuntu/Debian "
+                      "(other systems: https://docs.nvidia.com/datacenter/cloud-native/"
+                      "container-toolkit/latest/install-guide.html)")
     if not card:
         results.append(("docker GPU runtime", gpu_ok, gpu_detail))
 

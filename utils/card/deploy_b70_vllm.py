@@ -53,6 +53,7 @@ PROFILE = "b70-qwen38-vllm-262k-v1"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MODEL_PATH = Path(DEFAULT_DESTINATION).expanduser()
 RENDER_DEVICE = Path("/dev/dri/renderD128")
+INTEL_PCI_VENDOR = "0x8086"
 
 LABEL_MANAGER = "otools.manager"
 LABEL_MODEL = "otools.model"
@@ -439,14 +440,28 @@ def wait_for_service(timeout):
     raise DeployError(f"service did not become healthy: {last_error}")
 
 
+def require_intel_render_device():
+    if not RENDER_DEVICE.exists():
+        raise DeployError(f"render device is missing: {RENDER_DEVICE}")
+    vendor_path = Path("/sys/class/drm") / RENDER_DEVICE.name / "device/vendor"
+    try:
+        vendor = vendor_path.read_text().strip().lower()
+    except OSError as exc:
+        raise DeployError(f"cannot identify GPU behind {RENDER_DEVICE}: {exc}") from exc
+    if vendor != INTEL_PCI_VENDOR:
+        raise DeployError(
+            f"{RENDER_DEVICE} is not an Intel GPU (PCI vendor {vendor}); "
+            "the B70 may be absent or its render device may have moved"
+        )
+
+
 def launch(timeout=600):
+    require_intel_render_device()
     if not MODEL_PATH.is_dir():
         raise DeployError(
             f"model is missing at {MODEL_PATH}; run "
             "python3 utils/card/download_qwen38_vllm_model.py"
         )
-    if not RENDER_DEVICE.exists():
-        raise DeployError(f"render device is missing: {RENDER_DEVICE}")
     refuse_unowned_existing_containers()
     replace_previous_text_only_container()
     replace_model_with_different_repo_mount(REPOSITORY_ROOT, MODEL_PATH)

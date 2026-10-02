@@ -49,6 +49,8 @@ do not belong in these files.
 | `[capabilities]` `thinking_control` | `"enable_thinking"` (Qwen `chat_template_kwargs`), `"reasoning_effort"` (vLLM low/med/high), `"soft_switch"` (`/think` `/no_think`), or `"none"` (template default; per-preset `options` carry knobs). |
 | `[context]` `native` / `min_thinking` | Context facts (docs + sanity). |
 | `[presets.<mode>]` | Two harness-agnostic task modes: `plan` and `build`. Each has `thinking` (bool), optional `max_output`, a `[presets.<mode>.sampling]` table, and optional model-native `options` (e.g. `options.chat_template_kwargs`). Adapters map them onto their native planning and implementation modes. |
+| `task = "tts"` | Speech synthesis models use `capabilities.audio`, `capabilities.voice_clone`, and `serving.interface` instead of chat reasoning, context, and plan/build presets. Adapters should only offer these to audio-capable clients. |
+| `task = "asr"` | Speech recognition models use `capabilities.audio` and `serving.interface = "openai-audio-transcriptions"`; they are not chat plan/build models. |
 | `[variants.<name>]` | Optional thinking-depth presets (raw `options` only). |
 
 ### Supported `sampling` keys (generic)

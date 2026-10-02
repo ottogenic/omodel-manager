@@ -1,0 +1,7 @@
+FROM vllm/vllm-openai:v0.14.0@sha256:1d6866b87630d94f5e0cdae55ab5abb4ce0b03fcb84d9d10612f9d518d19d4fd
+
+RUN pip install --no-cache-dir \
+    'nagisa==0.2.11' 'soynlp==0.0.493' 'qwen-omni-utils==0.0.9' \
+    'librosa==1.0.0' 'soundfile==0.14.0' 'sox==1.5.0' && \
+    pip install --no-cache-dir --no-deps \
+    'https://github.com/QwenLM/Qwen3-ASR/archive/7c6daf77a2421100f5fb066495372c00129d39ff.tar.gz'

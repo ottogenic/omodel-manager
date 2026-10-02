@@ -62,6 +62,23 @@ class ConfigValidityTests(unittest.TestCase):
                 self.assertTrue(r["name"].strip(),
                                 f"{p.name}: `name` must be non-empty")
 
+                if r.get("task") == "tts":
+                    self.assertEqual(r.get("capabilities", {}).get("audio"),
+                                     {"input": ["text", "audio"], "output": ["audio"]})
+                    self.assertTrue(r["capabilities"].get("voice_clone"))
+                    self.assertIn(r.get("serving", {}).get("interface"),
+                                  ("gradio", "openai-audio-speech"))
+                    self.assertNotIn("presets", r, "TTS is not a chat plan/build model")
+                    continue
+
+                if r.get("task") == "asr":
+                    self.assertEqual(r.get("capabilities", {}).get("audio"),
+                                     {"input": ["audio"], "output": ["text"]})
+                    self.assertEqual(r.get("serving", {}).get("interface"),
+                                     "openai-audio-transcriptions")
+                    self.assertNotIn("presets", r, "ASR is not a chat plan/build model")
+                    continue
+
                 caps = r.get("capabilities", {})
                 self.assertIn("reasoning", caps)
                 self.assertIn("tool_call", caps)

@@ -1,0 +1,11 @@
+match = ["qwen3-asr-0.6b-rtx4070", "Qwen/Qwen3-ASR-0.6B"]
+source = "https://huggingface.co/Qwen/Qwen3-ASR-0.6B"
+name = "Qwen3 ASR 0.6B"
+task = "asr"
+
+[capabilities]
+audio = { input = ["audio"], output = ["text"] }
+language_detection = true
+
+[serving]
+interface = "openai-audio-transcriptions"
