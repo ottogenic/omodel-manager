@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **Crash diagnostics.** `diagnose DEVICE` reports host memory, kernel OOM logs,
+  and retained container state; `logs DEVICE --tail N` preserves longer histories.
+- **NIM multimodal request size.** The pinned loopback proxy template accepts
+  64 MiB bodies instead of nginx's default 1 MiB. `reload-proxy DEVICE` applies
+  prepared templates without reloading weights, validating configs before reload
+  and restoring the generated files on failure.
 - **Explicit devices can be uninstalled without unregistering their host.**
   `uninstall <device>` now removes the matching `devices.json` entry locally while preserving
   SSH access, host discovery, and running containers; host-only `--purge` is rejected.
@@ -16,6 +22,24 @@ All notable changes to this project are documented here. The format follows
   the same qualified helper from any controller where that host is registered.
 
 ### Added
+- **Two preserved GLM-5.3-Flash deployments.** Promoted `glm-5.3-flash-nim`
+  (NVIDIA NIM/SGLang) and `glm-5.3-flash-eugr` (Eugr vLLM/B12X) into
+  `DEFAULT_CONFIG.cluster_models`, with immutable image/checkpoint identities,
+  independent caches and documented comparison commands. Both survive `sync`.
+  The NIM profile retains MessagePack IPC and the tested 400K/single-request
+  settings; Eugr retains the qualified 500K/MTP5/four-slot recipe and startup fixes.
+- **External vLLM cluster recipes.** Loader, eager mode, quantization, linear/DCP/
+  Mamba settings and runtime-default scheduling/generation are profile-selectable.
+  Immutable registry images can pin their Docker image ID and runtime version
+  without depending on Docker's inspect serialization.
+- **NIM cluster support.** Curated or sandbox `cluster_models` can select the
+  official two-Spark NIM image and bundled checkpoint, with vendor cache preparation
+  before rendezvous, retained diagnostics, and live startup feature checks. GLM
+  qualification is tracked in `notes/glm-5.3-flash-chachi.md`.
+- **Device API tunnels.** `tunnel DEVICE --local-port PORT` forwards the API port
+  discovered from running container labels through the registered SSH transport.
+- **Device port inspection.** `ports DEVICE [PORT]` shows TCP listeners and existing
+  Tailscale Serve routes, including both hosts of a cluster.
 - **DeepSeek smpcache runtime.** Promoted a qualified derivative over the reviewed c8r
   image that pins Reederey's promoted indexer-capture, C128A-stride, and cached sampler-state
   postimages. Its build manifest binds every source tree and file digest, and launch now rejects

@@ -1,0 +1,51 @@
+# Shared by the two qualified Chachi builds; see notes/glm-5.3-flash-deployments.md.
+# No reliable no-thinking mode: enable_thinking=false leaked reasoning into content.
+# Explicit model-native effort options avoid adapters inventing a "medium" mode.
+match = [
+  "glm-5.3-flash",
+  "glm-5.3-flash-nim",
+  "glm-5.3-flash-eugr",
+  "local-inference-lab/GLM-5.3-Flash-NVFP4-Spark",
+  "nim/zai-org/glm-5.3-flash",
+  "zai-org/GLM-5.3-Flash",
+]
+source = "https://huggingface.co/zai-org/GLM-5.3-Flash/blob/eb9eb208eb0d988989d07a6a12d0fdeb5f52574a/README.md"
+name = "GLM-5.3-Flash"
+
+[capabilities]
+vision = { input = ["text", "image"], output = ["text"] }
+reasoning = true
+tool_call = true
+# Conservative shared adapter cap for switching between NIM (one slot) and Eugr
+# (four slots, qualified at ~51K each). Runtime profiles retain their own limits.
+concurrency = 1
+thinking_control = "none"
+
+[context]
+# Architecture limit only. NIM caps total tokens at 400,000; the Eugr trial
+# configures 500,000. omodel-wire reads the served limit from /v1/models during sync.
+# Do not substitute this native maximum for the runtime's deployed context limit.
+native = 1048576
+
+[presets.plan]
+thinking = true
+max_output = 32768
+options.chat_template_kwargs = { reasoning_effort = "max" }
+[presets.plan.sampling]
+temperature = 1.0
+top_p = 0.95
+
+[presets.build]
+thinking = true
+max_output = 32768
+options.chat_template_kwargs = { reasoning_effort = "high" }
+[presets.build.sampling]
+temperature = 1.0
+top_p = 0.95
+
+[variants.low]
+options.chat_template_kwargs = { reasoning_effort = "low" }
+[variants.high]
+options.chat_template_kwargs = { reasoning_effort = "high" }
+[variants.max]
+options.chat_template_kwargs = { reasoning_effort = "max" }

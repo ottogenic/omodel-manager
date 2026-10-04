@@ -542,6 +542,116 @@ DEEPSEEK_VLLM_PREIMAGES = {
 # ----------------------------------------------------------------------------
 DEFAULT_CONFIG = {
     "$otools": "model_manager",
+    "cluster_models": {
+        "glm-5.3-flash-nim": {
+            "backend": "nim-sglang",
+            "nim_model_source": "bundled",
+            "nim_loopback": True,
+            "nim_download_profile": "d3c5ed87ba2f6ed5424d46a191fde9d1c53f424d3d454372fae8873205a04b8b",
+            "model": "nim/zai-org/glm-5.3-flash",
+            "revision": "nim-aa28e1f-nvfp4",
+            "image": ("nvcr.io/nim/zai-org/glm-5.3-flash@sha256:"
+                      "0bd2a1f4ffacf4ee61e1f8c1b48071a6713b51bad954ab0ca627c24be84f43f8"),
+            "served_model_name": "zai-org/GLM-5.3-Flash",
+            # Keep the qualified NIM cache independent of its discovered API ID.
+            "runtime_cache_name": "glm-5.3-flash-nim",
+            "port": 8000,
+            "worker_port": 8002,
+            "manager_port": 20000,
+            "max_model_len": 400000,
+            "max_num_seqs": 1,
+            "env": {
+                "NIM_BACKEND_PORT": "8001",
+                "NIM_KV_CACHE_PERCENT": "0.93",
+                # NIM_MAX_MODEL_LEN rejects the bundled GB10 profile at this length.
+                "NIM_PASSTHROUGH_ARGS": (
+                    "--context-length 400000 --max-running-requests 1 "
+                    "--max-mamba-cache-size 10 --cuda-graph-max-bs-decode 1 "
+                    "--max-total-tokens 420000"),
+                "SGLANG_CPU_WORKERS": "2",
+                "SGLANG_USE_PICKLE_IPC": "0",
+            },
+            "startup_timeout": 7200,
+            "thinking_control": "reasoning_effort",
+            "status": "validated",
+            "usecase": ["Coding", "Reasoning", "Vision", "Agentic"],
+            "notes": "NVIDIA NIM/SGLang baseline; full-image replay qualified at ~80K, not actual 400K.",
+        },
+        "glm-5.3-flash-eugr": {
+            "backend": "vllm-mp",
+            "family": "glm-5.3-flash",
+            "model": "local-inference-lab/GLM-5.3-Flash-NVFP4-Spark",
+            "revision": "a608241037e4c2565356bff7ca293f2133888f88",
+            "model_size": 187637721616,
+            "model_shards": 44,
+            "image": ("eugr/spark-vllm-b12x@sha256:"
+                      "1803d1c23f746f2f559b1d119deb4517b857750c4fb283d0e96d500f681f1af8"),
+            "image_id": "sha256:1803d1c23f746f2f559b1d119deb4517b857750c4fb283d0e96d500f681f1af8",
+            "vllm_version": "0.1.dev21553+gab86b7073.d20261003",
+            "served_model_name": "zai-org/GLM-5.3-Flash",
+            "port": 8000,
+            "master_port": 25000,
+            "entrypoint": "/usr/local/bin/vllm",
+            "security_opt": ["seccomp=unconfined"],
+            "serve_subcommand": True,
+            "tp_socket_ifname": True,
+            "disable_deep_gemm": False,
+            "enable_expert_parallel": False,
+            "pipeline_parallel_size": 1,
+            "decode_context_parallel_size": 1,
+            "load_format": "b12x",
+            "quantization": "modelopt_mixed",
+            "attention_backend": "B12X",
+            "moe_backend": "b12x",
+            "linear_backend": "b12x",
+            "mamba_cache_mode": "align",
+            "enforce_eager": False,
+            "enable_prefix_caching": True,
+            "async_scheduling": None,
+            "generation_config": None,
+            "enable_flashinfer_autotune": False,
+            "max_model_len": 500000,
+            "max_num_seqs": 4,
+            "max_num_batched_tokens": 4096,
+            "gpu_memory_utilization": 0.87,
+            "kv_cache_dtype": "fp8",
+            "block_size": 256,
+            "speculative_config": {
+                "method": "mtp", "num_speculative_tokens": 5,
+                "moe_backend": "humming", "attention_backend": "B12X",
+            },
+            "reasoning_parser": "glm45",
+            "tool_parser": "glm47",
+            "thinking_control": "reasoning_effort",
+            "env": {
+                "XDG_CACHE_HOME": "/cache/runtime",
+                "NCCL_IGNORE_CPU_AFFINITY": "1",
+                "NCCL_IB_GID_INDEX": "3",
+                "CUTE_DSL_ARCH": "sm_121a",
+                "SAFETENSORS_FAST_GPU": "1",
+                "VLLM_ENABLE_ROCE_ALLREDUCE": "1",
+                "B12X_ROCE_SPIN_LIMIT": "600000000",
+                "VLLM_ROCE_ALLREDUCE_MAX_SIZE": "2MB",
+                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
+                "VLLM_SSM_CONV_STATE_LAYOUT": "DS",
+                "VLLM_USE_AOT_COMPILE": "1",
+                "VLLM_USE_MEGA_AOT_ARTIFACT": "1",
+                "VLLM_USE_V2_MODEL_RUNNER": "1",
+                "VLLM_ENABLE_PCIE_ALLREDUCE": "0",
+                "B12X_POLICY_MODE": "auto",
+                "INSTANTTENSOR_BACKEND": "BUFFERED",
+                "INSTANTTENSOR_BUFFER_SIZE": "67108864",
+                "INSTANTTENSOR_CHUNK_SIZE": "8388608",
+                "INSTANTTENSOR_CONCURRENCY": "1",
+                "INSTANTTENSOR_IO_DEPTH": "3",
+            },
+            "startup_timeout": 7200,
+            "tok_s": 18,
+            "status": "validated",
+            "usecase": ["Coding", "Reasoning", "Vision", "Agentic"],
+            "notes": "Eugr vLLM/B12X + Spark quant; ten-image retrieval qualified at 497704 input tokens.",
+        },
+    },
     "defaults": {
         "image": DEFAULT_IMAGE,
         # Loopback by default: the server is reachable only on the box it runs
@@ -2470,8 +2580,9 @@ def profile_inventory(kind=None):
             "users": va.get("max-num-seqs", 1), "tok_s": entry.get("tok_s"),
             "usecase": entry.get("usecase", []),
         })
-    for key in sorted(CLUSTER_PROFILES):
-        entry = CLUSTER_PROFILES[key]
+    cluster_models = load_cluster_profiles(cfg)
+    for key in sorted(cluster_models):
+        entry = cluster_models[key]
         add(key, "cluster", {
             "served_model": entry.get("served_model_name") or entry.get("model", key),
             "model_config": model_config(
@@ -2774,11 +2885,28 @@ def auto_register_dgx_cluster(hosts=None, preferred_aliases=None):
     return [name]
 
 
+def load_cluster_profiles(cfg=None):
+    """Overlay complete sandbox profiles without modifying curated identities."""
+    if cfg is None:
+        cfg = load_config(create=False) if os.path.exists(CONFIG_PATH) else {}
+    sandbox = cfg.get("cluster_models", {})
+    if not isinstance(sandbox, dict) or any(
+            not isinstance(key, str) or not isinstance(value, dict)
+            for key, value in sandbox.items()):
+        raise RuntimeError("cluster_models must be an object of complete cluster profiles")
+    # Replace whole entries: merging can retain incompatible runtime/quant pins.
+    profiles = dict(CLUSTER_PROFILES)
+    profiles.update(DEFAULT_CONFIG.get("cluster_models", {}))
+    profiles.update(sandbox)
+    return json.loads(json.dumps(profiles))
+
+
 def cluster_profile(key):
+    profiles = load_cluster_profiles()
     try:
-        return json.loads(json.dumps(CLUSTER_PROFILES[key]))
+        return profiles[key]
     except KeyError:
-        avail = ", ".join(sorted(CLUSTER_PROFILES))
+        avail = ", ".join(sorted(profiles))
         print(f"ERROR: unknown cluster profile '{key}'. Available: {avail}", file=sys.stderr)
         sys.exit(1)
 
@@ -2855,6 +2983,8 @@ def _host_exec(target, args, capture=False, check=False, tty=False):
     """Execute a fixed argv on one cluster host. Local execution stays shell-free;
     SSH necessarily invokes the remote shell, so every token is quoted independently."""
     args = [str(a) for a in args]
+    if args and args[0] == "docker":
+        return docker(args[1:], capture=capture, check=check, tty=tty, remote=target)
     if target:
         cmd = " ".join(shlex.quote(a) for a in args)
         return run_remote(target, cmd, capture=capture, batch=True, tty=tty, check=check)
@@ -3397,7 +3527,7 @@ def _deepseek_runtime_context(profile, dry=False):
 
 
 def _deepseek_runtime_signature(target, image):
-    profile = next((value for value in CLUSTER_PROFILES.values()
+    profile = next((value for value in load_cluster_profiles().values()
                     if value.get("image") == image), {})
     lane = profile.get("runtime_lane")
     if lane in ("c8r", "smpcache"):
@@ -4068,7 +4198,8 @@ def _download_cluster_snapshot(cfg, profile, image, family, dry=False, roles=Non
     def download(role, target):
         cache = os.path.join(remote_home(target), ".cache", "huggingface")
         _host_exec(target, ["mkdir", "-p", cache], check=True)
-        print(f"Downloading official {family} snapshot on {role} ({target or 'local'}) ...")
+        print(f"Downloading pinned {profile['model']} snapshot on {role} "
+              f"({target or 'local'}) ...")
         cmd = ["docker", "run", "--rm", "--network", "host", "--entrypoint", "hf",
                "-e", "HF_HUB_DISABLE_XET=1", "-e", "HF_HUB_DOWNLOAD_TIMEOUT=600",
                "-e", "HF_HUB_ETAG_TIMEOUT=60",
@@ -4103,6 +4234,192 @@ def _download_cluster_snapshot(cfg, profile, image, family, dry=False, roles=Non
         futures = [executor.submit(download, role, target) for role, target in selected]
         for future in concurrent.futures.as_completed(futures):
             future.result()
+
+
+def _nim_image_identity(target, profile):
+    image = profile["image"]
+    if not re.fullmatch(r"nvcr\.io/nim/[a-z0-9./_-]+@sha256:[0-9a-f]{64}", image):
+        raise RuntimeError("NIM requires an immutable NVIDIA registry image digest")
+    inspected = _host_exec(target, ["docker", "image", "inspect", image], capture=True)
+    if inspected.returncode != 0:
+        raise RuntimeError("pinned NIM image is missing; run cluster prepare --build")
+    try:
+        metadata = json.loads(inspected.stdout)[0]
+    except (IndexError, TypeError, json.JSONDecodeError) as e:
+        raise RuntimeError("cannot parse NIM image metadata") from e
+    if metadata.get("Architecture") != "arm64" or metadata.get("Os") != "linux":
+        raise RuntimeError("NIM image must be Linux ARM64")
+    if image not in metadata.get("RepoDigests", []):
+        raise RuntimeError("NIM image is not bound to the pinned registry digest")
+    return metadata.get("Id")
+
+
+def _nim_overlay_specs():
+    """Minimal, hash-checked adaptations to the pinned NVIDIA GLM NIM image."""
+    return [
+        {
+            "path": "/usr/local/lib/python3.12/dist-packages/nim_stack/cli/actions.py",
+            "name": "actions.py",
+            "before": "a7ea8e305ba694f6a90297a4cdd77a7b8b23ee2b4303b7b77b3a72cbe7bae52b",
+            "after": "ead9070a9afb365d9716d55fe3f34d343033eed66f5119494452699700d60ced",
+            "old": "    model_path = workspace_path\n",
+            "new": ('    # Local HF snapshots contain symlinks omitted by the SDK workspace enumerator.\n'
+                    '    model_path = (config.model_ref if config.model_ref and\n'
+                    '                  os.path.isabs(config.model_ref) and os.path.isdir(config.model_ref)\n'
+                    '                  else workspace_path)\n'),
+        },
+        {
+            "path": "/opt/nim/etc/nginx.conf.template",
+            "name": "nginx.conf.template",
+            "before": "63bdbb7aed7a6c36f0cd791b6a23920d1f89430010347d045ac1fc94973185de",
+            "after": "183a7bcb6dee4ade35df55383249bf586ddda2abee5286347a220934251c3b40",
+            "old": "listen ${NIM_SERVER_PORT}${NIM_NGINX_SSL_LISTEN_SUFFIX};",
+            "new": ("listen 127.0.0.1:${NIM_SERVER_PORT}${NIM_NGINX_SSL_LISTEN_SUFFIX};\n"
+                    "        client_max_body_size 64m;"),
+        },
+        {
+            "path": "/sgl-workspace/sglang/python/sglang/srt/models/glm5_next.py",
+            "name": "glm5_next.py",
+            "before": "0a141565e73252ddb7f1773f30f0c48e001b7dce21a5ca7864b4ea6ae51d0ccd",
+            "after": "77cb6a3e7a710990cff61c6a6c91537eb5bf7d134fb935a5ae1e2fb04f9200f6",
+            "old": "class Glm5NextForConditionalGeneration(nn.Module):\n",
+            "new": ('from sglang.srt.models.utils import WeightsMapper\n\n\n'
+                    'class Glm5NextForConditionalGeneration(nn.Module):\n'
+                    '    # Mirror load_weights naming for NVIDIA ModelOpt exclusions.\n'
+                    '    hf_to_sglang_mapper = WeightsMapper(orig_to_new_prefix={\n'
+                    '        "model.language_model.": "model.",\n'
+                    '        "model.visual": "visual",\n'
+                    '    })\n'),
+        },
+    ]
+
+
+def _nim_overlay_dir(cfg, target):
+    return os.path.join(_cluster_state_dir(cfg["name"], target), "nim-glm53-overlay")
+
+
+def _prepare_nim_overlay(cfg, profile, specs=None):
+    # Read base files with the image's Python, without importing its serving code,
+    # GPU access, network, or host mounts beyond this deployment's output directory.
+    script = '''import hashlib,json,pathlib,sys
+for item in json.loads(sys.argv[1]):
+    source = pathlib.Path(item["path"]).read_text()
+    assert hashlib.sha256(source.encode()).hexdigest() == item["before"], item["path"]
+    assert source.count(item["old"]) == 1, item["path"]
+    patched = source.replace(item["old"], item["new"], 1)
+    assert hashlib.sha256(patched.encode()).hexdigest() == item["after"], item["path"]
+    if item["name"].endswith(".py"):
+        compile(patched, item["path"], "exec")
+    pathlib.Path("/output", item["name"]).write_text(patched)
+    print(item["after"], item["name"])
+'''
+    for target in _cluster_targets(cfg):
+        _nim_image_identity(target, profile)
+        output = _nim_overlay_dir(cfg, target)
+        _host_exec(target, ["mkdir", "-p", output], check=True)
+        _host_exec(target, ["docker", "run", "--rm", "--network", "none",
+                            "--entrypoint", "/usr/bin/python3", "-v", f"{output}:/output",
+                            profile["image"], "-c", script,
+                            json.dumps(_nim_overlay_specs() if specs is None else specs)], check=True)
+
+
+def _verify_nim_overlay(cfg, target, specs=None):
+    for item in (_nim_overlay_specs() if specs is None else specs):
+        path = os.path.join(_nim_overlay_dir(cfg, target), item["name"])
+        result = _host_exec(target, ["sha256sum", path], capture=True)
+        if result.returncode != 0 or result.stdout.split()[:1] != [item["after"]]:
+            raise RuntimeError("NIM overlay missing or changed; rerun cluster prepare --build")
+
+
+def _nim_loopback_specs():
+    return [item for item in _nim_overlay_specs() if item["name"] == "nginx.conf.template"]
+
+
+def _nim_proxy_reload_script():
+    """Regenerate/test nginx config, restoring files if validation or reload fails."""
+    return '''import hashlib,pathlib,subprocess,sys
+root = pathlib.Path(sys.argv[2])
+template = root / "etc/nginx.conf.template"
+if hashlib.sha256(template.read_bytes()).hexdigest() != sys.argv[1]:
+    raise RuntimeError("NIM proxy template differs from prepared version; run cluster prepare first")
+paths = [root / "nginx" / name for name in
+         ("nginx.conf", "tls.conf", "proxy_backend.conf", "cors_preflight.conf")]
+saved = {path: path.read_bytes() if path.exists() else None for path in paths}
+try:
+    subprocess.run([str(root / "scripts/generate_nginx_config.sh")], check=True)
+    subprocess.run(["nginx", "-t", "-c", str(paths[0]), "-g", "error_log stderr;"], check=True)
+    subprocess.run(["nginx", "-c", str(paths[0]), "-s", "reload"], check=True)
+except BaseException:
+    for path, data in saved.items():
+        if data is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(data)
+    raise
+print("NIM proxy reloaded: 64 MiB request limit; inference processes remain running.")
+'''
+
+
+def _prepare_nim(cfg, profile, build=False, weights=False, dry=False):
+    bundled = profile.get("nim_model_source") == "bundled"
+    if dry:
+        if build:
+            print(f"  would pull and verify official NIM {profile['image']} on both nodes")
+        if weights and not bundled:
+            _download_cluster_snapshot(cfg, profile, profile["download_image"], "GLM", dry=True)
+        if bundled:
+            if profile.get("nim_loopback"):
+                print("  would stage only the hash-checked nginx loopback template")
+            print("  would pre-cache the bundled GB10 checkpoint with NIM download-to-cache"
+                  if weights else "  NIM will use its manifest-pinned bundled checkpoint")
+            return
+        print("  would stage hash-checked local-snapshot, loopback, and NVIDIA quant-name adaptations")
+        return
+    roles = tuple(zip(("head", "worker"), _cluster_targets(cfg)))
+    if build:
+        def pull(role, target):
+            print(f"Pulling pinned NVIDIA NIM on {role} ({target or 'local'}) ...", flush=True)
+            _host_exec(target, ["docker", "pull", profile["image"]], check=True)
+            return role, _nim_image_identity(target, profile)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            identities = dict(executor.map(lambda item: pull(*item), roles))
+        if len(set(identities.values())) != 1:
+            raise RuntimeError("NIM image identities differ between nodes")
+        print(f"Verified NIM image on both nodes: {identities['head']}")
+    if bundled:
+        if profile.get("nim_loopback"):
+            _prepare_nim_overlay(cfg, profile, specs=_nim_loopback_specs())
+        if weights:
+            profile_id = profile.get("nim_download_profile", "")
+            if not re.fullmatch(r"[0-9a-f]{64}", profile_id):
+                raise RuntimeError("bundled NIM preparation requires nim_download_profile")
+            def cache_weights(role, target):
+                _nim_image_identity(target, profile)
+                runtime = _vllm_runtime_cache(target, profile)
+                _host_exec(target, ["mkdir", "-p", runtime], check=True)
+                print(f"Pre-caching bundled NIM weights on {role} ...", flush=True)
+                _host_exec(target, ["docker", "run", "--rm", "--gpus", "all",
+                                    "-v", f"{runtime}:/opt/nim/.cache", profile["image"],
+                                    "download-to-cache", "--profile", profile_id,
+                                    "--use-cache", "--verify-checksums"], check=True)
+                print(f"Bundled NIM cache verified on {role}.", flush=True)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [executor.submit(cache_weights, role, target) for role, target in roles]
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+        else:
+            print("NIM will use its manifest-pinned bundled checkpoint.")
+        return
+    _prepare_nim_overlay(cfg, profile)
+    if weights:
+        image = profile["download_image"]
+        if "@sha256:" not in image:
+            raise RuntimeError("model downloader image must be pinned")
+        for _, target in roles:
+            present = _host_exec(target, ["docker", "image", "inspect", image], capture=True)
+            if present.returncode != 0:
+                _host_exec(target, ["docker", "pull", image], check=True)
+        _download_cluster_snapshot(cfg, profile, image, "GLM")
 
 
 def _prepare_qwen(cfg, profile, build=False, weights=False, dry=False):
@@ -4157,12 +4474,14 @@ def _vllm_snapshot_path(profile):
 
 
 def _vllm_runtime_cache(target, profile):
-    return os.path.join(remote_home(target), ".cache", "otools", profile["served_model_name"])
+    return os.path.join(remote_home(target), ".cache", "otools",
+                        profile.get("runtime_cache_name", profile["served_model_name"]))
 
 
 def _vllm_image_identity(target, profile, allow_unpinned=False):
     if (not allow_unpinned
-            and not (profile.get("image_signature") or profile.get("image_signatures"))):
+            and not (profile.get("image_signature") or profile.get("image_signatures")
+                     or profile.get("image_id"))):
         raise RuntimeError("vLLM image content identity is not pinned")
     inspected = _host_exec(target, ["docker", "image", "inspect", profile["image"]],
                            capture=True)
@@ -4176,6 +4495,14 @@ def _vllm_image_identity(target, profile, allow_unpinned=False):
         raise RuntimeError("pinned vLLM image is not Linux ARM64")
     if profile.get("base_image") is None and profile["image"] not in metadata.get("RepoDigests", []):
         raise RuntimeError("local vLLM image is not bound to the pinned registry digest")
+    image_id = profile.get("image_id")
+    if image_id:
+        if (profile.get("base_image") or not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id)
+                or not re.search(r"@sha256:[0-9a-f]{64}$", profile["image"])):
+            raise RuntimeError("image_id requires a pinned registry image")
+        if metadata.get("Id") != image_id:
+            raise RuntimeError("pinned vLLM image ID mismatch: "
+                               f"expected {image_id}, got {metadata.get('Id')}")
     content = {
         "architecture": metadata.get("Architecture"),
         "os": metadata.get("Os"),
@@ -4614,11 +4941,12 @@ def _prepare_vllm(cfg, profile, build=False, weights=False, dry=False):
             for future in concurrent.futures.as_completed(futures):
                 role, identity = future.result()
                 identities[role] = identity
-        signatures = {identity["content_sha256"] for identity in identities.values()}
+        identity_key = "id" if profile.get("image_id") else "content_sha256"
+        signatures = {identity[identity_key] for identity in identities.values()}
         if len(signatures) != 1:
             raise RuntimeError("pinned vLLM image contents differ between nodes")
         print(f"  verified vLLM {profile['vllm_version']} "
-              f"(content sha256:{signatures.pop()}) on both nodes")
+              f"({identity_key}:{signatures.pop()}) on both nodes")
     if weights:
         if not build:
             for role, target in roles:
@@ -4644,6 +4972,106 @@ def _cluster_docker_labels(profile_key, cfg, role, backend, port=None):
     if port:
         labels += ["--label", f"{LABEL_PORT}={port}"]
     return labels
+
+
+def build_nim_cluster_argv(profile_key, profile, cfg, role, target, primary=None):
+    """Official Spark NIM recipe: head first, hardware helper selects RoCE."""
+    if role not in ("head", "worker"):
+        raise ValueError("NIM role must be head or worker")
+    if role == "worker" and primary not in cfg["fabric"]["head_ips"]:
+        raise RuntimeError("NIM primary must be a registered head fabric address")
+    name = _cluster_container_name(profile_key, cfg["name"], role)
+    cache = os.path.join(remote_home(target), ".cache", "huggingface")
+    runtime = _vllm_runtime_cache(target, profile)
+    port = profile["port"] if role == "head" else profile["worker_port"]
+    argv = ["run", "-d", "--name", name]
+    argv += _cluster_docker_labels(profile_key, cfg, role, profile["backend"],
+                                   profile["port"] if role == "head" else None)
+    if profile.get("nim_model_source") == "bundled":
+        # NVIDIA's connected two-Spark recipe. Leave model selection, trust,
+        # all inference tuning to the image; loopback is an optional network adaptation.
+        argv += ["--gpus", "all", "--network", "host", "--shm-size=16g",
+                 "--device", "/dev/infiniband:/dev/infiniband:rwm",
+                 "--ulimit", "memlock=-1:-1", "-v", f"{runtime}:/opt/nim/.cache",
+                 "-e", f"NIM_NODE_MANAGER_PORT={profile['manager_port']}",
+                 "-e", f"NIM_SERVER_PORT={port}"]
+        if profile.get("nim_loopback"):
+            argv += ["-e", "NIM_BACKEND_HOST=127.0.0.1", "-e", f"NIM_HEALTH_PORT={port}"]
+            for item in _nim_loopback_specs():
+                path = os.path.join(_nim_overlay_dir(cfg, target), item["name"])
+                argv += ["-v", f"{path}:{item['path']}:ro"]
+        if role == "worker":
+            argv += ["-e", f"NIM_PRIMARY_NODE={primary}"]
+        for key, value in profile.get("env", {}).items():
+            argv += ["-e", f"{key}={value}"]
+        argv.append(profile["image"])
+        return name, argv
+    argv += ["--gpus", "all", "--network", "host", "--shm-size=16g",
+             "--device", "/dev/infiniband:/dev/infiniband:rwm",
+             "--ulimit", "memlock=-1:-1",
+             "-v", f"{cache}:/cache/huggingface:ro",
+             "-v", f"{runtime}:/opt/nim/.cache",
+             "-e", f"NIM_MODEL_PATH={_vllm_snapshot_path(profile)}",
+             "-e", "NIM_DISABLE_MODEL_DOWNLOAD=true",
+             "-e", "NIM_TRUST_CUSTOM_CODE=false",
+             "-e", f"NIM_SERVED_MODEL_NAME={profile['served_model_name']}",
+             "-e", f"NIM_MAX_MODEL_LEN={profile['max_model_len']}",
+             "-e", f"NIM_NODE_MANAGER_PORT={profile['manager_port']}",
+             "-e", f"NIM_SERVER_PORT={port}",
+             "-e", f"NIM_HEALTH_PORT={port}",
+             "-e", "NIM_BACKEND_HOST=127.0.0.1",
+             "-e", f"NIM_KV_CACHE_PERCENT={profile.get('gpu_memory_utilization', 0.85)}",
+             "-e", ("NIM_PASSTHROUGH_ARGS=" + shlex.join([
+                 "--max-running-requests", str(profile["max_num_seqs"]),
+                 "--chunked-prefill-size", str(profile.get("max_num_batched_tokens", 4096)),
+             ] + profile.get("sglang_args", []))),
+             "-e", "NCCL_DEBUG=INFO",
+             "-e", "HF_HUB_OFFLINE=1", "-e", "TRANSFORMERS_OFFLINE=1",
+             "-e", "HF_HUB_DISABLE_TELEMETRY=1", "-e", "DO_NOT_TRACK=1"]
+    for item in _nim_overlay_specs():
+        path = os.path.join(_nim_overlay_dir(cfg, target), item["name"])
+        argv += ["-v", f"{path}:{item['path']}:ro"]
+    if role == "worker":
+        argv += ["-e", f"NIM_PRIMARY_NODE={primary}"]
+    for key, value in profile.get("env", {}).items():
+        argv += ["-e", f"{key}={value}"]
+    argv.append(profile["image"])
+    return name, argv
+
+
+def _nim_primary_from_logs(body, cfg):
+    matches = re.findall(r"NIM_PRIMARY_NODE=([0-9]+(?:\.[0-9]+){3})(?![\w.])", body)
+    if not matches:
+        return None
+    primary = matches[-1]
+    if primary not in cfg["fabric"]["head_ips"]:
+        raise RuntimeError(f"NIM selected primary {primary} outside the registered head fabric")
+    return primary
+
+
+def _verify_nim_listeners(target, api_port, backend_port=8001):
+    """Require loopback endpoints and reject wildcard binds on their ports.
+
+    Host networking may also have Tailscale Serve bound to its own explicit IP
+    on the API port. That separate listener can coexist with NIM on loopback.
+    """
+    result = _host_exec(target, ["ss", "-H", "-ltn"], capture=True)
+    if result.returncode != 0:
+        raise RuntimeError("cannot verify NIM API/backend listener addresses")
+    wanted, found = {int(api_port), int(backend_port)}, set()
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) < 5:
+            continue
+        address, separator, port = fields[3].rpartition(":")
+        if not separator or not port.isdigit() or int(port) not in wanted:
+            continue
+        if address in ("0.0.0.0", "*", "[::]", "::"):
+            raise RuntimeError(f"NIM listener {fields[3]} is not loopback-only")
+        if address in ("127.0.0.1", "[::1]", "::1"):
+            found.add(int(port))
+    if found != wanted:
+        raise RuntimeError("NIM API/backend listeners are not both present")
 
 
 def build_qwen_cluster_argv(profile_key, profile, cfg, role, target):
@@ -4724,6 +5152,8 @@ def build_vllm_cluster_argv(profile_key, profile, cfg, role, target, keep=False)
         argv += ["-e", f"TP_SOCKET_IFNAME={fabric['interfaces'][0]}"]
     for key, value in profile.get("env", {}).items():
         argv += ["-e", f"{key}={value}"]
+    for option in profile.get("security_opt", []):
+        argv += ["--security-opt", option]
     if profile.get("entrypoint"):
         argv += ["--entrypoint", profile["entrypoint"]]
     argv.append(profile["image"])
@@ -4738,9 +5168,12 @@ def build_vllm_cluster_argv(profile_key, profile, cfg, role, target, keep=False)
                  "allgather_reducescatter"]
     if profile.get("pipeline_parallel_size") is not None:
         argv += ["--pipeline-parallel-size", str(profile["pipeline_parallel_size"])]
+    load_format = profile.get("load_format", "safetensors")
+    argv += ["--load-format", load_format]
+    if load_format == "safetensors":
+        argv += ["--safetensors-load-strategy", "lazy"]
     argv += [
-              "--load-format", "safetensors", "--safetensors-load-strategy", "lazy",
-              "--dtype", "bfloat16", "--max-model-len", str(profile["max_model_len"]),
+               "--dtype", "bfloat16", "--max-model-len", str(profile["max_model_len"]),
              "--max-num-seqs", str(profile["max_num_seqs"]), "--max-num-batched-tokens",
              str(profile["max_num_batched_tokens"])]
     if profile.get("long_prefill_token_threshold") is not None:
@@ -4749,24 +5182,32 @@ def build_vllm_cluster_argv(profile_key, profile, cfg, role, target, keep=False)
     if profile.get("max_cudagraph_capture_size") is not None:
         argv += ["--max-cudagraph-capture-size",
                  str(profile["max_cudagraph_capture_size"])]
+    if profile.get("async_scheduling", False) is not None:
+        argv.append("--async-scheduling" if profile.get("async_scheduling")
+                    else "--no-async-scheduling")
+    generation_config = profile.get("generation_config", "vllm")
+    if generation_config is not None:
+        argv += ["--generation-config", generation_config]
     argv += ["--gpu-memory-utilization", str(profile["gpu_memory_utilization"]),
              "--enable-chunked-prefill",
              ("--enable-prefix-caching" if profile.get("enable_prefix_caching")
               else "--no-enable-prefix-caching"),
-             ("--async-scheduling" if profile.get("async_scheduling")
-              else "--no-async-scheduling"),
              ("--enable-flashinfer-autotune"
               if profile.get("enable_flashinfer_autotune")
               else "--no-enable-flashinfer-autotune"),
               "--enable-auto-tool-choice", "--tool-call-parser", profile["tool_parser"],
-             "--reasoning-parser", profile["reasoning_parser"], "--generation-config", "vllm",
+             "--reasoning-parser", profile["reasoning_parser"],
              "--enable-prompt-tokens-details", "--enable-log-requests",
              "--distributed-timeout-seconds", "900",
              "--cpu-distributed-timeout-seconds", "900", "--nnodes", "2", "--node-rank",
               "0" if role == "head" else "1", "--master-addr", fabric["head_ips"][0],
               "--master-port", str(profile["master_port"])]
-    if profile.get("family") != "deepseek-v4-vision":
+    if profile.get("enforce_eager", profile.get("family") != "deepseek-v4-vision"):
         argv.append("--enforce-eager")
+    for field in ("quantization", "linear_backend", "decode_context_parallel_size",
+                  "mamba_cache_mode"):
+        if profile.get(field) is not None:
+            argv += ["--" + field.replace("_", "-"), str(profile[field])]
     if profile.get("kv_cache_dtype"):
         argv += ["--kv-cache-dtype", profile["kv_cache_dtype"]]
     if profile.get("block_size"):
@@ -5089,8 +5530,9 @@ def cmd_ps(args):
 
 def cmd_cluster_profiles(args):
     print(f"{'PROFILE':<46} {'BACKEND':<20} {'PORT':<6} STATUS")
-    for key in sorted(CLUSTER_PROFILES):
-        p = CLUSTER_PROFILES[key]
+    profiles = load_cluster_profiles()
+    for key in sorted(profiles):
+        p = profiles[key]
         print(f"{key:<46} {p['backend']:<20} {p['port']:<6} {p['status']}")
 
 
@@ -5246,6 +5688,12 @@ def cmd_cluster_prepare(args):
     print(f"Preparing '{args.profile}' for cluster '{cfg['name']}' ...")
     if profile["backend"] == "trtllm-mpi":
         _prepare_qwen(cfg, profile, build=args.build, weights=args.weights, dry=args.dry_run)
+    elif profile["backend"] == "nim-sglang":
+        try:
+            _prepare_nim(cfg, profile, build=args.build, weights=args.weights, dry=args.dry_run)
+        except (RuntimeError, subprocess.CalledProcessError, OSError) as e:
+            print(f"ERROR: NIM preparation failed: {e}", file=sys.stderr)
+            sys.exit(1)
     elif profile["backend"] == "vllm-mp":
         try:
             _prepare_vllm(cfg, profile, build=args.build, weights=args.weights,
@@ -5597,7 +6045,7 @@ def _vllm_warmup_requests(profile):
     blue_png = ("data:image/png;base64,"
                 "iVBORw0KGgoAAAANSUhEUgAAAAQAAAABCAIAAAB2XpiaAAAADUlEQVR4nGNgYPgPRwAV9wP9eJEBOw"
                 "AAAABJRU5ErkJggg==")
-    return [
+    requests = [
         ("direct chat", 300, {
             "model": model,
             "messages": [{"role": "user", "content": "Reply with the single word ok."}],
@@ -5654,6 +6102,19 @@ def _vllm_warmup_requests(profile):
             "stream": True,
         }),
     ]
+    if profile.get("thinking_control") == "reasoning_effort":
+        # GLM-5.3's template always opens a reasoning block. It does not implement
+        # enable_thinking=false; qualify low/high effort instead of a false toggle.
+        for label, _, payload in requests:
+            effort = "high" if label == "reasoning" else "low"
+            payload["reasoning_effort"] = effort
+            payload["chat_template_kwargs"] = {"reasoning_effort": effort}
+            payload["max_tokens"] = max(payload["max_tokens"], 2048)
+            payload["temperature"] = 1.0
+            payload["top_p"] = 0.95
+            payload.pop("top_k", None)
+            payload.pop("presence_penalty", None)
+    return requests
 
 
 def _warm_vllm_cluster(head, profile, deadline):
@@ -5723,7 +6184,7 @@ def _warm_vllm_cluster(head, profile, deadline):
         reasoning = message.get("reasoning") or message.get("reasoning_content")
         content = message.get("content")
         if label == "direct chat":
-            if reasoning:
+            if reasoning and profile.get("thinking_control") != "reasoning_effort":
                 raise RuntimeError("Qwen3.8 direct warmup ignored enable_thinking=false")
             if not isinstance(content, str) or not content:
                 raise RuntimeError("Qwen3.8 direct warmup emitted no content")
@@ -5756,7 +6217,8 @@ def _warm_vllm_cluster(head, profile, deadline):
 def _launch_vllm_cluster(profile_key, profile, cfg, dry=False, startup_timeout=1800, keep=False):
     head, worker = _cluster_targets(cfg)
     if not dry:
-        if (not (profile.get("image_signature") or profile.get("image_signatures"))
+        if (not (profile.get("image_signature") or profile.get("image_signatures")
+                 or profile.get("image_id"))
                 or not profile.get("vllm_version")):
             print("ERROR: experimental vLLM image identity is not pinned; prepare the image, "
                   "record its reported signature/version, then retry.", file=sys.stderr)
@@ -5802,8 +6264,11 @@ def _launch_vllm_cluster(profile_key, profile, cfg, dry=False, startup_timeout=1
                   "with --weights.", file=sys.stderr)
             sys.exit(1)
         _host_exec(target, ["mkdir", "-p", _vllm_runtime_cache(target, profile)], check=True)
-    signatures = {identity["content_sha256"] for identity in identities.values()}
+    identity_key = "id" if profile.get("image_id") else "content_sha256"
+    signatures = {identity[identity_key] for identity in identities.values()}
     expected = set(profile.get("image_signatures", []))
+    if profile.get("image_id"):
+        expected = {profile["image_id"]}
     if ((expected and not signatures.issubset(expected))
             or (not expected and len(signatures) != 1)):
         print("ERROR: pinned vLLM image contents do not match the qualified pair.", file=sys.stderr)
@@ -6317,6 +6782,119 @@ def _launch_deepseek_cluster(profile_key, profile, cfg, dry=False, startup_timeo
           f"head API port {profile['port']}.")
 
 
+def _launch_nim_cluster(profile_key, profile, cfg, dry=False, startup_timeout=1800):
+    head, worker = _cluster_targets(cfg)
+    bundled = profile.get("nim_model_source") == "bundled"
+    if dry:
+        print("--- DRY RUN: NIM head starts first; worker uses the primary IP from its logs ---")
+        for role, target in (("head", head), ("worker", worker)):
+            _, argv = build_nim_cluster_argv(
+                profile_key, profile, cfg, role, target, primary=cfg["fabric"]["head_ips"][0])
+            print(f"\n# {role}\n{format_run(argv, target)}")
+        return
+    if not cluster_preflight(cfg, require_fabric=True)[0]:
+        sys.exit(1)
+    _ensure_cluster_idle(cfg)
+    for role, target in (("head", head), ("worker", worker)):
+        _nim_image_identity(target, profile)
+        if not bundled:
+            _verify_nim_overlay(cfg, target)
+        elif profile.get("nim_loopback"):
+            _verify_nim_overlay(cfg, target, specs=_nim_loopback_specs())
+        snapshot = os.path.join(remote_home(target), ".cache", "huggingface", "hub",
+                                "models--" + profile["model"].replace("/", "--"),
+                                "snapshots", profile["revision"])
+        hashes = {} if bundled else profile.get("model_file_sha256", {})
+        required = {"config.json", "model.safetensors.index.json", "chat_template.jinja"}
+        if not bundled and not required.issubset(hashes):
+            raise RuntimeError("NIM local model override requires pinned config/index/template hashes")
+        for filename, expected in hashes.items():
+            if os.path.basename(filename) != filename or not re.fullmatch(r"[0-9a-f]{64}", expected):
+                raise RuntimeError("invalid NIM model metadata hash entry")
+            result = _host_exec(target, ["sha256sum", os.path.join(snapshot, filename)], capture=True)
+            if result.returncode != 0 or result.stdout.split()[:1] != [expected]:
+                raise RuntimeError(f"{role}: pinned model {filename} is missing or changed")
+        name = _cluster_container_name(profile_key, cfg["name"], role)
+        if _host_exec(target, ["docker", "container", "inspect", name],
+                      capture=True).returncode == 0:
+            raise RuntimeError(f"{role}: retained container exists; inspect logs then stop {cfg['name']}")
+        _host_exec(target, ["mkdir", "-p", _vllm_runtime_cache(target, profile)], check=True)
+        _drop_caches(target)
+    started = []
+    deadline = time.monotonic() + profile.get("startup_timeout", startup_timeout)
+    try:
+        primary = None
+        for role, target in (("head", head), ("worker", worker)):
+            name, argv = build_nim_cluster_argv(profile_key, profile, cfg, role, target, primary)
+            print(f"Starting NIM {role}: {name} ...", flush=True)
+            _host_exec(target, ["docker"] + argv, check=True)
+            started.append((role, target, name))
+            if role == "head":
+                while time.monotonic() < deadline:
+                    running = _host_exec(target, ["docker", "inspect", "--format",
+                                                  "{{.State.Running}}", name], capture=True)
+                    if running.returncode != 0 or running.stdout.strip() != "true":
+                        raise RuntimeError("NIM head exited before worker rendezvous")
+                    logs = _host_exec(target, ["docker", "logs", name], capture=True)
+                    primary = _nim_primary_from_logs((logs.stdout or "") + (logs.stderr or ""), cfg)
+                    if primary:
+                        print(f"NIM primary: {primary}", flush=True)
+                        break
+                    time.sleep(5)
+                else:
+                    raise RuntimeError("NIM head did not report its primary address before the deadline")
+        while time.monotonic() < deadline:
+            ib_ready = True
+            for role, target, name in started:
+                running = _host_exec(target, ["docker", "inspect", "--format",
+                                              "{{.State.Running}}", name], capture=True)
+                if running.returncode != 0 or running.stdout.strip() != "true":
+                    raise RuntimeError(f"NIM {role} exited during startup")
+                logs = _host_exec(target, ["docker", "logs", name], capture=True)
+                # Stock NIM does not enable NCCL INFO logging. Readiness still
+                # requires both ranks; transport evidence is collected separately.
+                if not bundled:
+                    ib_ready = ib_ready and "NET/IB" in ((logs.stdout or "") + (logs.stderr or ""))
+            healthy, _ = _host_text(head, ["curl", "-fsS", "--max-time", "5",
+                                          f"http://127.0.0.1:{profile['port']}/v1/health/ready"])
+            if healthy and ib_ready:
+                listed, body = _host_text(head, ["curl", "-fsS", "--max-time", "5",
+                                                f"http://127.0.0.1:{profile['port']}/v1/models"])
+                if not listed:
+                    raise RuntimeError("NIM is ready but model discovery failed")
+                models = json.loads(body).get("data", [])
+                if bundled:
+                    if len(models) != 1 or not models[0].get("id"):
+                        raise RuntimeError("NIM did not advertise exactly one bundled model")
+                    profile = dict(profile, served_model_name=models[0]["id"])
+                    print(f"NIM bundled served model: {profile['served_model_name']}", flush=True)
+                elif profile["served_model_name"] not in [model.get("id") for model in models]:
+                    raise RuntimeError("NIM served model identity differs from its profile")
+                if not bundled or profile.get("nim_loopback"):
+                    _verify_nim_listeners(head, profile["port"])
+                    _verify_nim_listeners(worker, profile["worker_port"])
+                _warm_vllm_cluster(head, profile, deadline)
+                break
+            time.sleep(10)
+        else:
+            raise RuntimeError("NIM did not become ready on NCCL NET/IB before the startup deadline")
+    except (RuntimeError, subprocess.CalledProcessError, OSError, ValueError, KeyboardInterrupt):
+        for role, target, name in started:
+            logs = _host_exec(target, ["docker", "logs", "--tail", "120", name], capture=True)
+            print(f"--- NIM {role} diagnostics ---\n{logs.stdout or ''}{logs.stderr or ''}",
+                  file=sys.stderr)
+        for _, target, name in reversed(started):
+            result = _host_exec(target, ["docker", "stop", name], capture=True)
+            if result.returncode != 0:
+                print(f"ERROR: could not stop failed NIM rank {name}", file=sys.stderr)
+        print(f"Rank containers retained; inspect `omm logs {cfg['name']} head` and worker logs.",
+              file=sys.stderr)
+        raise
+    transport = "two-rank readiness" if bundled else "NCCL NET/IB"
+    print(f"READY: {profile_key} passed chat, reasoning, tools, vision, streaming, and "
+          f"{transport} checks on {cfg['name']} (port {profile['port']}).")
+
+
 def cmd_cluster_launch(args):
     cfg = getattr(args, "cluster_config", None) or cluster_config(args.name)
     profile = cluster_profile(args.profile)
@@ -6327,6 +6905,14 @@ def cmd_cluster_launch(args):
     if profile["backend"] == "trtllm-mpi":
         _launch_qwen_cluster(args.profile, profile, cfg, dry=args.dry_run,
                              startup_timeout=args.startup_timeout)
+        return
+    if profile["backend"] == "nim-sglang":
+        try:
+            _launch_nim_cluster(args.profile, profile, cfg, dry=args.dry_run,
+                                startup_timeout=args.startup_timeout)
+        except (RuntimeError, subprocess.CalledProcessError, OSError, ValueError) as e:
+            print(f"ERROR: NIM launch failed: {e}", file=sys.stderr)
+            sys.exit(1)
         return
     if profile["backend"] == "vllm-mp":
         _launch_vllm_cluster(args.profile, profile, cfg, dry=args.dry_run,
@@ -6420,10 +7006,20 @@ def cmd_cluster_health(args):
     cfg = getattr(args, "cluster_config", None) or cluster_config(args.name)
     profile = cluster_profile(args.profile)
     head, _ = _cluster_targets(cfg)
-    path = "/health_generate" if profile["backend"] == "trtllm-mpi" else "/v1/models"
+    path = {"trtllm-mpi": "/health_generate", "nim-sglang": "/v1/health/ready"}.get(
+        profile["backend"], "/v1/models")
     timeout = "30" if profile["backend"] == "trtllm-mpi" else "5"
     ok, body = _host_text(head, ["curl", "-fsS", "--max-time", timeout,
                                   f"http://127.0.0.1:{profile['port']}{path}"])
+    if (ok and profile["backend"] == "nim-sglang"
+            and (profile.get("nim_model_source") != "bundled" or profile.get("nim_loopback"))):
+        try:
+            _, worker = _cluster_targets(cfg)
+            _verify_nim_listeners(head, profile["port"])
+            _verify_nim_listeners(worker, profile["worker_port"])
+        except RuntimeError as e:
+            print(f"DOWN  {e}")
+            sys.exit(1)
     print("READY  " + body if ok else "STARTING/DOWN  generation health failed")
     if not ok:
         sys.exit(1)
@@ -6764,7 +7360,7 @@ def _dispatch_facade_launch(device, profile, args, dry_run):
             name=device.get("target") or device["name"], profile=profile["key"],
             dry_run=dry_run, startup_timeout=1800,
             cluster_config=device,
-            keep=CLUSTER_PROFILES[profile["key"]]["backend"] == "vllm-mp"))
+            keep=cluster_profile(profile["key"])["backend"] == "vllm-mp"))
     REMOTE = device.get("target")
     return _call_internal(cmd_launch, argparse.Namespace(
         key=profile["key"], host=None, remote=REMOTE, local=REMOTE is None,
@@ -6815,10 +7411,11 @@ def cmd_plan(args):
     if not profile:
         return
     _dispatch_facade_launch(device, profile, args, dry_run=True)
-    selected = (CLUSTER_PROFILES.get(profile["key"])
+    selected = (load_cluster_profiles().get(profile["key"])
                 if device["kind"] == "cluster" else None)
     if (selected is not None
-            and not (selected.get("image_signature") or selected.get("image_signatures"))):
+            and not (selected.get("image_signature") or selected.get("image_signatures")
+                     or selected.get("image_id"))):
         _suggest([("Build and inspect the candidate image",
                    f"{_cli_name()} cluster prepare {device['name']} {profile['key']} --build")])
     else:
@@ -6846,16 +7443,143 @@ def cmd_device_logs(args):
         if device["kind"] == "cluster":
             _call_internal(cmd_cluster_logs, argparse.Namespace(
                 name=device.get("target") or device["name"], profile=deployment["profile"],
-                role=role, follow=args.follow, tail=200, cluster_config=device))
+                role=role, follow=args.follow, tail=getattr(args, "tail", 200), cluster_config=device))
         elif device["kind"] == "card":
             dispatch_card("logs", device, deployment["profile"], follow=args.follow)
         else:
             _call_internal(cmd_logs, _node_lifecycle_args(
-                device, deployment, follow=args.follow, tail=200))
+                device, deployment, follow=args.follow, tail=getattr(args, "tail", 200)))
     except SystemExit as e:
         if e.code not in (None, 0):
             raise
     _facade_suggestions(device, {"key": deployment["profile"]})
+
+
+def cmd_device_ports(args):
+    """Read listening TCP sockets and any Tailscale Serve mappings on a device."""
+    device = resolve_device(args.device)
+    if args.port is not None and not 1 <= args.port <= 65535:
+        sys.exit("ERROR: port must be between 1 and 65535")
+    targets = (_device_member_targets(device) if device["kind"] == "cluster"
+               else [device.get("target")])
+    command = ["ss", "-H", "-ltnp"]
+    if args.port is not None:
+        command += [f"sport = :{args.port}"]
+    failed = False
+    for target in targets:
+        print(f"\n# {target or 'local'}", flush=True)
+        ok, body = _host_text(target, ["sudo", "-n"] + command)
+        if not ok:
+            ok, body = _host_text(target, command)
+            print("Process ownership may be hidden without root access.")
+        print(body or "No matching TCP listeners.")
+        failed = failed or not ok
+        served, mapping = _host_text(target, ["tailscale", "serve", "status"])
+        if served and mapping:
+            print("Tailscale Serve:\n" + mapping)
+    if failed:
+        sys.exit(1)
+    _suggest([("Inspect managed deployments", f"{_cli_name()} ps")])
+
+
+def cmd_device_diagnose(args):
+    """Read host memory, kernel diagnostics, and retained container exit state."""
+    device = resolve_device(args.device)
+    targets = (_device_member_targets(device) if device["kind"] == "cluster"
+               else [device.get("target")])
+    for target in targets:
+        print(f"\n# {target or 'local'}", flush=True)
+        for command in (["uptime"], ["free", "-h"], ["cat", "/proc/pressure/memory"]):
+            ok, text = _host_text(target, command)
+            print(text if ok else f"Unavailable: {shlex.join(command)}")
+        rows = list_managed(remote=target, include_stopped=True)
+        for row in rows or []:
+            labels = row.get("Labels", "")
+            if device["kind"] == "cluster" and (
+                    (_label(labels, LABEL_CLUSTER) or "").casefold()
+                    != str(device.get("target") or device["name"]).casefold()):
+                continue
+            if device["kind"] == "card" and (
+                    (_label(labels, LABEL_DEVICE) or "").casefold() != device["name"].casefold()):
+                continue
+            # Explicit fields avoid exposing environment variables or credentials.
+            result = docker(["inspect", "--format",
+                             '{{.Name}} image={{.Image}} restarts={{.RestartCount}} state={{json .State}}',
+                             row["Names"]], capture=True, remote=target)
+            print(result.stdout or result.stderr)
+        command = ["journalctl", "-k", "--since", "-2h", "--no-pager", "-n", "300"]
+        ok, text = _host_text(target, ["sudo", "-n"] + command)
+        if not ok:
+            ok, text = _host_text(target, command)
+        print("Recent kernel journal:\n" + (text if ok else "Unavailable without journal access."))
+    _suggest([("Inspect deployments", f"{_cli_name()} ps")])
+
+
+def cmd_device_reload_proxy(args):
+    """Reload prepared NIM proxies using runtime identity, without a model restart."""
+    device = resolve_device(args.device)
+    if device["kind"] != "cluster":
+        sys.exit("ERROR: reload-proxy currently supports NIM clusters only")
+    deployment = _require_current_deployment(device)
+    cluster = device.get("target") or device["name"]
+    candidates = []
+    # Verify both ranks before changing either; no caller-local profile is required.
+    for role, target in zip(("head", "worker"), _device_member_targets(device)):
+        rows = list_managed(remote=target)
+        matches = [row for row in rows or [] if
+                   (_label(row.get("Labels", ""), LABEL_CLUSTER) or "").casefold() == str(cluster).casefold()
+                   and _label(row.get("Labels", ""), LABEL_MODEL) == deployment["profile"]
+                   and _label(row.get("Labels", ""), LABEL_ROLE) == role
+                   and _label(row.get("Labels", ""), LABEL_BACKEND) == "nim-sglang"]
+        if len(matches) != 1:
+            sys.exit(f"ERROR: cannot identify one running NIM {role} on {device['name']}")
+        candidates.append((role, target, matches[0]["Names"]))
+    expected = _nim_loopback_specs()[0]["after"]
+    for role, target, name in candidates:
+        docker(["exec", name, "/usr/bin/python3", "-c", _nim_proxy_reload_script(),
+                expected, "/opt/nim"], remote=target, check=True)
+        print(f"Reloaded {role} proxy on {device['name']}.")
+    _suggest([("Check readiness", f"{_cli_name()} health {device['name']}")])
+
+
+def cmd_device_tunnel(args):
+    """Expose the running device API locally using the registered SSH transport."""
+    device = resolve_device(args.device)
+    deployment = _require_current_deployment(device)
+    target = (_device_member_targets(device)[0] if device["kind"] == "cluster"
+              else device.get("target"))
+    rows = list_managed(remote=target)
+    ports = set()
+    for row in rows or []:
+        labels = row.get("Labels", "")
+        if _label(labels, LABEL_MODEL) != deployment["profile"]:
+            continue
+        if device["kind"] == "cluster" and (
+                (_label(labels, LABEL_CLUSTER) or "").casefold()
+                != str(device.get("target") or device["name"]).casefold()):
+            continue
+        value = _label(labels, LABEL_PORT)
+        if value and value.isdecimal() and 1 <= int(value) <= 65535:
+            ports.add(int(value))
+    if len(ports) != 1:
+        sys.exit("ERROR: cannot identify exactly one running device API port")
+    remote_port = ports.pop()
+    local_port = args.local_port or remote_port
+    if not 1 <= local_port <= 65535:
+        sys.exit("ERROR: local port must be between 1 and 65535")
+    if target is None:
+        print(f"Local device API: http://127.0.0.1:{remote_port}/v1")
+        return
+    argv = ssh_argv(target, batch=True)
+    argv[-1:-1] = ["-N", "-T", "-o", "ExitOnForwardFailure=yes",
+                   "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3",
+                   "-L", f"127.0.0.1:{local_port}:127.0.0.1:{remote_port}"]
+    print(f"Forwarding {device['name']} API to http://127.0.0.1:{local_port}/v1; "
+          "Ctrl-C closes the tunnel.", flush=True)
+    result = subprocess.run(argv)
+    if result.returncode:
+        sys.exit(result.returncode)
+    _suggest([("Check the deployment", f"{_cli_name()} health {device['name']}")])
 
 
 def cmd_device_stop(args):
@@ -7063,7 +7787,8 @@ def _launch_status(body):
 
 
 def cmd_launch(args):
-    if args.key in CLUSTER_PROFILES and not getattr(args, "node_only", False):
+    cluster_models = load_cluster_profiles()
+    if args.key in cluster_models and not getattr(args, "node_only", False):
         cluster_name = getattr(args, "host", None) or getattr(args, "remote", None)
         if not cluster_name:
             print(f"ERROR: cluster profile '{args.key}' requires a registered cluster: "
@@ -7077,7 +7802,7 @@ def cmd_launch(args):
             ("foreground", "--foreground"), ("force", "--force"),
             ("no_fetch", "--no-fetch"), ("refresh", "--refresh"), ("wait", "--wait"),
         ) if getattr(args, attr, False)]
-        if args.keep and CLUSTER_PROFILES[args.key]["backend"] != "vllm-mp":
+        if args.keep and cluster_models[args.key]["backend"] != "vllm-mp":
             single_host_options.append("--keep")
         if single_host_options:
             print("ERROR: these options apply only to single-host profiles: "
@@ -7973,11 +8698,30 @@ def main():
     p.add_argument("role", nargs="?", choices=("head", "worker"), metavar="ROLE",
                    help="cluster rank (default: head)")
     p.add_argument("--follow", "-f", action="store_true", help="stream new logs")
+    p.add_argument("--tail", type=int, default=200, help="number of recent node/cluster log lines (default: 200)")
     p.set_defaults(func=cmd_device_logs)
 
     p = sub.add_parser("health", help="check the deployment on DEVICE")
     p.add_argument("device", metavar="DEVICE")
     p.set_defaults(func=cmd_device_health)
+
+    p = sub.add_parser("tunnel", help="forward DEVICE's running API to local loopback over SSH")
+    p.add_argument("device", metavar="DEVICE")
+    p.add_argument("--local-port", type=int, help="local port (default: running API port)")
+    p.set_defaults(func=cmd_device_tunnel)
+
+    p = sub.add_parser("ports", help="inspect TCP listeners and Tailscale Serve mappings on DEVICE")
+    p.add_argument("device", metavar="DEVICE")
+    p.add_argument("port", nargs="?", type=int, metavar="PORT")
+    p.set_defaults(func=cmd_device_ports)
+
+    p = sub.add_parser("diagnose", help="read device memory, kernel logs, and container exit state")
+    p.add_argument("device", metavar="DEVICE")
+    p.set_defaults(func=cmd_device_diagnose)
+
+    p = sub.add_parser("reload-proxy", help="reload prepared NIM proxies without restarting inference")
+    p.add_argument("device", metavar="DEVICE")
+    p.set_defaults(func=cmd_device_reload_proxy)
 
     cluster = sub.add_parser("cluster", help="manage one model across two DGX Sparks")
     cluster_sub = cluster.add_subparsers(dest="cluster_cmd", required=True)
@@ -8025,7 +8769,7 @@ def main():
 
     p = cluster_sub.add_parser("prepare", help="stage reviewed runtime source, image, and weights")
     p.add_argument("name")
-    p.add_argument("profile", choices=sorted(CLUSTER_PROFILES))
+    p.add_argument("profile", choices=sorted(load_cluster_profiles()))
     p.add_argument("--build", action="store_true", help="build the pinned local runtime on both nodes")
     p.add_argument("--weights", action="store_true", help="download the exact official snapshot on both nodes")
     p.add_argument("--allow-busy", action="store_true",

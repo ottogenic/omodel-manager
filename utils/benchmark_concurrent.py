@@ -87,9 +87,9 @@ def make_story(sid, approx_tokens):
     return "".join(out)
 
 
-def run_one(base_url, model, story, max_tokens, timeout):
+def run_one(base_url, model, story, max_tokens, timeout, reasoning_effort=None):
     """Stream one summarize request; return timing/token stats."""
-    body = json.dumps({
+    payload = {
         "model": model,
         "messages": [{"role": "user",
                       "content": f"{story}\nSummarize the text above in one short paragraph."}],
@@ -98,13 +98,22 @@ def run_one(base_url, model, story, max_tokens, timeout):
         "stream": True,
         "stream_options": {"include_usage": True},
         "chat_template_kwargs": {"enable_thinking": False},
-    }).encode()
+    }
+    if reasoning_effort is not None:
+        payload["reasoning_effort"] = reasoning_effort
+        # Use the documented NIM/OpenAI effort field and vendor-default sampling
+        # for always-reasoning models; do not send a contradictory thinking-off flag.
+        payload.pop("chat_template_kwargs")
+        payload.pop("temperature")
+    body = json.dumps(payload).encode()
     req = urllib.request.Request(base_url, data=body,
                                  headers={"Content-Type": "application/json"}, method="POST")
     start = time.time()
     first = last = None
     n = 0
     usage = {}
+    done_seen = False
+    finish_reason = None
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             for raw in resp:
@@ -113,14 +122,19 @@ def run_one(base_url, model, story, max_tokens, timeout):
                     continue
                 payload = line[5:].strip()
                 if payload == "[DONE]":
+                    done_seen = True
                     break
                 try:
                     obj = json.loads(payload)
                 except ValueError:
                     continue
+                if obj.get("error"):
+                    return {"ok": False, "err": str(obj["error"])}
                 if obj.get("usage"):
                     usage = obj["usage"]
                 ch = obj.get("choices") or []
+                if ch and ch[0].get("finish_reason"):
+                    finish_reason = ch[0]["finish_reason"]
                 delta = (ch[0].get("delta") or {}) if ch else {}
                 # Reasoning models may stream their entire completion before the
                 # final answer through either reasoning field.
@@ -133,6 +147,8 @@ def run_one(base_url, model, story, max_tokens, timeout):
                     n += 1
     except Exception as e:
         return {"ok": False, "err": str(e)}
+    if not done_seen or not finish_reason:
+        return {"ok": False, "err": "incomplete stream (missing finish reason or [DONE])"}
     if first is None:
         return {"ok": False, "err": "no output tokens"}
     ttft = first - start
@@ -141,7 +157,7 @@ def run_one(base_url, model, story, max_tokens, timeout):
     # tokens per chunk, so chunk-counting (n) under-reports decode speed by up to ~Nx.
     # usage.completion_tokens is the true count; fall back to n only if usage is absent.
     out_toks = usage.get("completion_tokens", n)
-    return {"ok": True, "ttft": ttft,
+    return {"ok": True, "ttft": ttft, "finish_reason": finish_reason,
             "in_toks": usage.get("prompt_tokens", 0),
             "out_toks": out_toks,
             "prefill_tps": (usage.get("prompt_tokens", 0) / ttft) if ttft else 0.0,
@@ -162,6 +178,8 @@ def main():
                     help="summary length cap (default: %(default)s)")
     ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
                     help="wall-clock seconds per request (default: %(default)s)")
+    ap.add_argument("--reasoning-effort", choices=("low", "high", "max"),
+                    help="effort for always-reasoning models; output speed includes reasoning tokens")
     args = ap.parse_args()
 
     ep, port = args.endpoint, args.port
@@ -180,13 +198,16 @@ def main():
 
     print(f"Endpoint: {ep} -> {host}:{port}")
     print(f"Model:    {model}" + ("  (auto)" if not args.model else ""))
+    if args.reasoning_effort:
+        print(f"Reasoning effort: {args.reasoning_effort} (reasoning tokens included; default sampling)")
     print(f"Prompt:   ~{args.context // 1000}k tokens (unique), summarize | "
           f"{args.n} simultaneous request(s)")
 
     # Warm-up: one tiny request so the timed numbers aren't a cold-start outlier and
     # runs stay comparable across N. Timing discarded.
     print("  warming up ...", flush=True)
-    run_one(base_url, model, make_story(999, 200), max_tokens=16, timeout=min(args.timeout, 60))
+    run_one(base_url, model, make_story(999, 200), max_tokens=16, timeout=min(args.timeout, 60),
+            reasoning_effort=args.reasoning_effort)
 
     # Make repeated benchmark invocations unique too. Without a run nonce, a
     # server with prefix caching can reuse the same sid=0 story from an earlier
@@ -197,7 +218,8 @@ def main():
     results = [None] * args.n
     t0 = time.time()
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.n) as pool:
-        futs = {pool.submit(run_one, base_url, model, stories[s], args.max_tokens, args.timeout): s
+        futs = {pool.submit(run_one, base_url, model, stories[s], args.max_tokens, args.timeout,
+                            args.reasoning_effort): s
                 for s in range(args.n)}
         pending = set(futs)
         while pending:
@@ -231,6 +253,12 @@ def main():
         print(f"    decode (output) speed:             {min(dc):.1f}-{max(dc):.1f} tok/s")
         print("\n  Tip: decode tok/s at N=1 -> a profile's `tok_s` (the `list` Tk/s column). "
               "Compare N=1 vs N=2/4 for the parallel slowdown.")
+        capped = sum(r.get("finish_reason") == "length" for r in oks)
+        if capped:
+            print(f"  {capped}/{len(oks)} outputs reached the token cap; this measures speed, "
+                  "not complete-answer quality.")
+    if len(oks) != args.n:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

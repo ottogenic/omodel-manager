@@ -10,6 +10,7 @@ mock the one Docker choke point (`docker()`) where needed. Keep them fast.
 """
 
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
@@ -1672,7 +1673,360 @@ class HttpModelsTests(unittest.TestCase):
         self.assertEqual(phase, "starting")
 
 
+class DeviceTunnelTests(unittest.TestCase):
+    def run_tunnel(self, rows, local_port=18000):
+        device = {"name": "Chachi", "kind": "cluster", "member_targets": ["head", "worker"]}
+        with mock.patch.object(mm, "resolve_device", return_value=device), \
+             mock.patch.object(mm, "_require_current_deployment", return_value={"profile": "glm"}), \
+             mock.patch.object(mm, "list_managed", return_value=rows) as listed, \
+             mock.patch.object(mm, "ssh_argv", return_value=["ssh", "-i", "pinned-key", "head"]), \
+             mock.patch.object(mm.subprocess, "run", return_value=SimpleNamespace(returncode=0)) as run, \
+             contextlib.redirect_stdout(io.StringIO()):
+            mm.cmd_device_tunnel(SimpleNamespace(device="Chachi", local_port=local_port))
+        listed.assert_called_once_with(remote="head")
+        return run
+
+    def test_tunnel_uses_running_labels_and_loopback_with_registered_key(self):
+        run = self.run_tunnel([{"Labels": "otools.model=glm,otools.cluster=Chachi,otools.port=19000"}])
+        argv = run.call_args.args[0]
+        self.assertIn("127.0.0.1:18000:127.0.0.1:19000", argv)
+        self.assertIn("ExitOnForwardFailure=yes", argv)
+        self.assertIn("pinned-key", argv)
+        self.assertEqual(argv[-1], "head")
+
+    def test_tunnel_rejects_ambiguous_runtime_ports(self):
+        with self.assertRaisesRegex(SystemExit, "exactly one"):
+            self.run_tunnel([{"Labels": f"otools.model=glm,otools.cluster=Chachi,otools.port={port}"}
+                             for port in (18000, 19000)])
+
+    def test_tunnel_ignores_other_cluster_and_rejects_invalid_local_port(self):
+        with self.assertRaisesRegex(SystemExit, "exactly one"):
+            self.run_tunnel([{"Labels": "otools.model=glm,otools.cluster=other,otools.port=18000"}])
+        with self.assertRaisesRegex(SystemExit, "local port"):
+            self.run_tunnel([{"Labels": "otools.model=glm,otools.cluster=Chachi,otools.port=18000"}],
+                            local_port=65536)
+
+
+class NimProxyReloadTests(unittest.TestCase):
+    def test_reload_restores_all_configs_if_nginx_validation_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "etc").mkdir()
+            (root / "nginx").mkdir()
+            (root / "etc/nginx.conf.template").write_text("prepared template")
+            digest = hashlib.sha256(b"prepared template").hexdigest()
+            config = root / "nginx/nginx.conf"
+            config.write_text("working config")
+            def run(argv, **kwargs):
+                if argv[0].endswith("generate_nginx_config.sh"):
+                    config.write_text("invalid config")
+                    (root / "nginx/tls.conf").write_text("new file")
+                else:
+                    raise subprocess.CalledProcessError(1, argv)
+            with mock.patch.object(mm.sys, "argv", ["python", digest, tmp]), \
+                    mock.patch.object(subprocess, "run", side_effect=run) as called:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    exec(mm._nim_proxy_reload_script(), {})
+            self.assertEqual(config.read_text(), "working config")
+            self.assertFalse((root / "nginx/tls.conf").exists())
+            self.assertFalse(any("reload" in c.args[0] for c in called.call_args_list))
+
+    def test_changed_template_is_rejected_before_any_process_or_file_change(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "etc").mkdir()
+            (root / "etc/nginx.conf.template").write_text("unexpected template")
+            with mock.patch.object(mm.sys, "argv", ["python", "0" * 64, tmp]), \
+                    mock.patch.object(subprocess, "run") as called:
+                with self.assertRaisesRegex(RuntimeError, "differs"):
+                    exec(mm._nim_proxy_reload_script(), {})
+            called.assert_not_called()
+
+    def test_device_reload_uses_runtime_labels_without_local_profile(self):
+        device = {"name": "Chachi", "kind": "cluster", "member_targets": ["host1", "host2"]}
+        def rows(remote):
+            role = "head" if remote == "host1" else "worker"
+            return [{"Names": "live-" + role, "Labels": "otools.cluster=Chachi,otools.model=gone,"
+                     "otools.backend=nim-sglang,otools.role=" + role}]
+        with mock.patch.object(mm, "resolve_device", return_value=device), \
+                mock.patch.object(mm, "_require_current_deployment", return_value={"profile": "gone"}), \
+                mock.patch.object(mm, "list_managed", side_effect=rows), \
+                mock.patch.object(mm, "cluster_profile", side_effect=AssertionError("local config")), \
+                mock.patch.object(mm, "docker") as called, contextlib.redirect_stdout(io.StringIO()):
+            mm.cmd_device_reload_proxy(SimpleNamespace(device="Chachi"))
+        self.assertEqual([c.args[0][:2] for c in called.call_args_list],
+                         [["exec", "live-head"], ["exec", "live-worker"]])
+        self.assertEqual([c.kwargs["remote"] for c in called.call_args_list], ["host1", "host2"])
+
+
+class NimLifecycleTests(unittest.TestCase):
+    def setUp(self):
+        self.profile = {"backend": "nim-sglang", "model": "nvidia/GLM-5.3-Flash-NVFP4",
+                        "revision": "a" * 40, "served_model_name": "glm-5.3-flash-nvfp4",
+                        "image": "nvcr.io/nim/zai-org/glm-5.3-flash@sha256:" + "b" * 64,
+                        "port": 8000, "worker_port": 8002, "manager_port": 20000,
+                        "max_model_len": 131072, "thinking_control": "reasoning_effort"}
+        self.profile["max_num_seqs"] = 1
+        self.profile["model_file_sha256"] = dict.fromkeys(
+            ("config.json", "model.safetensors.index.json", "chat_template.jinja"), "c" * 64)
+        self.cfg = {"name": "test-pair", "fabric": {"head_ips": ["10.10.0.1"]}}
+        self.commands = []
+        self.primary = "10.10.0.1"
+        self.alive = True
+        self.metadata_hash = "c" * 64
+
+    def host_exec(self, target, argv, **kwargs):
+        self.commands.append((target, argv))
+        code, output = 0, ""
+        if argv[:3] == ["docker", "container", "inspect"]:
+            code = 1  # No retained container from an earlier attempt.
+        elif argv[0] == "sha256sum":
+            output = self.metadata_hash + "  " + argv[1]
+        elif argv[:3] == ["docker", "inspect", "--format"]:
+            output = "true" if self.alive else "false"
+        elif argv[:2] == ["docker", "logs"]:
+            output = f"NIM_PRIMARY_NODE={self.primary} NIM_NODE_MANAGER_PORT=20000\nNET/IB ready"
+        return SimpleNamespace(returncode=code, stdout=output, stderr="")
+
+    def launch(self):
+        with contextlib.ExitStack() as stack:
+            for name, value in (("_cluster_targets", ("host1", "host2")),
+                                ("cluster_preflight", (True, [])),
+                                ("_ensure_cluster_idle", None),
+                                ("_nim_image_identity", "pinned-id"),
+                                ("_verify_nim_overlay", None),
+                                ("_verify_nim_listeners", None),
+                                ("remote_home", "/home/test"),
+                                ("_drop_caches", None),
+                                ("_host_text", (True, json.dumps({"data": [
+                                    {"id": self.profile["served_model_name"]}]})))):
+                stack.enter_context(mock.patch.object(mm, name, return_value=value))
+            stack.enter_context(mock.patch.object(mm, "_host_exec", side_effect=self.host_exec))
+            stack.enter_context(mock.patch.object(mm.time, "sleep"))
+            warm = stack.enter_context(mock.patch.object(mm, "_warm_vllm_cluster"))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+            mm._launch_nim_cluster("glm", self.profile, self.cfg)
+            return warm
+
+    def test_head_rendezvous_precedes_worker_and_warmup(self):
+        warm = self.launch()
+        runs = [(target, argv) for target, argv in self.commands if argv[:2] == ["docker", "run"]]
+        self.assertEqual([target for target, _ in runs], ["host1", "host2"])
+        self.assertIn("NIM_PRIMARY_NODE=10.10.0.1", runs[1][1])
+        warm.assert_called_once()
+
+    def test_wrong_fabric_primary_stops_head_preserving_diagnostics(self):
+        self.primary = "192.0.2.99"
+        with self.assertRaisesRegex(RuntimeError, "outside the registered"):
+            self.launch()
+        runs = [target for target, argv in self.commands if argv[:2] == ["docker", "run"]]
+        self.assertEqual(runs, ["host1"])
+        self.assertTrue(any(argv[:2] == ["docker", "stop"] for _, argv in self.commands))
+        self.assertFalse(any(argv[:2] == ["docker", "rm"] for _, argv in self.commands))
+
+    def test_head_crash_never_launches_worker(self):
+        self.alive = False
+        with self.assertRaisesRegex(RuntimeError, "head exited"):
+            self.launch()
+        self.assertEqual([target for target, argv in self.commands
+                          if argv[:2] == ["docker", "run"]], ["host1"])
+        self.assertTrue(any(argv[:2] == ["docker", "stop"] for _, argv in self.commands))
+
+    def test_changed_model_metadata_prevents_any_rank_start(self):
+        self.metadata_hash = "d" * 64
+        with self.assertRaisesRegex(RuntimeError, "config.json is missing or changed"):
+            self.launch()
+        self.assertFalse(any(argv[:2] == ["docker", "run"] for _, argv in self.commands))
+
+    def test_bundled_launch_needs_no_hf_hashes_or_source_overlays(self):
+        self.profile["nim_model_source"] = "bundled"
+        self.profile.pop("model_file_sha256")
+        with mock.patch.object(mm, "_nim_overlay_specs", side_effect=AssertionError("unexpected overlay")):
+            warm = self.launch()
+        self.assertFalse(any(argv[0] == "sha256sum" for _, argv in self.commands))
+        warm.assert_called_once()
+
+
 class ClusterProfileTests(unittest.TestCase):
+    def test_promoted_glm_profiles_survive_missing_or_stale_sandbox(self):
+        expected = mm.DEFAULT_CONFIG["cluster_models"]
+        for cfg in ({}, mm.DEFAULT_CONFIG):
+            profiles = mm.load_cluster_profiles(cfg)
+            for key in ("glm-5.3-flash-nim", "glm-5.3-flash-eugr"):
+                self.assertEqual(profiles[key], expected[key])
+                profiles[key]["env"]["LOCAL_TEST"] = "1"
+                self.assertNotIn("LOCAL_TEST", expected[key]["env"])
+        replacement = {"backend": "nim-sglang", "model": "local-test"}
+        profiles = mm.load_cluster_profiles({"cluster_models": {"glm-5.3-flash-nim": replacement}})
+        self.assertEqual(profiles["glm-5.3-flash-nim"], replacement)
+        self.assertEqual(profiles["glm-5.3-flash-eugr"], expected["glm-5.3-flash-eugr"])
+
+    def test_promoted_glm_nim_preserves_qualified_cache_and_mitigations(self):
+        profiles = mm.load_cluster_profiles({})
+        nim = profiles["glm-5.3-flash-nim"]
+        vllm = profiles["glm-5.3-flash-eugr"]
+        self.assertNotEqual(nim["image"], vllm["image"])
+        self.assertEqual(nim["served_model_name"], vllm["served_model_name"])
+        cfg = {"name": "pair", "fabric": {"head_ips": ["10.10.0.1"]}}
+        with mock.patch.object(mm, "remote_home", return_value="/home/test"):
+            self.assertEqual(mm._vllm_runtime_cache("host", nim),
+                             "/home/test/.cache/otools/glm-5.3-flash-nim")
+            self.assertEqual(mm._vllm_runtime_cache("host", vllm),
+                             "/home/test/.cache/otools/zai-org/GLM-5.3-Flash")
+            for role in ("head", "worker"):
+                _, argv = mm.build_nim_cluster_argv(
+                    "glm-5.3-flash-nim", nim, cfg, role, "host", primary="10.10.0.1")
+                self.assertIn("SGLANG_USE_PICKLE_IPC=0", argv)
+                self.assertIn("NIM_BACKEND_HOST=127.0.0.1", argv)
+                self.assertIn("NIM_PASSTHROUGH_ARGS=" + nim["env"]["NIM_PASSTHROUGH_ARGS"], argv)
+                self.assertFalse(any(a.startswith("NIM_MAX_MODEL_LEN=") for a in argv))
+                self.assertIn("/home/test/.cache/otools/glm-5.3-flash-nim:/opt/nim/.cache", argv)
+
+    def test_cluster_host_docker_commands_use_shared_transport(self):
+        with mock.patch.object(mm, "docker") as docker:
+            mm._host_exec("user@host", ["docker", "inspect", "name"], capture=True)
+        docker.assert_called_once_with(["inspect", "name"], capture=True, check=False,
+                                       tty=False, remote="user@host")
+
+    def test_bundled_loopback_adaptation_mounts_only_nginx_without_model_patches(self):
+        profile = {"backend": "nim-sglang", "nim_model_source": "bundled", "nim_loopback": True,
+                   "served_model_name": "glm-nim", "image": "pinned-nim",
+                   "port": 8000, "worker_port": 8002, "manager_port": 20000}
+        cfg = {"name": "pair", "fabric": {"head_ips": ["10.10.0.1"]}}
+        with mock.patch.object(mm, "remote_home", return_value="/home/test"):
+            _, argv = mm.build_nim_cluster_argv("glm", profile, cfg, "head", "host1")
+        volumes = [argv[i + 1] for i, value in enumerate(argv[:-1]) if value == "-v"]
+        self.assertEqual(len(volumes), 2)
+        self.assertTrue(volumes[1].endswith(":/opt/nim/etc/nginx.conf.template:ro"))
+        self.assertIn("NIM_BACKEND_HOST=127.0.0.1", argv)
+        self.assertIn("NIM_HEALTH_PORT=8000", argv)
+        self.assertFalse(any(value.startswith(("NIM_MODEL_PATH=", "NIM_PASSTHROUGH_ARGS=",
+                                              "NIM_KV_CACHE_PERCENT=")) for value in argv))
+
+    def test_bundled_nim_precache_uses_vendor_utility_and_checksums_on_both_hosts(self):
+        profile = {"nim_model_source": "bundled", "nim_download_profile": "a" * 64,
+                   "served_model_name": "glm-nim", "image": "pinned-nim"}
+        with mock.patch.object(mm, "_cluster_targets", return_value=("host1", "host2")), \
+             mock.patch.object(mm, "remote_home", return_value="/home/test"), \
+             mock.patch.object(mm, "_nim_image_identity"), \
+             mock.patch.object(mm, "_host_exec") as run, \
+             contextlib.redirect_stdout(io.StringIO()):
+            mm._prepare_nim({"name": "pair"}, profile, weights=True)
+        downloads = [call.args for call in run.call_args_list
+                     if call.args[1][:2] == ["docker", "run"]]
+        self.assertEqual({target for target, _ in downloads}, {"host1", "host2"})
+        for _, argv in downloads:
+            self.assertEqual(argv[-5:], ["download-to-cache", "--profile", "a" * 64,
+                                        "--use-cache", "--verify-checksums"])
+            self.assertNotIn("NIM_MODEL_PATH", " ".join(argv))
+
+    def test_bundled_nim_uses_stock_image_tuning_without_overlays(self):
+        profile = {"backend": "nim-sglang", "nim_model_source": "bundled",
+                   "served_model_name": "glm-nim", "image": "pinned-nim",
+                   "port": 8000, "worker_port": 8002, "manager_port": 20000}
+        cfg = {"name": "pair", "fabric": {"head_ips": ["10.10.0.1"]}}
+        with mock.patch.object(mm, "remote_home", return_value="/home/test"):
+            _, argv = mm.build_nim_cluster_argv("glm", profile, cfg, "head", "host1")
+        env = [argv[i + 1] for i, value in enumerate(argv[:-1]) if value == "-e"]
+        self.assertEqual(env, ["NIM_NODE_MANAGER_PORT=20000", "NIM_SERVER_PORT=8000"])
+        volumes = [argv[i + 1] for i, value in enumerate(argv[:-1]) if value == "-v"]
+        self.assertEqual(volumes, ["/home/test/.cache/otools/glm-nim:/opt/nim/.cache"])
+        self.assertNotIn("--rm", argv)
+        self.assertEqual(argv[-1], "pinned-nim")
+
+    def test_nim_listener_verification_checks_backend_as_well_as_proxy(self):
+        for backend, valid in (("127.0.0.1", True), ("0.0.0.0", False), ("*", False)):
+            body = ("LISTEN 0 511 127.0.0.1:8000 0.0.0.0:*\n"
+                    f"LISTEN 0 511 {backend}:8001 0.0.0.0:*\n")
+            result = SimpleNamespace(returncode=0, stdout=body)
+            with self.subTest(backend=backend), mock.patch.object(mm, "_host_exec", return_value=result):
+                if valid:
+                    mm._verify_nim_listeners("host", 8000)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "not loopback"):
+                        mm._verify_nim_listeners("host", 8000)
+
+    def test_nim_loopback_can_coexist_with_explicit_tailnet_listener(self):
+        body = ("LISTEN 0 511 100.69.203.63:8000 0.0.0.0:*\n"
+                "LISTEN 0 511 127.0.0.1:8000 0.0.0.0:*\n"
+                "LISTEN 0 511 127.0.0.1:8001 0.0.0.0:*\n")
+        with mock.patch.object(mm, "_host_exec", return_value=SimpleNamespace(returncode=0, stdout=body)):
+            mm._verify_nim_listeners("host", 8000)
+        without_api = body.replace("LISTEN 0 511 127.0.0.1:8000 0.0.0.0:*\n", "")
+        with mock.patch.object(mm, "_host_exec", return_value=SimpleNamespace(returncode=0, stdout=without_api)):
+            with self.assertRaisesRegex(RuntimeError, "not both present"):
+                mm._verify_nim_listeners("host", 8000)
+
+    def test_nim_rank_commands_preserve_logs_and_use_official_discovery(self):
+        profile = {"backend": "nim-sglang", "model": "nvidia/GLM-5.3-Flash-NVFP4",
+                   "revision": "a" * 40, "served_model_name": "glm-5.3-flash-nvfp4",
+                   "image": "nvcr.io/nim/zai-org/glm-5.3-flash@sha256:" + "b" * 64,
+                   "port": 8000, "worker_port": 8002, "manager_port": 20000,
+                   "max_model_len": 131072, "max_num_seqs": 1}
+        cfg = {"name": "test-pair", "fabric": {"head_ips": ["10.10.0.1"]}}
+        with mock.patch.object(mm, "remote_home", return_value="/home/test"):
+            _, head = mm.build_nim_cluster_argv("glm", profile, cfg, "head", "host1")
+            _, worker = mm.build_nim_cluster_argv(
+                "glm", profile, cfg, "worker", "host2", "10.10.0.1")
+        self.assertNotIn("--rm", head)
+        self.assertNotIn("--privileged", head)
+        self.assertIn("/home/test/.cache/huggingface:/cache/huggingface:ro", head)
+        self.assertIn("NIM_TRUST_CUSTOM_CODE=false", head)
+        self.assertIn("NIM_BACKEND_HOST=127.0.0.1", head)
+        self.assertIn("NIM_HEALTH_PORT=8000", head)
+        self.assertIn("NIM_KV_CACHE_PERCENT=0.85", head)
+        self.assertIn("NIM_SERVER_PORT=8000", head)
+        self.assertIn("NIM_SERVER_PORT=8002", worker)
+        self.assertIn("NIM_PRIMARY_NODE=10.10.0.1", worker)
+        self.assertFalse(any(value.startswith("NIM_PRIMARY_NODE=") for value in head))
+        self.assertFalse(any(value.startswith(("NCCL_IB_", "NCCL_SOCKET_", "UCX_"))
+                             for value in head))
+        self.assertNotIn("--trust-remote-code", head)
+
+    def test_nim_rendezvous_rejects_unregistered_primary(self):
+        cfg = {"fabric": {"head_ips": ["10.10.0.1", "10.11.0.1"]}}
+        self.assertIsNone(mm._nim_primary_from_logs("loading model", cfg))
+        self.assertEqual(mm._nim_primary_from_logs(
+            "start worker NIM_PRIMARY_NODE=10.11.0.1 NIM_NODE_MANAGER_PORT=20000", cfg),
+            "10.11.0.1")
+        with self.assertRaisesRegex(RuntimeError, "outside the registered"):
+            mm._nim_primary_from_logs("NIM_PRIMARY_NODE=192.0.2.1", cfg)
+
+    def test_nim_image_identity_requires_arm64_and_digest_binding(self):
+        image = "nvcr.io/nim/zai-org/glm-5.3-flash@sha256:" + "a" * 64
+        metadata = {"Id": "sha256:" + "b" * 64, "Architecture": "arm64",
+                    "Os": "linux", "RepoDigests": [image]}
+        for architecture, digests, valid in (("arm64", [image], True),
+                                             ("amd64", [image], False),
+                                             ("arm64", [], False)):
+            with self.subTest(architecture=architecture, digests=digests):
+                record = dict(metadata, Architecture=architecture, RepoDigests=digests)
+                result = SimpleNamespace(returncode=0, stdout=json.dumps([record]))
+                with mock.patch.object(mm, "_host_exec", return_value=result):
+                    if valid:
+                        self.assertEqual(mm._nim_image_identity(None, {"image": image}), metadata["Id"])
+                    else:
+                        with self.assertRaises(RuntimeError):
+                            mm._nim_image_identity(None, {"image": image})
+
+    def test_sandbox_cluster_profiles_replace_complete_entries_without_mutation(self):
+        key = "qwen3.8-flash-next-fp8"
+        original = json.loads(json.dumps(mm.CLUSTER_PROFILES))
+        candidate = {"model": "nvidia/candidate", "backend": "vllm-mp"}
+        cfg = {"cluster_models": {key: candidate, "new-candidate": candidate}}
+        profiles = mm.load_cluster_profiles(cfg)
+        self.assertEqual(profiles[key], candidate)
+        self.assertNotIn("image_signature", profiles[key])
+        profiles["new-candidate"]["model"] = "changed"
+        self.assertEqual(cfg["cluster_models"]["new-candidate"]["model"], "nvidia/candidate")
+        self.assertEqual(mm.CLUSTER_PROFILES, original)
+
+    def test_sandbox_cluster_profiles_validate_structure(self):
+        for value in ([], None, {"broken": "not a profile"}):
+            with self.subTest(value=value), self.assertRaises(RuntimeError):
+                mm.load_cluster_profiles({"cluster_models": value})
+
     def test_qwen_artifacts_are_first_party_and_immutable(self):
         for profile in mm.CLUSTER_PROFILES.values():
             if profile["backend"] != "trtllm-mpi":
@@ -2053,6 +2407,29 @@ class ClusterRegistryTests(unittest.TestCase):
                 self.assertRaisesRegex(RuntimeError, "pinned registry digest"):
             mm._vllm_image_identity("user@host", profile)
 
+    def test_vllm_registry_id_pin_survives_inspect_shape_differences(self):
+        profile, metadata = self.vllm_identity_fixture()
+        profile.pop("image_signature")
+        profile["image"] = "registry.example/runtime@sha256:" + "a" * 64
+        profile["image_id"] = "sha256:" + "b" * 64
+        metadata["Id"] = profile["image_id"]
+        metadata["RepoDigests"] = [profile["image"]]
+        for env in (None, []):
+            metadata["Config"]["Env"] = env
+            responses = [
+                SimpleNamespace(returncode=0, stdout=json.dumps([metadata]), stderr=""),
+                SimpleNamespace(returncode=0, stdout=profile["vllm_version"] + "\n", stderr=""),
+            ]
+            with mock.patch.object(mm, "_host_exec", side_effect=responses):
+                identity = mm._vllm_image_identity("user@host", profile)
+            self.assertEqual(identity["id"], profile["image_id"])
+        metadata["Id"] = "sha256:" + "c" * 64
+        with mock.patch.object(mm, "_host_exec", return_value=SimpleNamespace(
+                returncode=0, stdout=json.dumps([metadata]), stderr="")) as execute, \
+                self.assertRaisesRegex(RuntimeError, "image ID mismatch"):
+            mm._vllm_image_identity("user@host", profile)
+        self.assertEqual(execute.call_count, 1)
+
     def test_vllm_image_identity_rejects_changed_content(self):
         profile, metadata = self.vllm_identity_fixture()
         metadata["Config"]["Env"].append("CHANGED=1")
@@ -2297,6 +2674,34 @@ class ClusterRegistryTests(unittest.TestCase):
         self.assertIn("VLLM_FLASHINFER_AUTOTUNE_SKIP_OPS="
                       "trtllm_fp4_block_scale_moe,flashinfer::trtllm_fp4_block_scale_moe", argv)
 
+    def test_vllm_external_recipe_does_not_inherit_incompatible_engine_defaults(self):
+        profile = dict(mm.CLUSTER_PROFILES["qwen3.8-flash-next-fp8"])
+        profile.update({
+            "load_format": "b12x", "enforce_eager": False,
+            "enable_expert_parallel": False, "disable_deep_gemm": False,
+            "enable_prefix_caching": True, "async_scheduling": None,
+            "generation_config": None, "quantization": "modelopt_mixed",
+            "linear_backend": "b12x", "decode_context_parallel_size": 1,
+            "mamba_cache_mode": "align", "entrypoint": "/usr/local/bin/vllm",
+            "security_opt": ["seccomp=unconfined"],
+            "serve_subcommand": True,
+        })
+        with mock.patch.object(mm, "remote_home", return_value="/home/user"):
+            _, argv = mm.build_vllm_cluster_argv(
+                "external", profile, self.config(), "worker", "user@worker", keep=True)
+        for flag in ("--enforce-eager", "--safetensors-load-strategy", "--async-scheduling",
+                     "--no-async-scheduling", "--generation-config", "--enable-expert-parallel",
+                     "--trust-remote-code", "--rm", "VLLM_USE_DEEP_GEMM=0"):
+            self.assertNotIn(flag, argv)
+        for flag, value in (("--load-format", "b12x"), ("--quantization", "modelopt_mixed"),
+                            ("--linear-backend", "b12x"), ("--decode-context-parallel-size", "1"),
+                            ("--mamba-cache-mode", "align"), ("--node-rank", "1"),
+                            ("--host", "127.0.0.1")):
+            self.assertEqual(argv[argv.index(flag) + 1], value)
+        self.assertIn("--headless", argv)
+        self.assertIn("--enable-prefix-caching", argv)
+        self.assertEqual(argv[argv.index("--security-opt") + 1], "seccomp=unconfined")
+
     def test_deepseek_anemll_argv_uses_candidate_recipe_and_headless_worker(self):
         cfg = self.config()
         profile = mm.CLUSTER_PROFILES["deepseek-v4-flash-vision-anemll"]
@@ -2424,6 +2829,16 @@ class ClusterRegistryTests(unittest.TestCase):
         image = payloads["vision"]["messages"][0]["content"][0]["image_url"]["url"]
         self.assertTrue(image.startswith("data:image/png;base64,"))
         self.assertTrue(payloads["streaming"]["stream"])
+
+    def test_vllm_effort_only_warmups_do_not_request_unsupported_thinking_toggle(self):
+        profile = dict(mm.CLUSTER_PROFILES["qwen3.8-flash-next-fp8"],
+                       thinking_control="reasoning_effort")
+        for label, _, payload in mm._vllm_warmup_requests(profile):
+            effort = "high" if label == "reasoning" else "low"
+            self.assertEqual(payload["chat_template_kwargs"], {"reasoning_effort": effort})
+            self.assertEqual(payload["reasoning_effort"], effort)
+            self.assertGreaterEqual(payload["max_tokens"], 2048)
+            self.assertNotIn("presence_penalty", payload)
 
     def test_vllm_warmup_rejects_non_object_tool_arguments(self):
         profile = mm.CLUSTER_PROFILES["qwen3.8-flash-next-fp8"]

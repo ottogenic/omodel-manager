@@ -100,6 +100,10 @@ its speech-to-text server. This is an audio model, not a chat model. See
 | `pull-status <profile\|host>` | Progress of a backgrounded launch/pull |
 | `logs DEVICE [head\|worker] [-f]` | Show/follow the current deployment logs; cluster role defaults to `head` |
 | `health DEVICE` | Check the current deployment on a device |
+| `ports DEVICE [PORT]` | Inspect TCP listeners and Tailscale Serve mappings on the device (both hosts for a cluster) |
+| `reload-proxy DEVICE` | Regenerate, validate, and gracefully reload prepared NIM proxy configs; keeps inference running. The pinned loopback template allows 64 MiB request bodies |
+| `diagnose DEVICE` | Read host memory pressure, retained container exit/OOM state, and recent kernel logs (both hosts for a cluster) |
+| `tunnel DEVICE [--local-port PORT]` | Forward the running API to local loopback using the registered SSH key; keep the command running while using it |
 | `cluster <subcommand>` | Register, inspect, preflight, and prepare two-node clusters; lifecycle uses the top-level device commands |
 | `ps [--all]` | Running containers plus every registered host, with host and cluster columns and each target `running`/`idle`/`pulling`/`unreachable` |
 | `stop DEVICE` | Stop the device's current deployment (`-y` to skip confirmation) |
@@ -109,6 +113,10 @@ its speech-to-text server. This is an audio model, not a chat model. See
 | `sync` | Reset `model_manager.json` from the committed `DEFAULT_CONFIG` — run after `git pull` to pick up newly merged profiles (backs up a differing old file to `.bak`; pairs with `omw sync`) |
 | `config [--path/--init/--edit]` | Show/init/edit the config file |
 | `shell-init` (alias `install-aliases`) | Add the `omm` shell alias |
+
+Use `logs DEVICE [ROLE] --tail 10000` to capture a larger node/cluster log history
+before removing a failed deployment. `diagnose` inspects stopped containers too;
+it prints selected state fields rather than container environment variables.
 
 Lifecycle commands resolve the device first and inspect that device's live Docker state over
 SSH. `local` always means this machine, host aliases come from `install`, and cluster names
@@ -203,6 +211,53 @@ Facade launches retain failed rank logs where the backend supports it; `ps` and
 
 Cluster profiles keep their immutable model and runtime identities in `omodel-manager`.
 Model-specific build history and findings belong in `notes/<profile>.md`.
+The GLM profiles are curated in `DEFAULT_CONFIG["cluster_models"]`; they remain
+available with an older local config and are preserved by `omm sync`.
+New cluster candidates can be tested in the ignored `model_manager.json` under
+`cluster_models`, using the same complete profile structure. Sandbox entries replace
+whole profiles (including any same-named curated profile), so incompatible artifact
+pins are never inherited. `models`, `plan`, `cluster prepare`, and device lifecycle
+commands all use these candidates; promote them only after hardware qualification.
+
+External `vllm-mp` recipes can select `load_format`, `enforce_eager`, `quantization`,
+`linear_backend`, `decode_context_parallel_size`, and `mamba_cache_mode`.
+`security_opt` passes a list of Docker security options when a runtime needs them
+(the B12X io_uring loader required `seccomp=unconfined` on the tested hosts).
+Set `async_scheduling` or `generation_config` to JSON `null` to retain the image's
+default rather than the manager's explicit override. Registry images can pair an
+immutable `image` manifest digest with the observed Docker `image_id` and
+`vllm_version`; existing content-signature pins
+remain supported. See [the Eugr GLM qualification](notes/glm-5.3-flash-eugr.md) for an example.
+
+### GLM-5.3-Flash: two preserved deployments
+
+| Profile | Runtime / weights | Configured context | Sequence slots |
+| --- | --- | ---: | ---: |
+| `glm-5.3-flash-nim` | NVIDIA NIM/SGLang, bundled NVIDIA NVFP4 checkpoint | 400000 | 1 |
+| `glm-5.3-flash-eugr` | Eugr vLLM/B12X, Local Inference Lab Spark quant | 500000 | 4 |
+
+Both use immutable image digests, separate persistent caches, and the same API
+model ID `zai-org/GLM-5.3-Flash` on port 8000. To switch an existing cluster:
+
+```bash
+omm stop Chachi
+omm launch Chachi glm-5.3-flash-nim
+# Later, switch back:
+omm stop Chachi
+omm launch Chachi glm-5.3-flash-eugr
+```
+
+On a newly registered two-Spark cluster, first run
+`omm cluster prepare DEVICE PROFILE --build --weights`, then `omm launch DEVICE PROFILE`.
+Use `omm plan DEVICE PROFILE` to inspect the launch and `omm health DEVICE` to
+verify readiness. Stopping removes the deployment containers, preserving images
+and cached weights. The shared model config conservatively limits adapter workers
+to one; the vLLM server still has four sequence slots.
+
+For quality comparisons, use the same prompts, images and sampling with one
+request at a time. These deployments differ in **weights/quantization as well as
+runtime**. Actual 400K NIM input remains unqualified; Eugr passed ten-image
+retrieval at 497704 input tokens. See [comparison setup and evidence](notes/glm-5.3-flash-deployments.md).
 
 See [DUAL_SPARK_MODEL_RESEARCH.md](DUAL_SPARK_MODEL_RESEARCH.md) for model selection and
 primary-source links.
