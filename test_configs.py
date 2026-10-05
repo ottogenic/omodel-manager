@@ -188,7 +188,8 @@ class ConfigValidityTests(unittest.TestCase):
     def test_qwen38_flash_next_config_matches_cluster_baseline(self):
         cfg = _load(CONFIGS / "cluster" / "qwen3.8-flash-next-fp8.toml")
         self.assertEqual(set(cfg["match"]), {
-            "qwen3.8-flash-next-fp8", "Qwen/Qwen3.8-Flash-Next-FP8",
+            "qwen3.8-flash-next-fp8", "qwen3.8-flash-next-fp8-vllm-current",
+            "Qwen/Qwen3.8-Flash-Next-FP8",
         })
         self.assertEqual(cfg["context"]["native"], 262144)
         self.assertEqual(cfg["capabilities"]["concurrency"], 1)

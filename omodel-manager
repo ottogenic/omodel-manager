@@ -543,6 +543,43 @@ DEEPSEEK_VLLM_PREIMAGES = {
 DEFAULT_CONFIG = {
     "$otools": "model_manager",
     "cluster_models": {
+        "qwen3.8-flash-next-fp8-vllm-current": {
+            "backend": "vllm-mp",
+            "model": "Qwen/Qwen3.8-Flash-Next-FP8",
+            "revision": "970c569adaca6b35532111fd6b27351b2baefe50",
+            "model_size": 185553536918,
+            "image": ("vllm/vllm-openai@sha256:"
+                      "c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3"),
+            "arm64_image_digest": ("sha256:"
+                                   "3f7dd5b777d34d1724456ce71f87385dca288c3bb23029ab27dee358f5d2b971"),
+            "image_signature": "95657992976249b5a727bcb7204b37d00d0fae80cb5a25bde5e3a08e6c393225",
+            "vllm_version": "0.31.0",
+            "source_revision": "db9527a46873454610df6dbedf79a36d6bf1a7f6",
+            "served_model_name": "qwen3.8-flash-next-fp8-vllm-current",
+            "port": 8000,
+            "master_port": 50000,
+            "max_model_len": 262144,
+            "max_num_seqs": 1,
+            "max_num_batched_tokens": 8192,
+            "gpu_memory_utilization": 0.87,
+            "tool_parser": "qwen3_xml",
+            "reasoning_parser": "qwen3",
+            "enforce_eager": False,
+            "async_scheduling": True,
+            "enable_flashinfer_autotune": True,
+            "enable_prefix_caching": False,
+            "disable_deep_gemm": True,
+            "speculative_config": {"method": "mtp", "num_speculative_tokens": 3},
+            "tok_s": 42,
+            "status": "validated",
+            "usecase": ["Coding", "Reasoning", "Vision", "Agentic", "Long-context"],
+            "notes": ("Qualified on Beebo with v0.31.0/CUDA 13.0, MTP-3, CUDA graphs, "
+                      "async scheduling and autotuning: 41.8-43.1 tok/s at 54.7K; "
+                      "244K retrieval, image, reasoning, tools and code pass. "
+                      "BF16 KV and one sequence preserve decode responsiveness. "
+                      "Prefix caching disabled; PLE NVMe offload unavailable. "
+                      "See notes/qwen3.8-flash-next-fp8.md."),
+        },
         "glm-5.3-flash-nim": {
             "backend": "nim-sglang",
             "nim_model_source": "bundled",

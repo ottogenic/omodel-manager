@@ -22,6 +22,12 @@ All notable changes to this project are documented here. The format follows
   the same qualified helper from any controller where that host is registered.
 
 ### Added
+- **Qualified Qwen3.8-Flash-Next vLLM v0.31.0 profile.** Added
+  `qwen3.8-flash-next-fp8-vllm-current` with pinned image/source identities,
+  MTP-3, CUDA graphs, async scheduling, BF16 KV and a single sequence slot.
+  Dual-Spark qualification measured about 42 tok/s at 54.7K input, with image,
+  reasoning, tools, executable code and 244K retrieval passing. The generic
+  config matches the new served ID; the preview profile remains available.
 - **Two preserved GLM-5.3-Flash deployments.** Promoted `glm-5.3-flash-nim`
   (NVIDIA NIM/SGLang) and `glm-5.3-flash-eugr` (Eugr vLLM/B12X) into
   `DEFAULT_CONFIG.cluster_models`, with immutable image/checkpoint identities,

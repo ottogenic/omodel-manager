@@ -192,3 +192,107 @@ The pinned profile is `validated` for its declared text, image, reasoning, and t
 async scheduling, and FlashInfer autotuning: the baseline already fits native context, and none of
 those riskier speed levers was A/B qualified. This status is artifact-specific and does not include
 video, reproducible source provenance, or a production-trust claim.
+
+## v0.31.0 candidate qualification, 2026-10-05
+
+Sandbox profile: `qwen3.8-flash-next-fp8-vllm-current`, tested on Beebo (thing-1 /
+thing-2, two GB10s, driver 580.178.04). The original committed profile is the rollback.
+The qualified candidate is promoted into `DEFAULT_CONFIG.cluster_models` following
+maintainer approval; the original preview profile remains available.
+
+### Runtime pin and selected settings
+
+- vLLM `0.31.0`, source commit `db9527a46873454610df6dbedf79a36d6bf1a7f6`.
+- Image: `vllm/vllm-openai@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3`.
+- ARM64 manifest: `sha256:3f7dd5b777d34d1724456ce71f87385dca288c3bb23029ab27dee358f5d2b971`.
+- Both nodes' canonical config/rootfs signature:
+  `95657992976249b5a727bcb7204b37d00d0fae80cb5a25bde5e3a08e6c393225`.
+- Image CUDA 13.0.2; head import reports PyTorch `2.13.0+cu130`.
+- Original checkpoint/revision retained. Served ID is the candidate profile key.
+- MTP depth 3; CUDA graphs, async scheduling, FlashInfer autotuning enabled.
+- BF16 KV, 262144 max context, 8192 batched tokens, utilization **0.87**, **one** sequence.
+- EP/allgather-reducescatter and dual-rail NCCL `NET/IB` retained.
+- `VLLM_USE_DEEP_GEMM=0` retained; prefix caching explicitly disabled.
+
+The standard image does not list SM121 in its build architecture list; actual GB10
+model execution, CUDA-graph capture, multimodal generation and long-context tests
+passed. This is hardware evidence, not a claim that every bundled kernel supports GB10.
+Observed paths include Triton FP8 MoE, FlashAttention 2, FlashInfer GDN prefill,
+CUDA GDN decode, V2 model runner, and PYNCCL collectives.
+
+Earlier session commentary incorrectly inferred that the head ran the old `qwen38`
+tag by inspecting that unrelated tag after a failed container-inspect template.
+`omm diagnose Beebo` instead reported the running head image config `d464f3b4...`,
+matching the baseline's documented registry config. No baseline image mismatch was
+established. Docker image ID representations differ between the two daemon stores;
+the candidate's canonical content signatures match.
+
+### Startup and one-variable experiments
+
+The initial aggressive bundle at 0.83 loaded target and draft, initialized NCCL and
+captured graphs, but failed the native-context capacity check: worker KV budget
+approximately 0.08 GiB versus 3.81 GiB required. Head budget was 4.18 GiB. Increasing
+only utilization to 0.87 passed startup and all five manager warmups.
+
+Initial successful BF16 run: 392491-token KV pool. Final restart: 378008 tokens
+(1.44 full native contexts), head available KV memory 8.53 GiB, model loading
+64.42 GiB / 719.3 seconds. PLE initialization reports pinned CPU FP8 embeddings;
+the GPU model-memory figure is therefore not the whole host-memory footprint.
+Final CUDA-graph captures completed; no final-run ERROR entries appeared in the
+inspected head log.
+
+| Configuration / workload | Actual input | TTFT | Decode tok/s | Wall |
+| --- | ---: | ---: | ---: | ---: |
+| Fresh preview baseline, N=1 | 54744 | 19.5 s | 19.8 | — |
+| Candidate BF16, seqs=1, N=1 | 54744 | 18.8 s | 43.1 | 21 s |
+| Candidate BF16, seqs=1, N=2 | 54744–56527 | 15.6–34.5 s | 32.3–43.1 | 38 s |
+| Candidate BF16, seqs=1, N=4 | 54744–56528 | 16.3–72.8 s | 34.4–42.0 | 77 s |
+| Candidate BF16, seqs=1, N=1 long | 110707 | 32.9 s | 41.1 | 36 s |
+| Candidate BF16, seqs=4, N=1 | 54744 | 18.7 s | 41.0 | 22 s |
+| Candidate BF16, seqs=4, N=2 | 54744–56527 | 19.8–34.9 s | 7.6–34.0 | 38 s |
+| Candidate BF16, seqs=4, N=4 | 54744–56528 | 20.2–71.1 s | 1.4–27.1 | 76 s |
+| Candidate FP8 KV, seqs=4, N=1 | 54744 | 17.9 s | 41.4 | 21 s |
+| Candidate FP8 KV, seqs=4, N=4 | 54744–56528 | 15.4–67.4 s | 2.3–30.2 | 73 s |
+| Final BF16 restart, seqs=1, N=1 | 54744 | 21.2 s | 41.8 | 24 s |
+
+Requests used the repository benchmark through `omm tunnel Beebo` to head loopback.
+These are individual runs, not confidence intervals. The bundle roughly doubles
+decode throughput; TTFT varied across restarts, so no consistent TTFT gain is claimed.
+Four sequence slots hurt early requests while later prompts prefill, with essentially
+unchanged total wall time. Restore one slot rather than claim latency-isolated concurrency.
+
+FP8 KV was a separate dtype-only experiment at four slots. The pinned checkpoint
+index contains 152089 tensors and no `k_scale`, `v_scale`, `kv_scale`, or `q_scale`
+keys. FP8 expanded the pool to 566654 tokens, but did not materially improve single-user
+speed. Its limited quality battery passed; that does not establish broad quality parity.
+BF16 already fits native context, so it remains the selected cache dtype.
+
+### Quality and parameter evidence
+
+- Every successful launch passed manager direct chat, separated reasoning, exact
+  Tokyo weather tool call, blue image, streaming and NCCL checks.
+- BF16 and FP8 each passed three tool-result round trips, all three reasoning efforts,
+  first-20-primes JSON, and exact three-marker retrieval at **244376 input tokens**.
+  BF16 retrieval took 76.7 seconds total.
+- Final BF16 and experimental FP8 each passed **8/8 tool cases and 8/8 executable-code
+  cases** using `utils/quality_eval.py --runs 2`.
+- Distinctive temperature, top_p, top_k, presence/frequency/repetition penalty, seed,
+  and max_tokens requests were accepted and independently matched in SamplingParams logs.
+  `max_tokens=131072` returned `OK` normally; this verifies acceptance, not a 131K decode.
+- Final manager health returned READY with the candidate ID and 262144 max context.
+
+### Deferred features and delivery state
+
+Research found prefix-restore fixes #48375 / #57128 unmerged at runtime selection;
+prefix caching was therefore not enabled. Recheck upstream before retesting it.
+Disk/mmap PLE NVMe offload was not in the selected stable release; its PRs remain a
+follow-up, not a passed hardware gate. No DeepGEMM requalification was attempted.
+The stable release's existing CPU PLE placement is retained.
+
+The qualified profile, generic TOML match and these notes are published together.
+For normal `omw sync`, thing-1 uses tailnet-only Tailscale Serve HTTP on port 8000
+forwarding to the unchanged loopback API. HTTPS on that port is not discovered by
+the current HTTP-only omodel-wire probe. The worker has no model API to discover.
+Raw local evidence is under `/tmp/opencode/qwen38-v0310-*`, quality round trips under
+`/tmp/opencode/qwen38-current-*-quality.jsonl`, and the two executable-quality reports
+end in `1791219010.json` (FP8) and `1791220020.json` (final BF16).
