@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shutil
 import tempfile
 import threading
 import hashlib
@@ -193,6 +194,110 @@ def voice_list():
     return {"voices": saved_names()}
 
 
+def _save_upload(upload):
+    """Stage an uploaded reference recording as a temp file; returns its path."""
+    if upload is None or not hasattr(upload, "filename"):
+        raise HTTPException(400, "Missing reference audio file")
+    suffix = os.path.splitext(upload.filename or "")[1] or ".wav"
+    fd, tmp = tempfile.mkstemp(dir=VOICE_DIR, suffix=suffix)
+    os.close(fd)
+    try:
+        with open(tmp, "wb") as out:
+            shutil.copyfileobj(upload.file, out)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+    return tmp
+
+
+def _validate_reference(tmp):
+    wav = load_wav(tmp, target_sr=16000, min_sr=16000)
+    if not 1 <= wav.shape[1] / 16000 <= 30:
+        raise HTTPException(400, "Reference audio must be 1-30 seconds long")
+    return wav
+
+
+def _pcm_stream(gen):
+    with synthesis_lock:
+        reset_stream_hop()
+        for chunk in gen:
+            samples = chunk["tts_speech"].squeeze().detach().cpu().clamp(-1, 1)
+            if samples.numel():
+                yield (samples * 32767).to(dtype=torch.int16).numpy().tobytes()
+
+
+@app.post("/api/save_voice")
+async def save_voice_http(request: Request):
+    form = await request.form()
+    name = str(form.get("name") or "").strip()
+    transcript = str(form.get("transcript") or "").strip()
+    consent = str(form.get("consent") or "")
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,50}", name):
+        raise HTTPException(400, "Voice name must be 1-50 letters, numbers, _ or -")
+    if not transcript:
+        raise HTTPException(400, "An exact transcript of the reference recording is required")
+    if consent not in ("true", "1", "on"):
+        raise HTTPException(400, "Voice consent is required")
+    destination = os.path.join(VOICE_DIR, name + ".wav")
+    metadata = os.path.join(VOICE_DIR, name + ".json")
+    if os.path.exists(destination) or os.path.exists(metadata):
+        raise HTTPException(409, "Voice name already exists; choose another name")
+    tmp = _save_upload(form.get("file"))
+    try:
+        wav = _validate_reference(tmp)
+        fd, temporary = tempfile.mkstemp(dir=VOICE_DIR, suffix=".wav")
+        os.close(fd)
+        try:
+            torchaudio.save(temporary, wav, 16000)
+            os.replace(temporary, destination)
+            with open(metadata, "x", encoding="utf-8") as stream:
+                json.dump({"transcript": transcript, "consent": True}, stream)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    finally:
+        os.unlink(tmp)
+    print(f"[perf] saved voice {name}", flush=True)
+    return {"name": name, "voices": saved_names()}
+
+
+@app.post("/api/test_speech")
+async def test_speech_http(request: Request):
+    form = await request.form()
+    text = str(form.get("text") or "").strip()
+    transcript = str(form.get("transcript") or "").strip()
+    instruction = str(form.get("instruction") or "").strip()
+    if not text or len(text) > 3500:
+        raise HTTPException(400, "Text must be 1-3500 characters")
+    if not transcript:
+        raise HTTPException(400, "An exact transcript of the reference recording is required")
+    tmp = _save_upload(form.get("file"))
+    try:
+        _validate_reference(tmp)
+        if instruction:
+            directive = instruction
+            if "<|endofprompt|>" not in directive:
+                directive = "You are a helpful assistant. " + directive + "<|endofprompt|>"
+            gen_obj = model.inference_instruct2(text, directive, tmp, stream=True)
+        else:
+            gen_obj = model.inference_zero_shot(text,
+                "You are a helpful assistant.<|endofprompt|>" + transcript, tmp, stream=True)
+
+        def gen():
+            try:
+                yield from _pcm_stream(gen_obj)
+            finally:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+
+        return StreamingResponse(gen(), media_type="audio/pcm",
+            headers={"Cache-Control": "no-store", "X-Sample-Rate": str(model.sample_rate)})
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
 @app.post("/api/speech")
 async def speech(request: Request):
     if int(request.headers.get("content-length", "0")) > 10_000:
@@ -204,7 +309,10 @@ async def speech(request: Request):
     if not isinstance(payload, dict):
         raise HTTPException(400, "Invalid speech request")
     text, name = payload.get("text"), payload.get("voice")
+    instruction = payload.get("instruction")
     if not isinstance(text, str) or not text.strip() or len(text) > 3500 or not isinstance(name, str):
+        raise HTTPException(400, "Invalid speech request")
+    if instruction is not None and not isinstance(instruction, str):
         raise HTTPException(400, "Invalid speech request")
     try:
         wav, transcript = saved_reference(name)
@@ -215,8 +323,15 @@ async def speech(request: Request):
         with synthesis_lock:
             speaker_id = cached_reference(name, wav, transcript)
             reset_stream_hop()
-            for chunk in model.inference_zero_shot(text.strip(), "", wav,
-                    zero_shot_spk_id=speaker_id, stream=True):
+            if (instruction or "").strip():
+                directive = instruction.strip()
+                if "<|endofprompt|>" not in directive:
+                    directive = "You are a helpful assistant. " + directive + "<|endofprompt|>"
+                gen = model.inference_instruct2(text.strip(), directive, wav, stream=True)
+            else:
+                gen = model.inference_zero_shot(text.strip(), "", wav,
+                        zero_shot_spk_id=speaker_id, stream=True)
+            for chunk in gen:
                 samples = chunk["tts_speech"].squeeze().detach().cpu().clamp(-1, 1)
                 if samples.numel():
                     yield (samples * 32767).to(dtype=torch.int16).numpy().tobytes()
